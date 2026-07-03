@@ -1,0 +1,216 @@
+{
+  "schema_version": "intent-golden/v1",
+  "cases": [
+    {
+      "id": "explicit-grade-math-course",
+      "request": "四年级数学课程",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["core_topic", "grade_level", "format_preferences"],
+        "inferred_slots": ["learning_domain"],
+        "omitted_slots": ["resource_types", "file_formats"],
+        "must": [],
+        "prefer": [],
+        "exclude": []
+      }
+    },
+    {
+      "id": "audio-scenario-inference",
+      "request": "想找些孩子上学路上听的英语启蒙内容",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["resource_types", "format_preferences", "use_scenario"],
+        "must": [],
+        "prefer": ["适合路上听"]
+      }
+    },
+    {
+      "id": "ambiguous-programming",
+      "request": "想让孩子学编程",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "core_topic",
+        "question_mentions_any": ["Scratch", "Python", "机器人"]
+      }
+    },
+    {
+      "id": "user-delegates-choice",
+      "request": "想找点恐龙科普，形式你看着办",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["core_topic", "resource_types"],
+        "slot_values": {"resource_types": ["不限"]},
+        "omitted_slots": ["format_preferences", "file_formats"]
+      }
+    },
+    {
+      "id": "must-free-prefer-official",
+      "request": "只要免费的，最好是官方的小学安全教育资源",
+      "expect": {
+        "status": "ready",
+        "must": ["免费"],
+        "prefer": ["官方来源"]
+      }
+    },
+    {
+      "id": "exclude-video",
+      "request": "不要视频，找二年级语文阅读理解材料",
+      "expect": {
+        "status": "ready",
+        "exclude": ["视频"],
+        "explicit_slots": ["grade_level", "core_topic"]
+      }
+    },
+    {
+      "id": "version-explicit",
+      "request": "人教版五年级上册数学同步练习",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["version", "grade_level", "core_topic", "learning_goal"]
+      }
+    },
+    {
+      "id": "age-grade-conflict",
+      "request": "给6岁的四年级孩子找数学同步课",
+      "expect": {
+        "status": "needs_clarification",
+        "ambiguity_fields": ["target_age", "grade_level"]
+      }
+    },
+    {
+      "id": "broad-category",
+      "request": "帮我找点学习资源",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "core_topic"
+      }
+    },
+    {
+      "id": "problem-to-goal",
+      "request": "孩子做应用题总是不知道从哪下手",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["core_topic", "learning_goal"],
+        "must": []
+      }
+    },
+    {
+      "id": "exhaustive-mode",
+      "request": "把适合小学生的天文科普资源尽量全面地找一下",
+      "expect": {
+        "status": "ready",
+        "slot_values": {"search_mode": "exhaustive"}
+      }
+    },
+    {
+      "id": "english-content-language-unknown",
+      "request": "找英语启蒙资源",
+      "expect": {
+        "status": "ready",
+        "unknown_or_defaulted_slots": ["language"],
+        "forbid_assumption": "资源必须全英文"
+      }
+    },
+    {
+      "id": "clear-topic-no-age",
+      "request": "找恐龙科普资源，视频图文都可以",
+      "expect": {
+        "status": "ready",
+        "unknown_or_inferred_slots": ["target_age"],
+        "must_not_clarify": ["target_age"]
+      }
+    },
+    {
+      "id": "clear-grade-no-age",
+      "request": "找三年级应用题专项练习",
+      "expect": {
+        "status": "ready",
+        "must_not_clarify": ["target_age", "resource_types", "format_preferences", "file_formats"]
+      }
+    },
+    {
+      "id": "vague-math-problem",
+      "request": "孩子数学不太好，想补一补",
+      "expect": {
+        "status": "needs_clarification",
+        "question_mentions_any": ["计算", "应用题", "概念"]
+      }
+    },
+    {
+      "id": "constraint-conflict-media",
+      "request": "不要视频，最好找动画讲解",
+      "expect": {
+        "status": "needs_clarification",
+        "ambiguity_fields": ["format_preferences", "constraints"]
+      }
+    },
+    {
+      "id": "sensitive-topic-age-matters",
+      "request": "想找儿童身体边界教育资源",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "target_age",
+        "reason_contains": "适龄"
+      }
+    },
+    {
+      "id": "no-platform-question",
+      "request": "推荐几个古诗启蒙动画",
+      "expect": {
+        "status": "ready",
+        "must_not_clarify": ["source_constraints", "platform"]
+      }
+    },
+    {
+      "id": "user-wants-first-look",
+      "request": "先给我看看有哪些儿童情绪管理资源",
+      "expect": {
+        "status": "ready",
+        "must_not_clarify": ["resource_types", "format_preferences", "file_formats", "source_constraints"]
+      }
+    },
+    {
+      "id": "independent-multiple-goals",
+      "request": "想找三年级数学练习，也想找儿童画教程",
+      "expect": {
+        "status": "needs_clarification",
+        "question_mentions_any": ["先", "分别", "哪个"]
+      }
+    },
+    {
+      "id": "explicit-file-format-and-resource-form",
+      "request": "找五年级数学 PDF 试卷，最好也有 PPT 讲解课件",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["resource_types"],
+        "explicit_slots": ["format_preferences", "file_formats"],
+        "slot_values": {
+          "resource_types": ["文档类", "练习类"],
+          "file_formats": ["PDF", "PPT"]
+        },
+        "prefer": ["PPT讲解课件"]
+      }
+    },
+    {
+      "id": "unspecified-resource-form-stays-unknown",
+      "request": "找适合小学生了解太阳系的资源",
+      "expect": {
+        "status": "ready",
+        "omitted_slots": ["resource_types", "format_preferences", "file_formats"],
+        "forbid_assumption": "默认使用视频、图文或文档"
+      }
+    },
+    {
+      "id": "printable-is-not-file-format",
+      "request": "找可打印的二年级口算题卡",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["resource_types"],
+        "explicit_slots": ["format_preferences"],
+        "omitted_slots": ["file_formats"],
+        "must": ["可打印"],
+        "forbid_file_formats": ["可打印"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": "search-platform-catalog/v1",
+  "platforms": {
+    "generic": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "engines": {"type": "array", "allowed": ["baidu", "bing"], "required_values": ["baidu", "bing"]}
+      }
+    },
+    "bilibili": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {}
+    },
+    "ximalaya": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "core": {"type": "string", "allowed": ["album", "track"]},
+        "free_only": {"type": "boolean"},
+        "sort": {"type": "string", "allowed": ["relevance", "popularity", "newest"]}
+      }
+    },
+    "smartedu": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {}
+    },
+    "zhihu": {
+      "planning_status": "available",
+      "auth": "required",
+      "search_parameters": {}
+    },
+    "douyin": {
+      "planning_status": "available",
+      "auth": "required",
+      "search_parameters": {}
+    },
+    "weibo": {
+      "planning_status": "available",
+      "auth": "required",
+      "search_parameters": {}
+    },
+    "open163": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {}
+    },
+    "annas-archive": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "core": {"type": "string", "allowed": ["book", "article"]}
+      }
+    },
+    "baiduwenku": {
+      "planning_status": "planned",
+      "auth": "unknown",
+      "search_parameters": {}
+    },
+    "xiaohongshu": {
+      "planning_status": "planned",
+      "auth": "unknown",
+      "search_parameters": {}
+    },
+    "cctv": {
+      "planning_status": "planned",
+      "auth": "unknown",
+      "search_parameters": {}
+    }
+  }
+}

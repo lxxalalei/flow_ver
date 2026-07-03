@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "request/v1",
+  "title": "Flow request snapshot",
+  "type": "object",
+  "required": ["_meta", "data"],
+  "properties": {
+    "_meta": {
+      "type": "object",
+      "required": ["schema_version", "session_id", "created_at"],
+      "properties": {
+        "schema_version": {"const": "request/v1"},
+        "session_id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "object",
+      "required": ["raw_request", "conversation_evidence"],
+      "properties": {
+        "raw_request": {"type": "string", "minLength": 1},
+        "conversation_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "properties": {
+              "role": {"enum": ["user", "assistant"]},
+              "content": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
