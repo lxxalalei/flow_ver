@@ -1,6 +1,6 @@
 ---
 name: learning-resource-flow
-description: 儿童成长资料获取与归档的总调度入口。用于接收自然语言需求，创建并校验 request.json，处理 Intent 澄清循环，并按六阶段顺序调度需求理解、搜索计划、平台搜索、筛选选择、下载和归档。
+description: 儿童成长资料发现、筛选、获取与归档的唯一用户入口。当用户用自然语言提出“帮孩子找、搜、推荐、筛选、下载或收藏资料”，或想围绕某个儿童成长主题寻找课程、视频、图书、绘本、文章、练习、活动方案等资源时使用；主题包括但不限于学科知识、认知探索、情绪心理、生活习惯、安全教育、艺术创造、运动健康、社会认知和亲子陪伴。负责澄清需求并串联搜索、候选比较与用户确认、下载和资料库归档，也用于继续未完成流程、调整已有搜索或重新查看候选。终端用户提出完整资料需求时应优先使用本 Skill，不要直接调用下游阶段 Skill。
 ---
 
 # learning-resource-flow
@@ -133,13 +133,24 @@ Stage 1 只能读取该快照，不依赖未持久化的聊天上下文。Flow �
 
 ### Stage 3：执行平台搜索
 
-- 直接调用 `resource-platforms` 的搜索模式。
+#### 调用前凭据预检
+
+1. 读取 `stage2_search_plan.json` 中实际涉及的平台，再读取 `resource-platforms/config/search-registry.json`；只检查本次计划中的平台，不加载无关凭据。
+2. 对注册表中 `auth=required` 的平台，读取对应 `resource-platforms/references/platforms/{platform}.md`，确认可接受的环境变量、Cookie/Token 必需字段和文件格式。
+3. 检查当前运行环境及 Agent Skills 根目录 `.learning-resource-flow/credentials.json` 指向的本地私有文件。只有非空环境变量，或确实存在且非空的凭据文件，才算已配置；不要读取后在消息、计划、manifest 或日志中回显凭据值。
+4. 已配置时，只把当前计划需要的凭据注入执行环境，然后调用 Platform。缺少任一必需凭据时，不得先调用对应平台试错；将 stage 3 标记为 `waiting_user`，按 `references/output-templates.md` 的“搜索凭据提醒”说明缺少的平台和凭据类型，询问用户要“协助配置”还是“跳过这些平台继续”，然后结束当前轮次。
+5. 用户同意配置时，由模型负责接收用户提供的 Cookie、Token 或请求头，按照 `resource-platforms/config/credentials.example.json` 创建对应的本地私有文件并更新 `credentials.json`；不要要求用户自行新建或编辑文件。写入后不得在回复或日志中回显完整凭据。确认文件可用后将 stage 3 设回 `in_progress`，注入环境变量并继续执行。
+6. 用户选择跳过时，不再为本轮重复询问；允许统一执行器把这些平台记录为 `AUTH_REQUIRED`，并继续执行无需登录或凭据已就绪的平台。用户取消时将会话标记为 `cancelled`。
+
+#### 搜索执行
+
+- 完成凭据预检后调用 `resource-platforms` 的搜索模式。
 - 输入 `stage2_search_plan.json`，输出 `stage3_search_results.json`。
 - `run_search_plan.py` 在原子写入前完成必要字段、计数和 `session_id` 自检；执行器返回失败时不得进入 Stage 4。
 - 读取 `_summary.resource_count` 和 `data.errors` 判断继续、重试或调整计划。
-- `resource_count>0` 时，将 stage 3 标记为 `completed` 并进入 Stage 4；部分平台失败不影响已有结果继续使用。
+- `resource_count>0` 且不存在尚未交接的认证错误时，将 stage 3 标记为 `completed` 并进入 Stage 4；普通平台失败或用户已明确选择跳过的认证失败不影响已有结果继续使用。
 - `resource_count=0` 时不得调用 Selector。存在可重试错误时按错误建议重试 Stage 3，但不要在外部状态没有变化时重复同一失败调用；仍为零结果时将 stage 3 标记为 `waiting_user`。
-- `data.errors` 出现 `AUTH_REQUIRED`、`AUTH_SESSION_EXPIRED` 或同类认证错误时，读取对应平台文档，说明缺少的具体登录信息并询问是否需要协助配置。用户授权后，由模型更新本地凭据约定，并在重试 Stage 3 时注入对应环境变量；不要为凭据变化重做 Intent 或搜索计划。
+- `data.errors` 出现尚未向用户交接的 `AUTH_REQUIRED`、`AUTH_SESSION_EXPIRED` 或同类认证错误，说明凭据缺失、过期或预检无法发现的服务端失效。按“搜索凭据提醒”暂停并询问用户；配置后从 Stage 3 重试，跳过时才使用其余成功结果继续 Stage 4。用户已明确选择跳过的平台只说明未搜索，不得再次询问。不要为凭据变化重做 Intent 或搜索计划。
 - 零结果且没有错误表示搜索成功但未召回内容；只有不可重试错误表示当前平台无法提供结果。两种情况都向用户提供调整关键词、扩大平台、修改条件或取消的选择。用户选择调整时从 Stage 2 重跑，选择重试时从 Stage 3 重跑。
 - 只有执行器异常、输出缺失或校验失败时才将 stage 3 标记为 `failed`。
 - 本阶段只执行平台任务、归一化字段和记录错误，不做跨平台筛选或最终质量评分。
