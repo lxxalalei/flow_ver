@@ -645,7 +645,7 @@ gallery-dl <图集链接>
 | 音频 | yt-dlp 提取 + ffmpeg 转码 | yt-dlp + ffmpeg | `.mp3` / `.m4a` | ximalaya 等音频站 |
 | 文档直链 | wget/curl | wget / curl | `.pdf` / `.docx` | 直链 PDF 文件 |
 | 图文网页 | 正文提取 + pandoc 转换 | wget + pandoc | `.md` / `.pdf` | baiduwenku 预览页 |
-| 图片 | wget 批量下载 | wget / gallery-dl | `.jpg` / `.png` | xiaohongshu 图集 |
+| 图片 | wget 批量下载 | wget / gallery-dl | `.jpg` / `.png` | 普通网页图集 |
 | m3u8 流（通用） | ffmpeg 直接下载 | ffmpeg | `.mp4` / `.ts` | 未知平台的 HLS 视频 |
 
 ### 平台工具依赖速查
@@ -698,13 +698,13 @@ for f in *.md; do pandoc "$f" -o "${f%.md}.pdf"; done
 mv "BV123456789.mp4" "小学四年级数学-四则运算-第1集.mp4"
 ```
 
-### 2. 整理目录
+### 2. 归档阶段参考
 
-按学科、年级、主题分类：
+正式入库由 `library-manager` 处理。需要理解目录方向时，按成长领域、适龄或年级、主题分类：
 
 ```
-学习资料库/
-└── 数学/
+成长资料库/
+└── 学科与知识/
     └── 小学四年级/
         └── 四则混合运算/
             ├── 视频/

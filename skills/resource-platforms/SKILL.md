@@ -1,15 +1,13 @@
 ---
 name: resource-platforms
-description: 学习资源平台搜索执行层。读取 resource-search 生成的多平台搜索计划，并行调用可用平台及百度、Bing 通用搜索接口，归一化原始结果并写入 Stage 3。用于执行搜索，不负责理解需求、生成关键词、筛选评分或下载资源。
+description: 成长资料平台搜索执行层。读取 resource-search 生成的多平台搜索计划，并行调用可用平台及通用搜索引擎，归一化原始结果并写入 Stage 3。用于执行搜索，不负责理解需求、生成关键词、筛选评分或下载资源。
 ---
 
 # resource-platforms
 
-## 铁律（不可违反）
+## 执行要求
 
-**Iterate until the output is complete and well-formed. Before declaring done, run a self-check — if any part feels half-baked, keep going.**
-
-输出搜索结果前，自检这份搜索结果真的达标了吗。
+输出搜索结果前，先自检结果是否完整、结构是否合规；明显半成品时继续修正。
 
 ## 任务
 
@@ -20,7 +18,7 @@ description: 学习资源平台搜索执行层。读取 resource-search 生成�
 - 根据私有搜索注册表加载平台 adapter。
 - 并行执行不同平台的任务。
 - 在同一平台内按顺序执行多条查询，避免并发触发限流。
-- 让 generic adapter 同时搜索百度和 Bing。
+- 让 generic adapter 按计划中的 `engines` 搜索 DuckDuckGo、Bing 或百度；默认计划至少包含 `duckduckgo`。
 - 处理平台超时、失败和部分成功。
 - 归一化平台原始字段。
 - 合并同平台、同 `resource_id` 的完全重复响应。
@@ -47,7 +45,7 @@ python3 resource-platforms/scripts/run_search_plan.py \
 
 1. 不同平台使用独立 worker 并行执行，并由注册表的 `max_concurrency` 限制总并发。
 2. 同一平台的 `searches[]` 默认串行。
-3. generic 内部并行请求百度和 Bing，再按规范化 URL 合并。
+3. generic 内部按计划请求 DuckDuckGo、Bing 或百度，再按规范化 URL 合并。
 4. 单个平台失败不得取消其他 worker。
 5. 所有 worker 完成或超时后一次性原子写入 Stage 3。
 

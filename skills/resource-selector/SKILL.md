@@ -1,13 +1,13 @@
 ---
 name: resource-selector
-description: 儿童学习资料候选筛选与用户选择 Skill。读取 Intent 与 Platform 的真实搜索结果，利用模型语义判断执行主题相关性、学习帮助和儿童安全过滤、跨平台相似判断、证据化质量评分与排序，向用户展示候选，并在明确选择后写入 Stage 4。用于搜索完成后的候选审查，不执行搜索或下载。
+description: 儿童成长资料候选筛选与用户选择 Skill。读取 Intent 与 Platform 的真实搜索结果，利用模型语义判断执行主题相关性、成长价值和儿童安全过滤、跨平台相似判断、证据化质量评分与排序，向用户展示候选，并在明确选择后写入 Stage 4。用于搜索完成后的候选审查，不执行搜索或下载。
 ---
 
 # resource-selector
 
 ## 目标
 
-把 Stage 3 的原始召回变成一组真正适合当前需求、可解释且便于用户选择的候选。这里依赖模型理解语义，不把标题关键词命中、平台热度或固定字段数量当成质量判断。
+把 Stage 3 的原始召回变成一组真正适合当前成长需求、可解释且便于用户选择的候选。这里依赖模型理解语义，不把标题关键词命中、平台热度或固定字段数量当成质量判断。
 
 本 Skill 负责跨平台去重、业务过滤、公开证据核验、候选比较、综合判断、排序展示和用户选择交接。
 
@@ -40,7 +40,7 @@ python3 resource-selector/scripts/prepare_candidates.py {session_dir}
 
 完整阅读 Intent，不要只拿 `core_topic` 做字符串匹配。明确：
 
-- 用户真正要学习什么、用于什么场景。
+- 用户真正要支持孩子哪类成长或学习目标、用于什么场景。
 - 内容面向的年龄、理解基础、学习目标和使用场景。
 - 明确要求的形态、文件类型、语言、来源、费用或版本条件。
 - 哪些是硬约束，哪些只是偏好，哪些完全没有要求。
@@ -53,7 +53,7 @@ python3 resource-selector/scripts/prepare_candidates.py {session_dir}
 
 先根据完整 Intent 和候选已有信息判断是否过滤：
 
-- 资源本身是否帮助理解、探索、练习或实践当前主题，而不是只碰巧包含某个词。
+- 资源本身是否帮助理解、探索、练习、实践、表达、习惯养成、情绪支持或亲子陪伴当前主题，而不是只碰巧包含某个词。
 - 内容尺度、理解门槛和表达方式是否明显不适合当前使用者。
 - 标题和现有描述是否提供足够证据。只有宽泛标题且缺少主题证据时，不能仅因平台权威而推定相关。
 - 是否含成人、色情、暴力、诈骗、危险模仿或其他儿童不宜内容。儿童安全冲突直接过滤。
@@ -110,7 +110,7 @@ python3 resource-selector/scripts/validate_worker_reviews.py {session_dir}
 
 先比较同类候选，再进行全局比较：
 
-- 哪些候选最准确、清楚、完整地帮助当前学习目标。
+- 哪些候选最准确、清楚、完整地帮助当前成长或学习目标。
 - 哪些来源更可靠，且推荐理由有公开证据支持。
 - 哪些内容对当前使用者更易理解、更安全、更便于使用。
 - 哪些候选学习价值高度重复，哪些能够形成互补组合。
@@ -177,15 +177,11 @@ python3 resource-selector/scripts/validate_worker_reviews.py {session_dir} --cle
 
 ### 8. 展示并暂停
 
-运行：
+读取 `references/display-templates.md`，根据 `selector_review.json` 的展示顺序和 Stage 3 元数据直接生成候选展示文本。
 
-```bash
-python3 resource-selector/scripts/render_review.py {session_dir}
-```
+默认按资源类型分组展示（视频 → 音频 → 图书与阅读 → 互动与练习 → 实验与活动 → 课程 → 网页与工具），每组以 `{type_icon} {category_name}（{count} 条）` 标题起始。每条候选按四行展示，以 emoji 引导；编号保持与 `selector_review.json:data.candidates` 一致。不要改成 markdown 表格、只列标题链接，或压缩掉摘要与来源信息。
 
-渲染器默认按资源类型分组展示（视频 → 音频 → 图书与阅读 → 互动与练习 → 实验与活动 → 课程 → 网页与工具），每组以 `{type_icon} {category_name}（{count} 条）` 标题起始。每条候选严格四行格式，以 emoji 引导。详细格式见 `references/display-templates.md`。
-
-**必须原样使用渲染器输出的文本**，不得改写为 markdown 表格、精简格式或其他排版。把渲染器输出和选择说明原样返回 Flow，由 Flow 将 Stage 4 标记为 `waiting_user` 并向用户展示。本轮停止，不调用 Downloader，不生成 Stage 4。
+把候选展示和选择说明返回 Flow，由 Flow 将 Stage 4 标记为 `waiting_user` 并向用户展示。本轮停止，不调用 Downloader，不生成 Stage 4。
 
 ## 第二次调用：处理用户选择
 

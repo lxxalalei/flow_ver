@@ -3,7 +3,7 @@
   "cases": [
     {
       "id": "broad-topic",
-      "intent": "想找一些火山科普学习资料",
+      "intent": "想找一些适合孩子理解火山的成长资料",
       "expect": {"principles": ["按内容贡献选择平台", "查询覆盖不同学习角度", "包含generic"]}
     },
     {
@@ -89,7 +89,7 @@
     {
       "id": "generic-required",
       "intent": "找一份亲子阅读活动方案",
-      "expect": {"principles": ["包含generic", "generic同时使用baidu和bing"]}
+      "expect": {"principles": ["包含generic", "generic使用duckduckgo"]}
     },
     {
       "id": "history-multiple-experiences",

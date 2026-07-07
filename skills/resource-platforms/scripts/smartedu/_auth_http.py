@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any
 import urllib.parse
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from shared.http_client import urlopen_with_fallback
 
 
 DEFAULT_SDP_APP_ID = "e5649925-441d-4a53-b525-51a2f1c4e0a8"
@@ -121,7 +123,7 @@ def bare_request_json(url: str, timeout: int = 20) -> Any:
     """对 s-file-* CDN 的 JSON 使用裸 GET（不附加任何业务 header），
     与 Go 项目 FetchJsonData 行为一致。"""
     request = Request(url, headers={"User-Agent": "Go-http-client/1.1"})
-    with urlopen(request, timeout=timeout) as response:
+    with urlopen_with_fallback(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -129,7 +131,7 @@ def bare_request_json_status(url: str, timeout: int = 20) -> tuple[dict[str, Any
     """裸 GET 带 HTTP 状态码返回，用于详情 JSON 探测。"""
     request = Request(url, headers={"User-Agent": "Go-http-client/1.1"})
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen_with_fallback(request, timeout=timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
             content_type = response.headers.get("Content-Type", "")
             try:
@@ -163,7 +165,7 @@ def request_json(
             if payload is not None:
                 data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             request = Request(url, data=data, headers=build_headers(access_token, cookie=cookie, extra_headers=extra_headers))
-            with urlopen(request, timeout=timeout) as response:
+            with urlopen_with_fallback(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
             last_error = exc
@@ -189,7 +191,7 @@ def request_json_status(
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(url, data=data, headers=build_headers(access_token, cookie=cookie, extra_headers=extra_headers))
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen_with_fallback(request, timeout=timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
             content_type = response.headers.get("Content-Type", "")
             try:
@@ -248,6 +250,6 @@ def request_text(
     extra_headers: dict[str, str] | None = None,
 ) -> str:
     request = Request(url, headers=build_headers(access_token, cookie=cookie, extra_headers=extra_headers))
-    with urlopen(request, timeout=timeout) as response:
+    with urlopen_with_fallback(request, timeout=timeout) as response:
         charset = response.headers.get_content_charset() or "utf-8"
         return response.read().decode(charset, errors="replace")

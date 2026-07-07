@@ -17,9 +17,9 @@ class GenericSearchAdapter(CLISearchAdapter):
     def _build_search_cmd(self, query: str, max_results: int, params: dict[str, Any], output_file: Path) -> list[str] | None:
         if self.search_script is None or not self.search_script.exists():
             return None
-        engines = params.get("engines") or ["baidu", "bing"]
+        engines = params.get("engines") or ["duckduckgo", "bing"]
         if not isinstance(engines, list):
-            engines = ["baidu", "bing"]
+            engines = ["duckduckgo", "bing"]
         return [
             sys.executable,
             str(self.search_script),

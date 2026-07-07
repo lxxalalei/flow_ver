@@ -3,7 +3,7 @@
   "cases": [
     {
       "case_id": "official_low_popularity_vs_viral_shallow",
-      "intent": "为 8 岁孩子找能真正理解火山形成过程的学习资料",
+      "intent": "为 8 岁孩子找能真正理解火山形成过程的成长资料",
       "candidates": [
         {
           "resource_id": "museum:volcano-guide",
@@ -135,7 +135,7 @@
     },
     {
       "case_id": "safety_claim_requires_authority",
-      "intent": "找儿童独自在家时应对火灾的安全学习资料",
+      "intent": "找儿童独自在家时应对火灾的安全教育资料",
       "candidates": [
         {
           "resource_id": "fire-service:home-safety",

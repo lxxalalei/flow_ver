@@ -55,6 +55,7 @@ class CLISearchAdapter(SearchAdapter):
         if current:
             entries.append(current)
         env["PYTHONPATH"] = os.pathsep.join(entries)
+        env.setdefault("PYTHONIOENCODING", "utf-8")
         return env
 
     def search(self, query: str, max_results: int, params: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +69,8 @@ class CLISearchAdapter(SearchAdapter):
                     cmd,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=self.timeout_seconds,
                     env=self._subprocess_env(),
                     check=False,

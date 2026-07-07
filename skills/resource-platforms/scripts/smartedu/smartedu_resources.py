@@ -27,7 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+for path in (Path(__file__).resolve().parent.parent, Path(__file__).resolve().parent.parent.parent):
+    sys.path.insert(0, str(path))
 from shared.logger import getLogger
 log = getLogger("smartedu")
 
@@ -94,6 +95,7 @@ from _search import (
     detail_urls_for_identity,
     explicit_detail_json_urls,
     extract_search_items,
+    filter_stable_search_page_items,
     filter_search_items_by_tags,
     grade_to_chinese,
     identity_from_detail_page_url,
@@ -126,7 +128,7 @@ def write_output(path: str | None, data: Any) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(output + "\n", encoding="utf-8")
     else:
-        print(output)
+        sys.stdout.buffer.write((output + "\n").encode("utf-8"))
 
 
 def parse_tab_codes(values: list[str] | None) -> list[str]:
@@ -139,7 +141,7 @@ def parse_tab_codes(values: list[str] | None) -> list[str]:
     return tab_codes or DEFAULT_TAB_CODES
 
 
-def search_payload(args: argparse.Namespace, filters: dict[str, Any]) -> dict[str, Any]:
+def search_payload(args: argparse.Namespace, filters: dict[str, Any], limit: int | None = None) -> dict[str, Any]:
     query = args.query or norm(filters.get("query") or filters.get("core_topic") or filters.get("subject"))
     # 把 intent / task-json 的结构化字段映射为 SmartEdu tag 维度筛选
     tag_dimension_map = {
@@ -165,7 +167,7 @@ def search_payload(args: argparse.Namespace, filters: dict[str, Any]) -> dict[st
         "duplicate_filter": True,
         "search_order": {"field": args.order_field, "direction": args.order_direction},
         "offset": args.offset,
-        "limit": args.limit,
+        "limit": limit if limit is not None else args.limit,
         "combine_intentions": [],
         "combine_resources": combine_resources,
     }
@@ -1017,10 +1019,10 @@ def deep_search(args: argparse.Namespace, filters: dict[str, Any]) -> tuple[list
     return deduped, stats
 
 
-def fetch_search_results(args: argparse.Namespace, filters: dict[str, Any]) -> Any:
+def fetch_search_results(args: argparse.Namespace, filters: dict[str, Any], limit: int | None = None) -> Any:
     extra_headers = parse_extra_headers(args.header)
     access_token = args.access_token or os.environ.get("SMARTEDU_ACCESS_TOKEN")
-    payload = search_payload(args, filters)
+    payload = search_payload(args, filters, limit=limit)
     tag_filters = payload.get("combine_resources", [])
     if args.search_url:
         return request_json(args.search_url, access_token=access_token, payload=payload, cookie=args.cookie, extra_headers=extra_headers)
@@ -1029,7 +1031,7 @@ def fetch_search_results(args: argparse.Namespace, filters: dict[str, Any]) -> A
     for url in SEARCH_URLS:
         try:
             data = request_json(url, access_token=access_token, payload=payload, cookie=args.cookie, extra_headers=extra_headers)
-            items = extract_search_items(data, args.limit)
+            items = extract_search_items(data, limit or args.limit)
             if items or not tag_filters:
                 return data
             # 带筛选搜到0条目，降级为无筛选宽搜索，后面由本地硬过滤补位
@@ -1054,22 +1056,25 @@ def run_search_resources(args: argparse.Namespace) -> int:
     query = args.query or norm(filters.get("query") or filters.get("core_topic") or filters.get("subject"))
 
     deep_search_enabled = bool(getattr(args, "deep_search", False))
+    search_limit = args.limit if args.fetch_details else min(100, max(args.limit * 4, args.limit + 10))
 
     if args.search_response_json:
         data = load_json(args.search_response_json)
-        items = extract_search_items(data, args.limit)
+        items = extract_search_items(data, search_limit)
         items = filter_search_items_by_tags(items, filters)
         deep_stats = {"deep_search": False, "total_unique": len(items), "phases": [], "note": "offline mode"}
     elif deep_search_enabled:
         items, deep_stats = deep_search(args, filters)
         items = filter_search_items_by_tags(items, filters)
     else:
-        data = fetch_search_results(args, filters)
-        items = extract_search_items(data, args.limit)
+        data = fetch_search_results(args, filters, limit=search_limit)
+        items = extract_search_items(data, search_limit)
         items = filter_search_items_by_tags(items, filters)
         deep_stats = {"deep_search": False, "total_unique": len(items), "phases": []}
 
     candidates: list[dict[str, Any]] = []
+    candidate_items = items
+    filtered_subresource_items = 0
     details_fetched = 0
     detail_failures: list[dict[str, Any]] = []
     detail_items_seen = 0
@@ -1096,7 +1101,9 @@ def run_search_resources(args: argparse.Namespace) -> int:
                 fallback.setdefault("raw", {}).setdefault("warnings", []).append("详情已获取但未解析出文件项")
                 candidates.append(annotate_candidate_detail(fallback, detail_summary))
     else:
-        candidates = [search_item_to_candidate(item, query, filters) for item in items]
+        candidate_items = filter_stable_search_page_items(items)[: args.limit]
+        filtered_subresource_items = max(0, len(items) - len(candidate_items))
+        candidates = [search_item_to_candidate(item, query, filters) for item in candidate_items]
     result = {
         "candidate_schema": "learning-resource-candidate/v1",
         "source_skill": "smartedu",
@@ -1104,9 +1111,11 @@ def run_search_resources(args: argparse.Namespace) -> int:
         "filters": filters,
         "searched_at": datetime.now(timezone.utc).isoformat(),
         "candidates": candidates,
-        "model_context": search_model_context(items[:20], candidates, query, filters),
+        "model_context": search_model_context(candidate_items[:20], candidates, query, filters),
         "summary": {
             "search_items_seen": len(items),
+            "page_candidates": len(candidate_items),
+            "filtered_subresource_items": filtered_subresource_items,
             "candidates": len(candidates),
             "fetch_details": bool(args.fetch_details),
             "details_fetched": details_fetched,
@@ -1118,13 +1127,13 @@ def run_search_resources(args: argparse.Namespace) -> int:
             "auth_context": has_runtime_auth_context(access_token, args.cookie, extra_headers, args),
             "browser_state_context": bool(args.browser_state),
             "deep_search": deep_stats,
-            "note": "已开启详情追踪时，候选优先使用详情文件项；未开启或详情失败时，搜索候选仅适合展示和继续展开，下载前应解析真实文件项。",
+            "note": "未开启详情追踪时，仅输出可稳定打开的课程包入口，过滤课件、教案、任务单等子资源详情页；开启详情追踪时，候选优先使用详情文件项。",
         },
     }
     if detail_failures:
         result["detail_failures"] = detail_failures
     write_output(args.output, result)
-    return 0 if candidates else 1
+    return 0 if candidates or items else 1
 
 
 def run_detail_probe(args: argparse.Namespace) -> int:

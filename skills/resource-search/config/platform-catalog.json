@@ -5,7 +5,7 @@
       "planning_status": "available",
       "auth": "optional",
       "search_parameters": {
-        "engines": {"type": "array", "allowed": ["baidu", "bing"], "required_values": ["baidu", "bing"]}
+        "engines": {"type": "array", "allowed": ["duckduckgo", "bing", "baidu"], "required_values": ["duckduckgo"]}
       }
     },
     "bilibili": {
@@ -24,7 +24,7 @@
     },
     "smartedu": {
       "planning_status": "available",
-      "auth": "required",
+      "auth": "optional",
       "search_parameters": {}
     },
     "zhihu": {
@@ -55,11 +55,6 @@
       }
     },
     "baiduwenku": {
-      "planning_status": "planned",
-      "auth": "unknown",
-      "search_parameters": {}
-    },
-    "xiaohongshu": {
       "planning_status": "planned",
       "auth": "unknown",
       "search_parameters": {}

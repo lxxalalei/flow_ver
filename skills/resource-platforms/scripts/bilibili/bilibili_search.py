@@ -7,12 +7,16 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.http_client import urlopen_with_fallback
 
 from wbi_sign import wbi_sign
 
@@ -55,7 +59,7 @@ def request_json(url: str, *, referer: str, cookie: str, timeout: int) -> dict[s
         headers["Cookie"] = cookie
     request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urlopen_with_fallback(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type", "")
             body = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:

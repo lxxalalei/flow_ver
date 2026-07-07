@@ -36,6 +36,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from shared.logger import getLogger
+from shared.http_client import urlopen_with_fallback
 
 log = getLogger("zhihu")
 
@@ -143,7 +144,7 @@ def search_via_api(
 
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urlopen_with_fallback(req, timeout=15) as resp:
                 if resp.status != 200:
                     log.warning("搜索 API 返回 HTTP %d", resp.status)
                     break
@@ -318,7 +319,7 @@ def search_via_html(
 
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urlopen_with_fallback(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         log.error("页面抓取失败: %s", exc)
@@ -392,7 +393,7 @@ def _search_via_bing(keyword: str, max_results: int) -> list[dict[str, Any]]:
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urlopen_with_fallback(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         log.error("Bing 搜索失败: %s", exc)
@@ -412,7 +413,7 @@ def _search_via_baidu(keyword: str, max_results: int) -> list[dict[str, Any]]:
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urlopen_with_fallback(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         log.error("百度搜索失败: %s", exc)

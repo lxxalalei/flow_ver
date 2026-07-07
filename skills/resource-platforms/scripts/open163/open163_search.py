@@ -36,9 +36,11 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+for path in (Path(__file__).resolve().parent.parent, Path(__file__).resolve().parent.parent.parent):
+    sys.path.insert(0, str(path))
 
 from shared.logger import getLogger
+from shared.http_client import urlopen_with_fallback
 
 log = getLogger("open163")
 
@@ -345,7 +347,7 @@ def search_via_html(
 
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urlopen_with_fallback(req, timeout=20) as resp:
             if resp.status != 200:
                 log.warning("搜索页返回 HTTP %d", resp.status)
                 return []
@@ -671,7 +673,7 @@ def output_candidates(
         Path(output_file).write_text(output + "\n", encoding="utf-8")
         log.info("候选列表已保存: %s (%d 条)", output_file, len(results))
     else:
-        print(output)
+        sys.stdout.buffer.write((output + "\n").encode("utf-8"))
     return data
 
 

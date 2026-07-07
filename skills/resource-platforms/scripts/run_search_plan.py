@@ -242,7 +242,7 @@ def atomic_write(path: Path, document: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="并行执行学习资源平台搜索计划")
+    parser = argparse.ArgumentParser(description="并行执行成长资料平台搜索计划")
     parser.add_argument("plan", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)

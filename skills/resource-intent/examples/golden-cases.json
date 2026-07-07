@@ -28,10 +28,11 @@
       "id": "open-programming-exploration",
       "request": "想让孩子学编程",
       "expect": {
-        "status": "ready",
+        "status": "needs_clarification",
         "explicit_slots": ["core_topic"],
-        "omitted_slots": ["resource_types", "format_preferences", "file_formats"],
-        "must_not_clarify": ["programming_route", "resource_types"]
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["图形化", "Scratch", "Python", "机器人", "入门"],
+        "must_not_clarify": ["platform", "resource_types"]
       }
     },
     {
@@ -71,6 +72,16 @@
       }
     },
     {
+      "id": "broad-grade-math-route",
+      "request": "一年级数学",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["课内同步", "练习巩固", "趣味", "启蒙"],
+        "must_not_clarify": ["platform", "resource_types", "file_formats"]
+      }
+    },
+    {
       "id": "age-grade-conflict",
       "request": "给6岁的四年级孩子找数学同步课",
       "expect": {
@@ -80,7 +91,7 @@
     },
     {
       "id": "broad-category",
-      "request": "帮我找点学习资源",
+      "request": "帮我找点资料",
       "expect": {
         "status": "needs_clarification",
         "clarification_field": "core_topic"
@@ -134,9 +145,22 @@
       "id": "broad-math-exploration",
       "request": "孩子数学不太好，想补一补",
       "expect": {
-        "status": "ready",
+        "status": "needs_clarification",
         "inferred_slots": ["core_topic", "learning_goal"],
-        "must_not_clarify": ["math_route", "resource_types"]
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["计算", "应用题", "课内同步", "基础"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "broad-poetry-learning-route",
+      "request": "适合小学生的古诗文学习资料",
+      "expect": {
+        "status": "needs_clarification",
+        "explicit_slots": ["core_topic", "target_age"],
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["课内同步", "朗读背诵", "启蒙欣赏", "理解赏析"],
+        "must_not_clarify": ["platform", "file_formats"]
       }
     },
     {

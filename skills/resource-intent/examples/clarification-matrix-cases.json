@@ -1,0 +1,656 @@
+{
+  "schema_version": "intent-clarification-matrix/v1",
+  "purpose": "评估 resource-intent 在主动澄清策略下的边界：该澄清时问路线，不该澄清时直接进入 Search。",
+  "dimensions": {
+    "status": ["needs_clarification", "ready"],
+    "domain": ["学科与知识", "阅读与语言", "自然与科学", "能力培养", "情绪与心理", "生活习惯", "安全教育", "艺术与创造", "亲子陪伴", "多目标"],
+    "ambiguity_type": ["无可搜索主题", "搜索路线分叉", "多目标分叉", "硬约束冲突", "适龄安全", "路线已明确", "用户授权探索", "资料形态明确", "上下文补充"]
+  },
+  "cases": [
+    {
+      "id": "route-split-grade-math",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "一年级数学",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["课内同步", "练习巩固", "趣味", "启蒙"],
+        "question_should_not_ask": ["平台", "视频", "PDF"]
+      }
+    },
+    {
+      "id": "route-split-poetry-primary",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "适合小学生的古诗文学习资料",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["课内同步", "朗读背诵", "启蒙欣赏", "理解赏析"],
+        "question_should_not_ask": ["平台", "下载格式"]
+      }
+    },
+    {
+      "id": "route-split-primary-english",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "小学英语资料",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["课内同步", "听说启蒙", "阅读", "单词"],
+        "question_should_not_ask": ["平台", "视频"]
+      }
+    },
+    {
+      "id": "route-split-primary-science",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "三年级科学资源",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["课内同步", "实验", "科普拓展"],
+        "question_should_not_ask": ["平台", "文件格式"]
+      }
+    },
+    {
+      "id": "route-split-programming",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "想让孩子学编程",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["图形化", "Scratch", "Python", "机器人", "入门"],
+        "question_should_not_ask": ["平台", "资源类型"]
+      }
+    },
+    {
+      "id": "route-split-math-remediation",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "孩子数学不太好，想补一补",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["计算", "应用题", "课内同步", "基础"],
+        "question_should_not_ask": ["平台", "视频"]
+      }
+    },
+    {
+      "id": "route-split-reading-ability",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "想提升孩子语文阅读能力",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["阅读理解", "阅读兴趣", "词句积累", "表达"],
+        "question_should_not_ask": ["平台", "PDF"]
+      }
+    },
+    {
+      "id": "route-split-attention",
+      "dimension": {
+        "domain": "能力培养",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "想培养孩子专注力",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "use_scenario",
+        "question_should_mention_any": ["学习时坐不住", "游戏训练", "家庭习惯", "课堂"],
+        "question_should_not_ask": ["平台", "资料格式"]
+      }
+    },
+    {
+      "id": "route-split-emotion-management",
+      "dimension": {
+        "domain": "情绪与心理",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "儿童情绪管理资源",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "use_scenario",
+        "question_should_mention_any": ["识别情绪", "发脾气", "亲子沟通", "孩子自己看"],
+        "question_should_not_ask": ["平台", "下载格式"]
+      }
+    },
+    {
+      "id": "route-split-parent-child-communication",
+      "dimension": {
+        "domain": "亲子陪伴",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "找一些亲子沟通资料",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "learning_goal",
+        "question_should_mention_any": ["家长方法", "孩子表达", "冲突沟通", "亲子活动"],
+        "question_should_not_ask": ["平台", "视频"]
+      }
+    },
+    {
+      "id": "route-split-life-habit",
+      "dimension": {
+        "domain": "生活习惯",
+        "ambiguity_type": "搜索路线分叉"
+      },
+      "request": "想找孩子习惯养成资料",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "core_topic",
+        "question_should_mention_any": ["睡眠", "整理", "时间管理", "阅读习惯"],
+        "question_should_not_ask": ["平台", "资源形式"]
+      }
+    },
+    {
+      "id": "route-clear-math-sync-practice",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "一年级数学同步练习题",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "grade_level", "learning_goal"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "route-clear-poetry-recitation",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "小学生古诗文朗读背诵音频",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age", "learning_goal", "resource_types"],
+        "must_not_clarify": ["platform", "file_formats"]
+      }
+    },
+    {
+      "id": "route-clear-math-word-problems",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "三年级数学应用题练习",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "grade_level", "learning_goal"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "route-clear-scratch-video",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "Scratch 儿童编程入门视频",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "learning_goal", "format_preferences"],
+        "must_not_clarify": ["programming_route", "platform"]
+      }
+    },
+    {
+      "id": "route-clear-sleep-history-audio",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "想找些孩子睡前听的中国历史故事",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "use_scenario", "resource_types"],
+        "must_not_clarify": ["platform", "target_age"]
+      }
+    },
+    {
+      "id": "route-clear-volcano-documentary-age",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "找适合8岁孩子了解火山喷发的纪录片",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age", "format_preferences"],
+        "must_not_clarify": ["platform", "file_formats"]
+      }
+    },
+    {
+      "id": "delegated-dinosaur-forms",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "用户授权探索"
+      },
+      "request": "想找点恐龙科普，形式你看着办",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "resource_types"],
+        "slot_values": {
+          "resource_types": ["不限"]
+        },
+        "must_not_clarify": ["resource_types", "platform"]
+      }
+    },
+    {
+      "id": "delegated-emotion-first-look",
+      "dimension": {
+        "domain": "情绪与心理",
+        "ambiguity_type": "用户授权探索"
+      },
+      "request": "先给我看看有哪些儿童情绪管理资源",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic"],
+        "must_not_clarify": ["use_scenario", "resource_types", "platform"]
+      }
+    },
+    {
+      "id": "delegated-solar-system-any-form",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "用户授权探索"
+      },
+      "request": "找适合小学生了解太阳系的资源，形式都可以",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age", "resource_types"],
+        "slot_values": {
+          "resource_types": ["不限"]
+        },
+        "must_not_clarify": ["format_preferences", "platform"]
+      }
+    },
+    {
+      "id": "broad-but-explorable-history",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "用户授权探索"
+      },
+      "request": "推荐一些古埃及文明资料，先看看都有哪些",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic"],
+        "must_not_clarify": ["learning_path", "resource_types", "platform"]
+      }
+    },
+    {
+      "id": "context-poetry-route-known-grade-missing",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "上下文补充"
+      },
+      "request": "适合小学生的古诗文学习资料",
+      "conversation_evidence": [
+        {
+          "role": "assistant",
+          "content": "这次更想找课内同步、朗读背诵，还是启蒙欣赏？"
+        },
+        {
+          "role": "user",
+          "content": "课内同步。"
+        }
+      ],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "grade_level",
+        "question_should_mention_any": ["几年级", "册次", "上册", "下册"],
+        "question_should_not_ask": ["平台", "资源形式"]
+      }
+    },
+    {
+      "id": "context-math-route-known-ready",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "上下文补充"
+      },
+      "request": "一年级数学",
+      "conversation_evidence": [
+        {
+          "role": "assistant",
+          "content": "这次数学资料更想找课内同步讲解、练习巩固，还是趣味数学拓展？"
+        },
+        {
+          "role": "user",
+          "content": "练习巩固就行。"
+        }
+      ],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "grade_level", "learning_goal"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "context-math-remediation-route-known-grade-missing",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "上下文补充"
+      },
+      "request": "孩子数学不太好，想补一补",
+      "conversation_evidence": [
+        {
+          "role": "assistant",
+          "content": "数学补弱想先从计算基础、应用题，还是课内同步基础开始？"
+        },
+        {
+          "role": "user",
+          "content": "先补计算基础。"
+        }
+      ],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "grade_level",
+        "question_should_mention_any": ["几年级", "年龄", "小学低年级", "小学高年级"],
+        "question_should_not_ask": ["平台", "视频"]
+      }
+    },
+    {
+      "id": "context-safety-age-known-ready",
+      "dimension": {
+        "domain": "安全教育",
+        "ambiguity_type": "上下文补充"
+      },
+      "request": "想找儿童身体边界教育资源",
+      "conversation_evidence": [
+        {
+          "role": "assistant",
+          "content": "孩子大概多大？这个主题不同年龄的表达尺度差异比较大。"
+        },
+        {
+          "role": "user",
+          "content": "小学低年级。"
+        }
+      ],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "conflict-no-video-prefer-animation",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "硬约束冲突"
+      },
+      "request": "不要视频，最好找动画讲解",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "constraints",
+        "question_should_mention_any": ["完全不要视频", "可以接受动画", "短动画"],
+        "question_should_not_ask": ["平台", "年龄"]
+      }
+    },
+    {
+      "id": "conflict-free-paid",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "硬约束冲突"
+      },
+      "request": "只要免费的，付费课程也可以看看",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "constraints",
+        "question_should_mention_any": ["只看免费", "付费也可以", "底线"],
+        "question_should_not_ask": ["平台", "资源形式"]
+      }
+    },
+    {
+      "id": "conflict-printable-audio",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "硬约束冲突"
+      },
+      "request": "必须可打印，只想要音频",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "constraints",
+        "question_should_mention_any": ["可打印", "音频", "以哪一个为准"],
+        "question_should_not_ask": ["平台", "年龄"]
+      }
+    },
+    {
+      "id": "conflict-grade-context",
+      "dimension": {
+        "domain": "学科与知识",
+        "ambiguity_type": "硬约束冲突"
+      },
+      "request": "找五年级上册数学同步练习",
+      "conversation_evidence": [
+        {
+          "role": "user",
+          "content": "之前确认过是一年级上册。"
+        }
+      ],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "grade_level",
+        "question_should_mention_any": ["一年级", "五年级", "以哪一个为准"],
+        "question_should_not_ask": ["平台", "资源类型"]
+      }
+    },
+    {
+      "id": "multi-independent-bird-art",
+      "dimension": {
+        "domain": "多目标",
+        "ambiguity_type": "多目标分叉"
+      },
+      "request": "想找鸟类观察资料，也想找儿童画入门教程",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "priority",
+        "question_should_mention_any": ["先", "哪个", "分别"],
+        "question_should_not_ask": ["平台", "格式"]
+      }
+    },
+    {
+      "id": "multi-related-solar-model",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "想了解太阳系，也想动手做行星模型",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "learning_goal"],
+        "must_not_clarify": ["priority", "platform"]
+      }
+    },
+    {
+      "id": "multi-independent-poetry-math",
+      "dimension": {
+        "domain": "多目标",
+        "ambiguity_type": "多目标分叉"
+      },
+      "request": "想找古诗背诵资料，也想找一年级数学练习",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "priority",
+        "question_should_mention_any": ["先", "古诗", "数学"],
+        "question_should_not_ask": ["平台", "格式"]
+      }
+    },
+    {
+      "id": "safety-body-boundary-no-age",
+      "dimension": {
+        "domain": "安全教育",
+        "ambiguity_type": "适龄安全"
+      },
+      "request": "想找儿童身体边界教育资源",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "target_age",
+        "question_should_mention_any": ["年龄", "几年级", "适龄"],
+        "question_should_not_ask": ["平台", "资源形式"]
+      }
+    },
+    {
+      "id": "safety-anti-abduction-self-view",
+      "dimension": {
+        "domain": "安全教育",
+        "ambiguity_type": "适龄安全"
+      },
+      "request": "找防拐骗安全教育资源，孩子自己看",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "target_age",
+        "question_should_mention_any": ["年龄", "几年级", "孩子自己看"],
+        "question_should_not_ask": ["平台", "下载格式"]
+      }
+    },
+    {
+      "id": "safety-body-boundary-age-known",
+      "dimension": {
+        "domain": "安全教育",
+        "ambiguity_type": "适龄安全"
+      },
+      "request": "找适合5岁孩子看的身体边界教育绘本",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age", "format_preferences"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "safety-adolescence-implicit-age",
+      "dimension": {
+        "domain": "情绪与心理",
+        "ambiguity_type": "适龄安全"
+      },
+      "request": "找青春期心理健康科普资源",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age"],
+        "must_not_clarify": ["exact_age", "platform"]
+      }
+    },
+    {
+      "id": "format-pdf-mind-map",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "资料形态明确"
+      },
+      "request": "找太阳系 PDF 思维导图，最好也有 PPT 讲解课件",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "format_preferences", "file_formats"],
+        "must_not_clarify": ["resource_types", "platform"]
+      }
+    },
+    {
+      "id": "format-printable-observation-card",
+      "dimension": {
+        "domain": "自然与科学",
+        "ambiguity_type": "资料形态明确"
+      },
+      "request": "找可打印的儿童鸟类观察卡片",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "format_preferences"],
+        "must": ["可打印"],
+        "must_not_clarify": ["file_formats", "platform"]
+      }
+    },
+    {
+      "id": "format-poetry-checklist",
+      "dimension": {
+        "domain": "阅读与语言",
+        "ambiguity_type": "资料形态明确"
+      },
+      "request": "找小学古诗背诵打卡表",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age", "format_preferences"],
+        "must_not_clarify": ["platform", "file_formats"]
+      }
+    },
+    {
+      "id": "format-official-preference-not-hard",
+      "dimension": {
+        "domain": "安全教育",
+        "ambiguity_type": "路线已明确"
+      },
+      "request": "最好是官方的小学生交通安全教育资料",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "ready",
+        "required_slots": ["core_topic", "target_age"],
+        "prefer": ["官方"],
+        "must_not_clarify": ["是否只要官方", "平台"]
+      }
+    },
+    {
+      "id": "empty-topic",
+      "dimension": {
+        "domain": "多目标",
+        "ambiguity_type": "无可搜索主题"
+      },
+      "request": "帮我找点资料",
+      "conversation_evidence": [],
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_focus": "core_topic",
+        "question_should_mention_any": ["了解", "学习", "解决", "主题"],
+        "question_should_not_ask": ["平台", "资源形式", "年龄"]
+      }
+    }
+  ]
+}

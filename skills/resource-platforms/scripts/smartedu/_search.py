@@ -243,6 +243,16 @@ def search_provider_name(item: dict[str, Any]) -> str:
     return "/".join(names) if names else ""
 
 
+def is_stable_search_page_item(item: dict[str, Any]) -> bool:
+    search_resource_type = norm(first_value(item, ["search_resource_type", "searchResourceType"]))
+    resource_type = norm(first_value(item, ["resource_type", "resourceType", "content_type", "contentType"]))
+    return search_resource_type == "course" and resource_type in {"elite_lesson", "national_lesson"}
+
+
+def filter_stable_search_page_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in items if is_stable_search_page_item(item)]
+
+
 def detail_page_from_search_item(item: dict[str, Any]) -> str:
     explicit = norm(first_value(item, ["url", "web_url", "webUrl", "href", "detail_url", "detailUrl", "share_url", "shareUrl"]))
     if explicit.startswith("http"):

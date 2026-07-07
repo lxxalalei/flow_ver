@@ -2,7 +2,7 @@
 
 ## Stage 4：候选展示
 
-原样展示 `resource-selector/scripts/render_review.py` 的输出。不要在 Flow 中维护第二套候选格式、分组顺序或编号规则；平台错误、候选摘要和选择说明均以 Selector 渲染结果为准。
+原样展示 Selector 返回的候选文本。不要在 Flow 中维护第二套候选格式、分组顺序或编号规则；平台错误、候选摘要和选择说明均以 Selector 展示文本为准。
 
 ## Stage 5：下载进度
 
