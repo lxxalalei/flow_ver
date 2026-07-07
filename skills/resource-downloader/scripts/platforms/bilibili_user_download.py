@@ -18,13 +18,15 @@ import random
 import argparse
 from pathlib import Path
 
+SKILLS_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(SKILLS_ROOT / "resource-platforms" / "scripts"))
+sys.path.insert(0, str(SKILLS_ROOT / "resource-platforms" / "scripts" / "bilibili"))
 sys.path.insert(0, str(Path(__file__).parent))
 from bilibili_dl import (
     resolve_cdp_url, create_browser_context, cleanup,
     _do_download, RateLimiter, RiskControlError,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from shared.logger import getLogger
 log = getLogger("bilibili")
 

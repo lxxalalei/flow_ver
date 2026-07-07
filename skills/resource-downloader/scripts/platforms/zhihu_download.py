@@ -6,14 +6,14 @@
   - 专栏文章 (zhihu.com/p/{id})：提取文章正文
 
 认证策略：
-  - 可选传入 Cookie（z_c0），有 Cookie 可获取更多内容
+  - 可选传入 Cookie（包含 z_c0 和 d_c0），有 Cookie 可获取更多内容
   - 无 Cookie 也可获取部分公开内容
   - 支持 httpx 和 urllib 两种 HTTP 后端
 
 用法:
   python zhihu_dl.py download "https://www.zhihu.com/question/123456789" -o ./downloads/
   python zhihu_dl.py download "https://zhuanlan.zhihu.com/p/12345678" -o ./downloads/
-  python zhihu_dl.py download "https://www.zhihu.com/question/123/answer/456" --cookie "z_c0=xxxx" -o ./
+  python zhihu_dl.py download "https://www.zhihu.com/question/123/answer/456" --cookie "z_c0=...; d_c0=..." -o ./
 
 依赖:
   - httpx（可选，有则用，无则降级 urllib）
@@ -34,7 +34,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+SKILLS_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(SKILLS_ROOT / "resource-platforms" / "scripts"))
 
 from shared.utils import safe_filename
 from shared.logger import getLogger
@@ -54,6 +55,19 @@ API_ARTICLE = "https://www.zhihu.com/api/v4/articles/{article_id}"
 # ==========================
 
 
+def _runtime_cookie(cookie: str | None = None) -> str | None:
+    direct = cookie or os.environ.get("ZHIHU_COOKIE")
+    if direct:
+        return direct
+    cookie_file = os.environ.get("ZHIHU_COOKIE_FILE")
+    if not cookie_file:
+        return None
+    path = Path(cookie_file).expanduser()
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8").strip() or None
+
+
 def _get_headers(cookie: str | None = None) -> dict[str, str]:
     headers: dict[str, str] = {
         "User-Agent": UA,
@@ -61,7 +75,7 @@ def _get_headers(cookie: str | None = None) -> dict[str, str]:
         "Accept-Language": "zh-CN,zh;q=0.9",
         "Referer": "https://www.zhihu.com/",
     }
-    cookie = cookie or os.environ.get("ZHIHU_COOKIE")
+    cookie = _runtime_cookie(cookie)
     if cookie:
         headers["Cookie"] = cookie
     return headers
@@ -73,7 +87,7 @@ def _get_api_headers(cookie: str | None = None) -> dict[str, str]:
         "Accept": "application/json, text/plain, */*",
         "Referer": "https://www.zhihu.com/",
     }
-    cookie = cookie or os.environ.get("ZHIHU_COOKIE")
+    cookie = _runtime_cookie(cookie)
     if cookie:
         headers["Cookie"] = cookie
         m = re.search(r"z_c0=([^;]+)", cookie)
@@ -521,7 +535,7 @@ def main() -> int:
     dl = sub.add_parser("download", help="下载知乎内容并导出 Markdown")
     dl.add_argument("url", help="知乎问答/文章 URL")
     dl.add_argument("-o", "--output", default=".", help="输出目录")
-    dl.add_argument("--cookie", default=None, help="知乎 Cookie（含 z_c0，可选）")
+    dl.add_argument("--cookie", default=None, help="知乎 Cookie（含 z_c0 和 d_c0，可选）")
     dl.add_argument("--cdp", default=None, help="CDP URL（可选，本平台通常不需要）")
 
     args = parser.parse_args()

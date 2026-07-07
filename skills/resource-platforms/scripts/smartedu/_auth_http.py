@@ -77,6 +77,11 @@ def build_headers(access_token: str | None = None, cookie: str | None = None, ex
         "Referer": "https://basic.smartedu.cn/",
         "sdp-app-id": os.environ.get("SMARTEDU_SDP_APP_ID", DEFAULT_SDP_APP_ID),
     }
+    token = _norm(access_token)
+    if token:
+        raw_token = token[7:].strip() if token.lower().startswith("bearer ") else token
+        headers["Authorization"] = f"Bearer {raw_token}"
+        headers["accessToken"] = raw_token
     authorization = os.environ.get("SMARTEDU_AUTHORIZATION")
     cookie = cookie or os.environ.get("SMARTEDU_COOKIE")
     if authorization:

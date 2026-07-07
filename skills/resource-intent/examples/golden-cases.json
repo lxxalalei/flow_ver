@@ -2,13 +2,13 @@
   "schema_version": "intent-golden/v1",
   "cases": [
     {
-      "id": "explicit-grade-math-course",
-      "request": "四年级数学课程",
+      "id": "explicit-age-volcano-documentary",
+      "request": "找适合8岁孩子了解火山喷发的纪录片",
       "expect": {
         "status": "ready",
-        "explicit_slots": ["core_topic", "grade_level", "format_preferences"],
-        "inferred_slots": ["learning_domain"],
-        "omitted_slots": ["resource_types", "file_formats"],
+        "explicit_slots": ["core_topic", "target_age", "format_preferences"],
+        "inferred_slots": ["learning_domain", "resource_types"],
+        "omitted_slots": ["grade_level", "version", "file_formats"],
         "must": [],
         "prefer": [],
         "exclude": []
@@ -16,7 +16,7 @@
     },
     {
       "id": "audio-scenario-inference",
-      "request": "想找些孩子上学路上听的英语启蒙内容",
+      "request": "想找些孩子睡前听的中国历史故事",
       "expect": {
         "status": "ready",
         "inferred_slots": ["resource_types", "format_preferences", "use_scenario"],
@@ -25,12 +25,13 @@
       }
     },
     {
-      "id": "ambiguous-programming",
+      "id": "open-programming-exploration",
       "request": "想让孩子学编程",
       "expect": {
-        "status": "needs_clarification",
-        "clarification_field": "core_topic",
-        "question_mentions_any": ["Scratch", "Python", "机器人"]
+        "status": "ready",
+        "explicit_slots": ["core_topic"],
+        "omitted_slots": ["resource_types", "format_preferences", "file_formats"],
+        "must_not_clarify": ["programming_route", "resource_types"]
       }
     },
     {
@@ -54,11 +55,11 @@
     },
     {
       "id": "exclude-video",
-      "request": "不要视频，找二年级语文阅读理解材料",
+      "request": "不要视频，找适合孩子了解昆虫生命周期的资料",
       "expect": {
         "status": "ready",
         "exclude": ["视频"],
-        "explicit_slots": ["grade_level", "core_topic"]
+        "explicit_slots": ["core_topic"]
       }
     },
     {
@@ -86,8 +87,8 @@
       }
     },
     {
-      "id": "problem-to-goal",
-      "request": "孩子做应用题总是不知道从哪下手",
+      "id": "observation-problem-to-goal",
+      "request": "孩子总分不清昆虫和蜘蛛",
       "expect": {
         "status": "ready",
         "inferred_slots": ["core_topic", "learning_goal"],
@@ -121,19 +122,21 @@
       }
     },
     {
-      "id": "clear-grade-no-age",
-      "request": "找三年级应用题专项练习",
+      "id": "clear-age-weather-activity",
+      "request": "找适合8岁孩子做的天气观察活动",
       "expect": {
         "status": "ready",
-        "must_not_clarify": ["target_age", "resource_types", "format_preferences", "file_formats"]
+        "explicit_slots": ["target_age", "core_topic", "format_preferences"],
+        "must_not_clarify": ["grade_level", "resource_types", "file_formats"]
       }
     },
     {
-      "id": "vague-math-problem",
+      "id": "broad-math-exploration",
       "request": "孩子数学不太好，想补一补",
       "expect": {
-        "status": "needs_clarification",
-        "question_mentions_any": ["计算", "应用题", "概念"]
+        "status": "ready",
+        "inferred_slots": ["core_topic", "learning_goal"],
+        "must_not_clarify": ["math_route", "resource_types"]
       }
     },
     {
@@ -171,7 +174,7 @@
     },
     {
       "id": "independent-multiple-goals",
-      "request": "想找三年级数学练习，也想找儿童画教程",
+      "request": "想找鸟类观察资料，也想找儿童画入门教程",
       "expect": {
         "status": "needs_clarification",
         "question_mentions_any": ["先", "分别", "哪个"]
@@ -179,13 +182,13 @@
     },
     {
       "id": "explicit-file-format-and-resource-form",
-      "request": "找五年级数学 PDF 试卷，最好也有 PPT 讲解课件",
+      "request": "找太阳系 PDF 思维导图，最好也有 PPT 讲解课件",
       "expect": {
         "status": "ready",
         "inferred_slots": ["resource_types"],
         "explicit_slots": ["format_preferences", "file_formats"],
         "slot_values": {
-          "resource_types": ["文档类", "练习类"],
+          "resource_types": ["文档类", "图片类"],
           "file_formats": ["PDF", "PPT"]
         },
         "prefer": ["PPT讲解课件"]
@@ -202,7 +205,7 @@
     },
     {
       "id": "printable-is-not-file-format",
-      "request": "找可打印的二年级口算题卡",
+      "request": "找可打印的儿童鸟类观察卡片",
       "expect": {
         "status": "ready",
         "inferred_slots": ["resource_types"],

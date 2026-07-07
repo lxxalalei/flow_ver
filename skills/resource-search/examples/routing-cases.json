@@ -90,6 +90,21 @@
       "id": "generic-required",
       "intent": "找一份亲子阅读活动方案",
       "expect": {"principles": ["包含generic", "generic同时使用baidu和bing"]}
+    },
+    {
+      "id": "history-multiple-experiences",
+      "intent": "想让孩子了解古埃及文明",
+      "expect": {"principles": ["覆盖讲解与故事沉浸", "不强制加入试卷或教辅"]}
+    },
+    {
+      "id": "creative-art",
+      "intent": "找适合孩子认识颜色并动手创作的资料",
+      "expect": {"principles": ["覆盖观察与创作活动", "平台选择服从实践目标"]}
+    },
+    {
+      "id": "open-programming",
+      "intent": "想让孩子学编程",
+      "expect": {"principles": ["探索多个儿童入门方向", "不要求上游先限定编程路线"]}
     }
   ]
 }

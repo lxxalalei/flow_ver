@@ -20,7 +20,7 @@ description: 学习资料库管理 Skill。用于将 Stage 5 下载或降级结�
 
 不负责重新搜索、修改 Selector 评分或重新下载资源。
 
-Stage 5→6 的 envelope、归档结果和引用规则以 `../docs/pipeline-data-contract.md` 为准。
+本 Skill 拥有 `archive/v1` 的输出格式。归档时通过 `resource_id` 关联所需上游文件，不要求 Stage 5 重复来源、需求或质量字段。
 
 ## 资料库结构
 
@@ -83,7 +83,7 @@ Stage 5→6 的 envelope、归档结果和引用规则以 `../docs/pipeline-data
 
 - `archive_status`：`archived` / `skipped` / `failed`
 - `library_paths`
-- `duplicate_of`（仅重复跳过时）
+- `duplicate_of`（`skipped` 时必填；`skipped` 只表示重复资源未再次归档）
 - `archive_error`（仅失败时）
 
 ```json
@@ -135,6 +135,14 @@ Stage 5→6 的 envelope、归档结果和引用规则以 `../docs/pipeline-data
 - 已归档资源的 `library_paths` 可访问，索引与实际文件一致。
 - 跳过和失败均有可解释原因。
 - `_summary` 的三项计数必须能从 `data.results` 核对；只向 Flow 返回 `_summary` 和输出路径。
+
+写入后运行：
+
+```bash
+python3 library-manager/scripts/validate_output.py {session_dir}
+```
+
+校验失败时修复一次；仍失败则向 Flow 返回失败。
 
 ## 参考资料
 

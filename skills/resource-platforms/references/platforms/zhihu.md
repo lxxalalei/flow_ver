@@ -4,10 +4,10 @@
 
 - Adapter：`scripts/zhihu/adapter.py`
 - 搜索脚本：`scripts/zhihu/zhihu_search.py`
-- 认证：必须提供 `ZHIHU_COOKIE`、`ZHIHU_COOKIE_FILE` 或 `ZHIHU_TOKEN`
+- 认证：必须提供 `ZHIHU_COOKIE` 或 `ZHIHU_COOKIE_FILE`
 - 计划参数：当前只使用关键词和 `max_results`
 
-Cookie应至少包含有效登录态；文件保存原始Cookie字符串。Token可传纯值或完整Bearer值。认证信息只从环境读取。
+Cookie 必须同时包含有效的 `z_c0` 和 `d_c0`；文件保存浏览器请求头中的原始 Cookie 字符串。认证信息只从环境读取。
 
 ## 搜索路径
 
@@ -27,4 +27,4 @@ API单页最多20条，按offset翻页直到达到 `max_results`。直接脚本�
 
 ## 当前验证状态
 
-2026-06-30使用有效Cookie真实搜索成功。未认证API会返回401/400，页面路径可能403，因此认证接口是当前稳定主路径。Cookie过期后应重新获取，不把降级路径声明为稳定替代。
+2026-06-30使用有效 Cookie 真实搜索成功。未认证 API 会返回401/400，页面路径可能403，因此认证接口是当前稳定主路径。执行前检查 `z_c0` 和 `d_c0`；Cookie 过期后重新获取，不把降级路径声明为稳定替代。

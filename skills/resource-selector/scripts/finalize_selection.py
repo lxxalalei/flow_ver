@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from validate_review import validate as validate_review_document
+
 
 def load_object(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -60,6 +62,35 @@ def selected_from_review(
     return selected
 
 
+def validate_selection(document: dict[str, Any], review: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    meta = document.get("_meta", {})
+    summary = document.get("_summary", {})
+    data = document.get("data", {})
+    if meta.get("schema_version") != "selection/v1":
+        errors.append("Stage 4 schema_version 必须为 selection/v1")
+    if meta.get("session_id") != review.get("_meta", {}).get("session_id"):
+        errors.append("Stage 4 session_id 必须继承 selector_review")
+    status = data.get("status")
+    selected = data.get("selected")
+    if status not in {"selected", "cancelled"}:
+        errors.append("Stage 4 data.status 非法")
+    if not isinstance(selected, list):
+        return errors + ["Stage 4 data.selected 必须是 array"]
+    if status == "selected" and not selected:
+        errors.append("selected 状态必须至少选择一个资源")
+    if status == "cancelled" and selected:
+        errors.append("cancelled 状态不得包含选择")
+    ids = [item.get("resource_id") for item in selected if isinstance(item, dict)]
+    if len(ids) != len(selected) or any(not isinstance(value, str) or not value for value in ids):
+        errors.append("每个选择必须包含非空 resource_id")
+    if len(ids) != len(set(ids)):
+        errors.append("Stage 4 resource_id 不得重复")
+    if summary != {"status": status, "selected_count": len(selected)}:
+        errors.append("Stage 4 _summary 必须与 data 一致")
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="写入 Stage 4 用户选择")
     parser.add_argument("session_dir", type=Path)
@@ -72,6 +103,10 @@ def main() -> int:
     args = parser.parse_args()
     review_path = args.review or args.session_dir / "selector_review.json"
     review = load_object(review_path)
+    selector_input = load_object(args.session_dir / "selector_input.json")
+    review_errors = validate_review_document(selector_input, review)
+    if review_errors:
+        raise ValueError(f"selector_review 未通过校验: {'; '.join(review_errors)}")
     session_id = review.get("_meta", {}).get("session_id")
     if args.cancel:
         selected: list[dict[str, Any]] = []
@@ -91,6 +126,9 @@ def main() -> int:
         "_summary": {"status": status, "selected_count": len(selected)},
         "data": {"status": status, "selected": selected},
     }
+    output_errors = validate_selection(document, review)
+    if output_errors:
+        raise ValueError(f"Stage 4 输出无效: {'; '.join(output_errors)}")
     output = args.output or args.session_dir / "stage4_selection.json"
     atomic_write(output, document)
     print(json.dumps(document["_summary"], ensure_ascii=False))

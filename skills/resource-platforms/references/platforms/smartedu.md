@@ -11,14 +11,7 @@ Adapter固定以家长身份调用跨租户资源搜索，只传递查询词和�
 
 ## 认证
 
-公开资源可在无登录态下尝试。受限栏目可使用：
-
-- `SMARTEDU_ACCESS_TOKEN`
-- `SMARTEDU_COOKIE`
-- `SMARTEDU_AUTHORIZATION`
-- `SMARTEDU_HEADERS`
-
-脚本还会从项目或当前目录的 `.env.local` 加载这些变量。认证值不得写入计划、结果或日志。
+搜索使用 `SMARTEDU_ACCESS_TOKEN`。模型从本地凭据约定取得 Access Token，并在调用统一执行器时注入环境变量。传输层把它同时写入 `Authorization: Bearer ...` 和 `accessToken` 请求头。认证值不得写入计划、结果或日志。
 
 ## 搜索路径
 
@@ -40,4 +33,4 @@ Adapter固定以家长身份调用跨租户资源搜索，只传递查询词和�
 
 2026-07-01使用公开接口真实搜索“小学古诗”成功，直接脚本与统一Adapter均返回5条并完成标准化；抽查的三个课程详情链接均能打开并显示正确的年级、册次和课时信息。未登录浏览器只能查看课程信息，微课视频、任务单和作业入口会要求登录。
 
-当前`SMARTEDU_ACCESS_TOKEN`虽然会被脚本读取并标记为认证上下文，但`_auth_http.build_headers()`尚未把它写入`Authorization`或`accessToken`请求头，因此受限资源的Token认证仍未验收。不能用公开搜索成功来证明Token有效。
+Access Token 的请求头传递已经接入搜索传输层。仍需用当前有效 Token 对受限资源进行真实验收；公开搜索成功不能单独证明 Token 有效。

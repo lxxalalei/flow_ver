@@ -20,7 +20,8 @@ Intent 返回 `needs_clarification` 时：
 4. 不另行概括确认事实，避免 Flow 提前完成 Intent 的语义归纳。
 5. 每次写入后运行 `python3 learning-resource-flow/scripts/validate_request.py {session_dir}/request.json`。
 6. 重跑 stage 1；不要直接修改 `stage1_intent.json`。
-7. 最多两轮。达到上限后仍无法确定核心主题或消除硬约束冲突，将 stage 1 标记为 `failed` 并结束本次规划。
+7. 不设置固定轮数上限。Intent 返回 `needs_clarification` 时继续交接，直到返回 `ready`、用户取消，或用户明确拒绝继续提供且缺失信息无法安全省略。
+8. 用户无法提供某项信息但授权继续时，重新运行 Intent，由 Intent 判断能否省略该维度或采用透明的低风险默认；Flow 不替 Intent 作出语义决定。
 
 等待回答期间，manifest 至少记录：
 
@@ -43,7 +44,7 @@ Stage 4 的合格候选少于 5 条时，说明主要过滤原因，并提供：
 
 - 调整关键词或主题范围：回到 stage 2。
 - 增加平台或改为穷尽模式：回到 stage 2。
-- 放宽费用、语言或质量条件：复用 stage 3，重跑 stage 4。
+- 修改费用、语言、类型、质量偏好等用户约束：更新 `request.json`，从 stage 1 重跑。
 - 接受现有候选：继续在 stage 4 选择。
 
 不要由 flow 自行改写用户约束。
@@ -51,6 +52,18 @@ Stage 4 的合格候选少于 5 条时，说明主要过滤原因，并提供：
 ## 部分平台失败
 
 Stage 3 只要存在成功结果即可进入 stage 4。向用户展示候选时附带失败平台及原因，但不要把平台失败描述为“该平台没有资源”。
+
+认证错误时读取对应平台文档，向用户说明当前平台具体缺少的登录信息，并询问是否需要模型协助配置。用户授权后，由模型写入本地凭据约定并在重试时注入环境变量。若其他平台已有结果，可以继续展示候选并说明缺失平台；若认证错误导致零结果，将 stage 3 保持为 `waiting_user`。配置完成后从 Stage 3 重跑。
+
+## 搜索零结果
+
+Stage 3 的 `_summary.resource_count=0` 时停止在当前阶段，不调用 Selector：
+
+1. 存在可重试错误时，根据错误建议重试；外部状态没有变化时不要循环执行同一失败调用。
+2. 没有错误表示搜索成功但未召回内容；只有不可重试错误表示当前平台无法提供结果。这两种情况都不是输出校验失败。
+3. 将 stage 3 标记为 `waiting_user`，提供调整关键词、扩大平台、修改条件或取消。
+4. 用户调整搜索方案时从 Stage 2 重跑；用户要求原计划重试时从 Stage 3 重跑。
+5. 只有执行器异常、输出缺失或校验失败时将 stage 3 标记为 `failed`。
 
 ## 下载降级
 
@@ -67,12 +80,14 @@ Stage 5 使用：
 
 读取 manifest 后，从第一个非 `completed` 阶段继续。恢复前确认其输入文件存在且上游阶段已完成。遇到 `waiting_user` 时不得自动重跑，必须先取得并持久化用户回答。
 
-重跑阶段时：
+恢复阶段时保留现有文件和进度。明确重跑阶段时：
 
-1. 将该阶段标记为 `in_progress`。
-2. 将所有下游阶段重置为 `pending`。
-3. 新输出使用原文件名覆盖前先保留必要错误记录。
+1. 运行 `python3 learning-resource-flow/scripts/reset_from_stage.py {session_dir} {stage_number}`。
+2. 确认当前阶段及下游旧输出已删除，对应状态已重置为 `pending`。
+3. 将目标阶段标记为 `in_progress` 并调用对应 Skill。
 4. 成功后标记 `completed`；业务结果只保存在阶段文件。
+
+重置脚本不删除 `request.json`、manifest、已完成的上游输出或正式资料库内容。重跑 Stage 4 会清理 Selector 输入、并行 worker 私有结果和最终 review；重跑 Stage 5 或更早阶段会清理会话内下载目录。
 
 ## 用户取消
 

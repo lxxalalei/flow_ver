@@ -633,7 +633,7 @@ gallery-dl <图集链接>
 | **smartedu** | 字幕 | 直接下载 | urllib | `.srt` | `smartedu_download.py download <url> --formats srt` |
 | **douyin** | 短视频 | f2 引擎（Token + ABogus 签名） | f2 + gmssl + httpx | `.mp4`（无水印） | `douyin_dl.py download <url> -o <dir>` |
 | **douyin** | 短视频（fallback） | CDP 浏览器拦截 | Playwright/CDP | `.mp4` | `douyin_dl.py --cdp http://127.0.0.1:9222 download <url>` |
-| **zhihu** | 图文/问答 | API 提取正文 → Markdown | httpx/urllib + z_c0 Cookie | `.md` | `zhihu_dl.py download <url> -o <dir>` |
+| **zhihu** | 图文/问答 | API 提取正文 → Markdown | httpx/urllib + z_c0、d_c0 Cookie | `.md` | `zhihu_dl.py download <url> -o <dir>` |
 | **weibo** | 图文 | 页面爬取 → Markdown + 图片 | requests/urllib + SUB Cookie | `.md` + `.jpg` | `weibo_dl.py download <url> -o <dir>` |
 | **weibo** | 短视频 | 视频地址提取 + 下载 | requests/urllib | `.mp4` | `weibo_dl.py download <url> -o <dir>` |
 
@@ -655,7 +655,7 @@ gallery-dl <图集链接>
 | bilibili | bilibili-api-python, httpx | Playwright（下载）, ffmpeg（合并） |
 | smartedu | Python 3.10+, PyCryptodome/cryptography | ffmpeg（ts→mp4）, Access Token（私有资源） |
 | douyin | f2, gmssl, httpx | Playwright + playwright-stealth（CDP fallback）, ffmpeg |
-| zhihu | httpx（可选，降级 urllib） | z_c0 Cookie（完整内容） |
+| zhihu | httpx（可选，降级 urllib） | 包含 z_c0、d_c0 的 Cookie（完整内容） |
 | weibo | requests/urllib | SUB Cookie（搜索） |
 
 ---

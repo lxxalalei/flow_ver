@@ -17,7 +17,7 @@ description: 学习资源下载调度器。读取用户已确认的资源，按�
 
 不负责重新搜索、重新评分、替用户改变选择或把文件移入正式资料库。
 
-Stage 4→5 的 envelope、结果字段和引用不变量以 `../docs/pipeline-data-contract.md` 为准。
+本 Skill 拥有 `download/v1` 的输出格式。输入只引用 Stage 3 的来源信息和 Stage 4 的用户选择，不复制它们的完整资源字段。
 
 ## 输入
 
@@ -33,6 +33,8 @@ Stage 4→5 的 envelope、结果字段和引用不变量以 `../docs/pipeline-d
 ### 1. 确定下载通道
 
 Downloader 不读取 Platform 的搜索注册表。平台专属下载入口将在 Downloader 自己的实现阶段维护；当前只能根据 `references/download-methods.md` 选择已有通用方法。需要 Cookie、token 或浏览器会话时，只通过环境变量、配置或运行时会话传递，不写入阶段文件。
+
+执行已有平台下载脚本前，由模型读取 Platform 共用的本地凭据约定和对应平台文档，再把当前下载需要的凭据注入环境变量。需要登录但凭据缺失或失效时，停止无意义重试并询问用户是否需要协助配置。配置完成后重新调用下载脚本；不把凭据写入下载结果或日志。
 
 平台入口、认证和限制需要进一步确认时，按需读取 `../resource-platforms/references/platforms/{platform}.md`。
 
@@ -109,9 +111,16 @@ Level 2/3 的正文、摘要或来源记录先保存成文件，再把路径写�
 - 所有失败或降级均有结构化原因。
 - `_summary` 的三项计数必须能从 `data.results` 核对；只向 Flow 返回 `_summary` 和输出路径。
 
+写入后运行：
+
+```bash
+python3 resource-downloader/scripts/validate_output.py {session_dir}
+```
+
+校验失败时修复一次；仍失败则向 Flow 返回失败，不进入归档。
+
 ## 参考资料
 
-- `../docs/pipeline-data-contract.md`：Stage 5 权威数据契约。
 - `references/download-methods.md`：通用下载、转换和平台方法。
 - `references/troubleshooting.md`：具体故障排查。
 - `references/platform-download-contract.md`：未来的平台下载接口；本轮不实现下载入口。

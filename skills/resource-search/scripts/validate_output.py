@@ -143,8 +143,13 @@ def validate(document: dict[str, Any], catalog: dict[str, Any], intent: dict[str
 
     if generic_count != 1:
         errors.append(f"search_tasks 必须恰好包含一个 generic 任务，实际 {generic_count} 个")
-    if intent is not None and intent.get("data", {}).get("status") != "ready":
-        errors.append("不能为非 ready 的 intent 生成搜索计划")
+    if intent is not None:
+        if intent.get("_meta", {}).get("schema_version") != "intent-spec/v1":
+            errors.append("输入必须是 intent-spec/v1")
+        if intent.get("data", {}).get("status") != "ready" or intent.get("_summary", {}).get("status") != "ready":
+            errors.append("不能为非 ready 的 intent 生成搜索计划")
+        if meta.get("session_id") != intent.get("_meta", {}).get("session_id"):
+            errors.append("搜索计划 session_id 必须继承 Intent")
     return errors
 
 

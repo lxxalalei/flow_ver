@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -154,6 +155,8 @@ def main() -> int:
     output = args.output or args.session_dir / "selector_input.json"
     document = prepare(args.session_dir)
     atomic_write(output, document)
+    if output.resolve() == (args.session_dir / "selector_input.json").resolve():
+        shutil.rmtree(args.session_dir / "selector_worker_reviews", ignore_errors=True)
     print(json.dumps(document["_summary"], ensure_ascii=False))
     return 0
 

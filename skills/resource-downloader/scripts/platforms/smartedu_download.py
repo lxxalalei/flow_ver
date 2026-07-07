@@ -58,7 +58,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+SKILLS_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(SKILLS_ROOT / "resource-platforms" / "scripts"))
+sys.path.insert(0, str(SKILLS_ROOT / "resource-platforms" / "scripts" / "smartedu"))
+
 from shared.logger import getLogger
 log = getLogger("smartedu")
 

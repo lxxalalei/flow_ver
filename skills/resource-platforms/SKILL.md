@@ -39,6 +39,10 @@ python3 resource-platforms/scripts/run_search_plan.py \
 
 执行器读取 `config/search-registry.json`。只有 `status=available` 且 adapter 可加载的平台才能执行；planned 或不可用平台写入结构化错误，不得伪造成零结果。
 
+执行前由模型检查当前计划涉及的平台，并按需读取对应平台文档。凭据约定保存在当前 Agent Skills 根目录的 `.learning-resource-flow/credentials.json` 及其相邻私有文件中；该文件不是阶段契约，也不要求脚本自动管理。
+
+凭据文件不存在时，由模型按 `config/credentials.example.json` 创建；缺少必需凭据时，询问用户并在授权后帮助写入本地文件。运行统一执行器时，由模型把当前任务需要的凭据注入环境变量。不要为未计划的平台加载凭据。
+
 ### 并行规则
 
 1. 不同平台使用独立 worker 并行执行，并由注册表的 `max_concurrency` 限制总并发。
@@ -62,6 +66,8 @@ adapter 负责把统一参数转换为平台真实调用，并把平台响应转
 
 Cookie、Token、浏览器状态路径和 CDP 地址只使用注册表及平台文档声明的环境变量。不得把认证信息放进 `searches[].params` 或命令行中的明文参数。缺少依赖或必需认证时，必须在联网前返回结构化错误。
 
+缺少必需认证或登录态失效时，返回 `AUTH_REQUIRED` 或对应认证错误。模型读取对应平台文档，说明具体缺少什么，并询问是否需要协助配置；配置完成后重新调用统一执行器。只报告配置状态，不把凭据写入搜索计划、结果或日志。
+
 ## 结果边界
 
 每条有效资源至少提供：
@@ -81,13 +87,14 @@ Cookie、Token、浏览器状态路径和 CDP 地址只使用注册表及平台�
 
 - `_summary.resource_count` 等于 `data.resources` 数量。
 - `_summary.failed_platforms` 只包含完全没有成功结果且存在错误的平台。
-- 每个计划任务都有结果或错误记录。
+- 执行器尝试每个计划任务；Stage 3 只持久化有效资源和真实错误，零结果且无错误的查询不增加占位记录。
 - 输出不包含搜索计划改写、跨平台筛选或下载结果。
 - 只向 Flow 返回 `_summary` 和输出路径。
 
 ## 按需读取
 
 - `config/search-registry.json`：平台状态、adapter、认证方式和超时。
+- `config/credentials.example.json`：模型创建本地凭据约定时使用的轻量示例，不是需要脚本校验的数据契约。
 - `references/search-interface.md`：adapter 与 Stage 3 的搜索数据说明。
 - `references/search-errors.md`：搜索错误及重试边界。
 - `references/platforms/{platform}.md`：正常批量搜索不预加载。某个平台认证失败、连续空结果、接口或解析异常时，读取对应文件后诊断；测试、修改或新增该平台搜索实现前也必须读取。不要为一个平台的问题加载其他平台文档。

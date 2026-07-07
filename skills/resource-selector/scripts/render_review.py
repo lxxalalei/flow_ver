@@ -78,44 +78,48 @@ def type_icon(resource_type: str) -> str:
         return "🎬"
     if "音频" in t:
         return "🎵"
-    if "文档" in t or "文档" in t:
-        return "📄"
-    if "习题" in t or "练习" in t:
-        return "✏️"
-    if "课件" in t:
-        return "📊"
-    if "课程" in t or "课" in t:
+    if any(value in t for value in ("实验", "活动", "手工", "实践", "项目", "制作")):
+        return "🔬"
+    if any(value in t for value in ("互动", "游戏", "习题", "练习", "试题", "试卷", "题库", "软件", "应用")):
+        return "🧩"
+    if any(value in t for value in ("图书", "绘本", "电子书", "文章", "文档", "阅读", "pdf", "doc", "ppt")):
+        return "📖"
+    if any(value in t for value in ("课程", "公开课", "讲座")) or t == "课":
         return "📚"
-    if "网页" in t:
-        return "🌐"
+    if any(value in t for value in ("网页", "工具")):
+        return "🛠️"
     return "📌"
 
 
 def _category_for(resource: dict[str, Any]) -> str:
     """将资源归入大类，用于分组展示。"""
     t = (resource.get("type") or "").lower()
-    platform = (resource.get("platform") or "").lower()
+    title = (resource.get("title") or "").lower()
+    text = f"{t} {title}"
     if "视频" in t:
         return "视频资源"
     if "音频" in t:
         return "音频资源"
-    if "文档" in t or "pdf" in t or "doc" in t or "ppt" in t or resource.get("title", "").lower().count("可打印") > 0 or "电子版" in resource.get("title", ""):
-        return "文档资源"
-    if "习题" in t or "练习" in t or "试题" in t or "试卷" in t:
-        return "习题资源"
-    if "课程" in t or "课" in t:
+    if any(value in text for value in ("实验", "活动", "手工", "实践", "项目", "制作", "观察任务")):
+        return "实验与活动"
+    if any(value in text for value in ("互动", "游戏", "习题", "练习", "试题", "试卷", "题库", "问答", "模拟", "软件", "应用")):
+        return "互动与练习"
+    if any(value in t for value in ("课程", "公开课", "讲座")) or t == "课":
         return "课程资源"
-    return "网页资源"
+    if any(value in text for value in ("图书", "绘本", "电子书", "文章", "文档", "阅读", "百科", "指南", "讲义", "pdf", "doc", "ppt", "可打印", "电子版")):
+        return "图书与阅读"
+    return "网页与工具"
 
 
-CATEGORY_ORDER = ["视频资源", "音频资源", "文档资源", "习题资源", "课程资源", "网页资源"]
+CATEGORY_ORDER = ["视频资源", "音频资源", "图书与阅读", "互动与练习", "实验与活动", "课程资源", "网页与工具"]
 CATEGORY_HEADER_ICON = {
     "视频资源": "🎬",
     "音频资源": "🎵",
-    "文档资源": "📄",
-    "习题资源": "✏️",
+    "图书与阅读": "📖",
+    "互动与练习": "🧩",
+    "实验与活动": "🔬",
     "课程资源": "📚",
-    "网页资源": "🌐",
+    "网页与工具": "🛠️",
 }
 
 
@@ -197,9 +201,6 @@ def render(session_dir: Path, offset: int, limit: int, group_by_type: bool = Tru
             resource = resources.get(review_item.get("resource_id"), {})
             lines.extend(_render_candidate(index, review_item, resource))
             lines.append("")
-        if offset + limit < len(candidates):
-            lines.append(f"还有 {len(candidates) - offset - limit} 条候选，回复\u201c查看更多\u201d继续展示。")
-
     lines.append("回复编号选择，例如\u201c1,3\u201d；也可以回复\u201c全部\u201d\u201c只要视频\u201d或\u201c取消\u201d。")
     return "\n".join(lines).rstrip() + "\n"
 

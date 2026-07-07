@@ -2,7 +2,7 @@
 """知乎搜索脚本 — 基于知乎搜索 API 实现关键词搜索，输出标准 candidate JSON。
 
 搜索策略（双路径）：
-  1. 优先用知乎搜索 API（需要 z_c0 Cookie / Authorization Bearer token）
+  1. 优先用知乎搜索 API（Cookie 需要同时包含 z_c0 和 d_c0）
   2. 无认证信息时降级为通用 HTTP 页面抓取 + 解析，返回有限结果
 
 输出由 adapter 归一化，接口见 resource-platforms/references/search-interface.md：
@@ -10,7 +10,7 @@
 
 用法:
   python zhihu_search.py search "三年级数学学习方法" --max 20 -o candidates.json
-  python zhihu_search.py search "小学英语启蒙" --cookie "z_c0=xxxx" --max 20
+  python zhihu_search.py search "小学英语启蒙" --cookie "z_c0=...; d_c0=..." --max 20
   python zhihu_search.py search "科普 为什么天空是蓝色的" --max 15
 
 依赖:
@@ -82,7 +82,16 @@ def runtime_cookie(explicit: str | None = None) -> str | None:
     return None
 
 
-def _get_auth_headers(cookie: str | None, token: str | None) -> dict[str, str]:
+def missing_cookie_keys(cookie: str | None) -> list[str]:
+    value = cookie or ""
+    return [
+        key
+        for key in ("z_c0", "d_c0")
+        if not re.search(rf"(?:^|;\s*){re.escape(key)}=", value)
+    ]
+
+
+def _get_auth_headers(cookie: str | None) -> dict[str, str]:
     """构建带认证的请求头。"""
     headers: dict[str, str] = {
         "User-Agent": UA,
@@ -90,9 +99,6 @@ def _get_auth_headers(cookie: str | None, token: str | None) -> dict[str, str]:
         "Referer": "https://www.zhihu.com/",
         "x-requested-with": "fetch",
     }
-    # 优先用显式传入的 token
-    if token:
-        headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
     if cookie:
         headers["Cookie"] = cookie
     elif os.environ.get("ZHIHU_COOKIE"):
@@ -103,17 +109,18 @@ def _get_auth_headers(cookie: str | None, token: str | None) -> dict[str, str]:
 def search_via_api(
     keyword: str,
     cookie: str | None = None,
-    token: str | None = None,
     max_results: int = 20,
 ) -> list[dict[str, Any]]:
-    """通过知乎搜索 API 搜索。需要认证（z_c0 cookie 或 Bearer token）。"""
+    """通过知乎搜索 API 搜索。Cookie 必须同时包含 z_c0 和 d_c0。"""
     cookie = runtime_cookie(cookie)
-    token = token or os.environ.get("ZHIHU_TOKEN")
-    headers = _get_auth_headers(cookie, token)
-
-    if not cookie and not token:
-        log.warning("缺少知乎认证信息（z_c0 cookie 或 token），无法调用搜索 API")
-        return []
+    missing = missing_cookie_keys(cookie)
+    if missing:
+        raise SearchError(
+            "AUTH_REQUIRED",
+            f"知乎 Cookie 缺少必要字段: {', '.join(missing)}",
+            False,
+        )
+    headers = _get_auth_headers(cookie)
 
     candidates: list[dict[str, Any]] = []
     offset = 0
@@ -497,14 +504,13 @@ def _extract_candidates_from_search_html(html: str, max_results: int) -> list[di
 def search(
     keyword: str,
     cookie: str | None = None,
-    token: str | None = None,
     max_results: int = 20,
 ) -> list[dict[str, Any]]:
     """主搜索入口：三级降级 — API → 页面抓取 → 搜索引擎兜底。"""
     log.info("知乎搜索: '%s' (max=%d)", keyword, max_results)
 
     # 路径 1：API 搜索（需认证）
-    candidates = search_via_api(keyword, cookie=cookie, token=token, max_results=max_results)
+    candidates = search_via_api(keyword, cookie=cookie, max_results=max_results)
     if candidates:
         return candidates
 
@@ -552,8 +558,7 @@ def main() -> int:
 
     s = sub.add_parser("search", help="搜索知乎问答/文章")
     s.add_argument("keyword", help="搜索关键词")
-    s.add_argument("--cookie", default=None, help="知乎 Cookie（包含 z_c0）")
-    s.add_argument("--token", default=None, help="知乎 Bearer token（替代 cookie 中的 z_c0）")
+    s.add_argument("--cookie", default=None, help="知乎 Cookie（必须包含 z_c0 和 d_c0）")
     s.add_argument("--max", type=int, default=20, help="最大返回数（默认 20）")
     s.add_argument("-o", "--output", default=None, help="输出 JSON 文件路径")
 
@@ -561,19 +566,18 @@ def main() -> int:
 
     if args.cmd == "search":
         cookie = runtime_cookie(args.cookie)
-        token = args.token or os.environ.get("ZHIHU_TOKEN")
         try:
             results = search(
                 args.keyword,
                 cookie=cookie,
-                token=token,
                 max_results=args.max,
             )
             error = None
-            if not results and not (cookie or token):
+            missing = missing_cookie_keys(cookie)
+            if not results and missing:
                 error = {
                     "error_code": "AUTH_REQUIRED",
-                    "message": "知乎直接搜索需要 ZHIHU_COOKIE 或 ZHIHU_TOKEN",
+                    "message": f"知乎 Cookie 缺少必要字段: {', '.join(missing)}",
                     "retryable": False,
                 }
         except SearchError as exc:

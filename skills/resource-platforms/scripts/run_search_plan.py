@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib.util
-import importlib.util
 import json
 import os
 import sys
@@ -135,6 +134,70 @@ def exact_dedup(resources: list[dict]) -> list[dict]:
     return output
 
 
+def validate_output(document: dict[str, Any], plan: dict[str, Any]) -> list[str]:
+    """Check only the Stage 3 boundary fields consumed by later skills."""
+    errors: list[str] = []
+    meta = document.get("_meta")
+    summary = document.get("_summary")
+    data = document.get("data")
+    if not isinstance(meta, dict) or meta.get("schema_version") != "platform-results/v1":
+        errors.append("Stage 3 _meta.schema_version 必须为 platform-results/v1")
+        meta = {}
+    if meta.get("session_id") != plan.get("_meta", {}).get("session_id"):
+        errors.append("Stage 3 session_id 必须继承搜索计划")
+    if not isinstance(summary, dict):
+        errors.append("Stage 3 _summary 必须是 object")
+        summary = {}
+    if not isinstance(data, dict):
+        return errors + ["Stage 3 data 必须是 object"]
+    resources = data.get("resources")
+    stage_errors = data.get("errors")
+    if not isinstance(resources, list):
+        return errors + ["Stage 3 data.resources 必须是 array"]
+    if not isinstance(stage_errors, list):
+        return errors + ["Stage 3 data.errors 必须是 array"]
+
+    seen: set[tuple[str, str]] = set()
+    for index, item in enumerate(resources):
+        prefix = f"data.resources[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{prefix} 必须是 object")
+            continue
+        for field in ("resource_id", "platform", "title", "source_url"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                errors.append(f"{prefix}.{field} 必须是非空字符串")
+        key = (str(item.get("platform") or ""), str(item.get("resource_id") or ""))
+        if all(key):
+            if key in seen:
+                errors.append(f"{prefix} 与已有 platform/resource_id 重复")
+            seen.add(key)
+
+    for index, item in enumerate(stage_errors):
+        prefix = f"data.errors[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{prefix} 必须是 object")
+            continue
+        for field in ("platform", "error_code", "message"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                errors.append(f"{prefix}.{field} 必须是非空字符串")
+        if not isinstance(item.get("retryable"), bool):
+            errors.append(f"{prefix}.retryable 必须是 boolean")
+
+    if summary.get("resource_count") != len(resources):
+        errors.append("_summary.resource_count 必须等于 data.resources 数量")
+    expected_failed = []
+    for task in plan.get("data", {}).get("search_tasks", []):
+        platform = task.get("platform")
+        if (
+            not any(item.get("platform") == platform for item in resources if isinstance(item, dict))
+            and any(item.get("platform") == platform for item in stage_errors if isinstance(item, dict))
+        ):
+            expected_failed.append(platform)
+    if summary.get("failed_platforms") != expected_failed:
+        errors.append("_summary.failed_platforms 与资源和错误不一致")
+    return errors
+
+
 async def run(plan: dict[str, Any], registry_document: dict[str, Any]) -> dict[str, Any]:
     tasks = plan.get("data", {}).get("search_tasks", [])
     registry = registry_document.get("platforms", {})
@@ -184,7 +247,12 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     args = parser.parse_args()
-    document = asyncio.run(run(load_json(args.plan), load_json(args.registry)))
+    plan = load_json(args.plan)
+    document = asyncio.run(run(plan, load_json(args.registry)))
+    errors = validate_output(document, plan)
+    if errors:
+        print(json.dumps({"valid": False, "errors": errors}, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 1
     atomic_write(args.output, document)
     print(json.dumps(document["_summary"], ensure_ascii=False))
     return 0

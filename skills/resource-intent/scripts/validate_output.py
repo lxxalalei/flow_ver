@@ -44,7 +44,12 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def _string_list(value: Any) -> bool:
-    return isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value)
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, str) and item.strip() for item in value)
+        and len(value) == len(set(value))
+    )
 
 
 def validate(document: dict[str, Any]) -> list[str]:

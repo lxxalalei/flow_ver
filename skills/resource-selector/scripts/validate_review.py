@@ -45,14 +45,14 @@ def validate(selector_input: dict[str, Any], review: dict[str, Any]) -> list[str
         score = item.get("quality_score")
         if not isinstance(score, int) or isinstance(score, bool) or not 40 <= score <= 100:
             errors.append(f"{prefix}.quality_score 必须是 40-100 整数")
-        if item.get("relevance") not in {"high", "medium"}:
-            errors.append(f"{prefix}.relevance 必须是 high 或 medium")
         reasons = item.get("reasons")
         if not isinstance(reasons, list) or not reasons or not all(isinstance(value, str) and value.strip() for value in reasons):
             errors.append(f"{prefix}.reasons 必须是非空字符串数组")
         summary = item.get("summary")
-        if summary is not None and (not isinstance(summary, str) or not summary.strip()):
-            errors.append(f"{prefix}.summary 如果存在必须是非空字符串")
+        if not isinstance(summary, str) or not summary.strip():
+            errors.append(f"{prefix}.summary 必须是非空字符串")
+        elif len(summary) > 50:
+            errors.append(f"{prefix}.summary 不得超过 50 字")
         notes = item.get("notes", [])
         if not isinstance(notes, list) or not all(isinstance(value, str) and value.strip() for value in notes):
             errors.append(f"{prefix}.notes 必须是字符串数组")

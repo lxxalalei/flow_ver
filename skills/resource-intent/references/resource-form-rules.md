@@ -41,7 +41,7 @@
 |---|---|---|---|
 | “要动画” | `["视频类"]` inferred | `["动画"]` explicit | 省略 |
 | “找音频故事” | `["音频类"]` explicit | `["故事"]` explicit | 省略 |
-| “要 PDF 试卷” | `["文档类", "练习类"]` inferred | `["试卷"]` explicit | `["PDF"]` explicit |
+| “要 PDF 鸟类观察卡片” | `["文档类", "图片类"]` inferred | `["卡片"]` explicit | `["PDF"]` explicit |
 | “可打印的练习题” | `["练习类"]` inferred | `["练习题"]` explicit | 省略；可打印进入约束 |
 | “形式都可以” | `["不限"]` explicit | 省略 | 省略 |
 | 未提任何类型 | 省略 | 省略 | 省略 |
