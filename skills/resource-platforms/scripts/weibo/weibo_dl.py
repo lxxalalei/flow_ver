@@ -6,9 +6,9 @@
 给定微博用户主页链接，爬取该用户所有个人微博（图文+视频）并下载到本地。
 
 用法:
-  python weibo_dl.py https://weibo.com/u/1669879400 -o D:\weibo_output
-  python weibo_dl.py https://weibo.com/n/迪丽热巴 -o D:\weibo_output --max-pages 5
-  python weibo_dl.py --uid 1669879400 -o D:\weibo_output
+  python weibo_dl.py https://weibo.com/u/1669879400 -o D:\\weibo_output
+  python weibo_dl.py https://weibo.com/n/迪丽热巴 -o D:\\weibo_output --max-pages 5
+  python weibo_dl.py --uid 1669879400 -o D:\\weibo_output
 
 依赖: requests (无其他第三方依赖)
 Cookie: 需要有效的 SUB cookie（Cookie Bridge 方式获取）

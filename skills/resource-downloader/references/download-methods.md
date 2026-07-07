@@ -237,7 +237,7 @@ wget --mirror <网站链接>
 ## 📺 HLS/m3u8 流媒体下载
 
 > **适用平台**：smartedu（精品课、同步课堂等课程视频）、cctv、open163 等使用 HLS 协议的平台。
-> **本系统权威实现**：`resource-platforms/scripts/smartedu/smartedu_download.py`。
+> **本系统权威实现**：`resource-downloader/scripts/platforms/smartedu_download.py`。
 
 ### HLS 协议简介
 
@@ -285,15 +285,15 @@ ffmpeg -protocol_whitelist file,http,https,tcp,tls,crypto \
 
 ```bash
 # smartedu 全资源下载器（内部自动调用 m3u8 下载）
-python3 resource-platforms/scripts/smartedu/smartedu_download.py download \
+python3 resource-downloader/scripts/platforms/smartedu_download.py download \
   "https://basic.smartedu.cn/qualityCourse?courseId=xxx"
 
 # 指定只下载视频（m3u8），并设置并发数
-python3 resource-platforms/scripts/smartedu/smartedu_download.py download "https://..." \
+python3 resource-downloader/scripts/platforms/smartedu_download.py download "https://..." \
   --formats m3u8 --video-concurrency 8
 
 # 指定输出格式为 mp4（需 ffmpeg）
-python3 resource-platforms/scripts/smartedu/smartedu_download.py download "https://..." \
+python3 resource-downloader/scripts/platforms/smartedu_download.py download "https://..." \
   --formats m3u8 --video-output mp4
 ```
 
@@ -775,7 +775,7 @@ yt-dlp --proxy http://proxy:port <链接>
 
 | 文档 | 说明 |
 |------|------|
-| `platform-download-contract.md` | 未来的平台下载接口 |
+| `platform-download-contract.md` | 平台下载脚本的接口约定 |
 | `error-codes.md` | 下载错误码规范 |
 | `../../resource-platforms/references/platforms/smartedu.md` | smartedu 平台能力与限制 |
 | `../../resource-platforms/references/platforms/douyin.md` | douyin 平台能力与限制 |

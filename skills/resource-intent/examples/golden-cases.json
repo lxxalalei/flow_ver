@@ -21,7 +21,7 @@
         "status": "ready",
         "inferred_slots": ["resource_types", "format_preferences", "use_scenario"],
         "must": [],
-        "prefer": ["适合路上听"]
+        "prefer": ["适合睡前听"]
       }
     },
     {

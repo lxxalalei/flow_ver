@@ -184,9 +184,7 @@ class DedupMatch:
     @property
     def should_skip(self) -> bool:
         """是否应跳过归档（取决于策略）。"""
-        return self.is_duplicate and self.match_type != MatchType.RESOURCE_ID or (
-            self.is_duplicate and self._action == "skip"
-        )
+        return self.is_duplicate and self._action == "skip"
 
     # 内部用，resolve 阶段设置
     _action: str = field(default="", repr=False)

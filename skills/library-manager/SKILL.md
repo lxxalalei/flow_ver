@@ -82,7 +82,7 @@ description: 学习资料库管理 Skill。用于将 Stage 5 下载或降级结�
 每条 Stage 5 结果只写一条归档结果：
 
 - `archive_status`：`archived` / `skipped` / `failed`
-- `library_paths`
+- `library_paths`：使用可访问的绝对路径。
 - `duplicate_of`（`skipped` 时必填；`skipped` 只表示重复资源未再次归档）
 - `archive_error`（仅失败时）
 
@@ -103,7 +103,7 @@ description: 学习资料库管理 Skill。用于将 Stage 5 下载或降级结�
       {
         "resource_id": "bilibili:BV1example",
         "archive_status": "archived",
-        "library_paths": ["数学/小学四年级/example.mp4"]
+        "library_paths": ["/absolute/学习资料库/数学/小学四年级/example.mp4"]
       }
     ]
   }

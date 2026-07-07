@@ -32,7 +32,7 @@ description: 学习资源下载调度器。读取用户已确认的资源，按�
 
 ### 1. 确定下载通道
 
-Downloader 不读取 Platform 的搜索注册表。平台专属下载入口将在 Downloader 自己的实现阶段维护；当前只能根据 `references/download-methods.md` 选择已有通用方法。需要 Cookie、token 或浏览器会话时，只通过环境变量、配置或运行时会话传递，不写入阶段文件。
+Downloader 不读取 Platform 的搜索注册表。优先使用 `scripts/platforms/` 中已有的平台下载脚本；没有专属脚本时，根据 `references/download-methods.md` 选择通用方法。需要 Cookie、token 或浏览器会话时，只通过环境变量、配置或运行时会话传递，不写入阶段文件。
 
 执行已有平台下载脚本前，由模型读取 Platform 共用的本地凭据约定和对应平台文档，再把当前下载需要的凭据注入环境变量。需要登录但凭据缺失或失效时，停止无意义重试并询问用户是否需要协助配置。配置完成后重新调用下载脚本；不把凭据写入下载结果或日志。
 
@@ -123,5 +123,5 @@ python3 resource-downloader/scripts/validate_output.py {session_dir}
 
 - `references/download-methods.md`：通用下载、转换和平台方法。
 - `references/troubleshooting.md`：具体故障排查。
-- `references/platform-download-contract.md`：未来的平台下载接口；本轮不实现下载入口。
+- `references/platform-download-contract.md`：平台下载脚本的接口约定。
 - `references/error-codes.md`：下载错误码。

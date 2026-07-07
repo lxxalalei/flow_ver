@@ -1,6 +1,6 @@
 # 平台下载接口契约
 
-本契约用于 `resource-downloader -> resource-platforms` 的单资源下载调用。重试、降级选择和最终 Stage 5 文件由 Downloader 负责。
+本契约用于 Downloader 调用已有平台下载脚本时约束单资源结果。重试、降级选择和最终 Stage 5 文件由 Downloader 负责。
 
 ## 输入
 

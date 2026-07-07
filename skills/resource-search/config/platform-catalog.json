@@ -24,7 +24,7 @@
     },
     "smartedu": {
       "planning_status": "available",
-      "auth": "optional",
+      "auth": "required",
       "search_parameters": {}
     },
     "zhihu": {
@@ -49,7 +49,7 @@
     },
     "annas-archive": {
       "planning_status": "available",
-      "auth": "optional",
+      "auth": "none",
       "search_parameters": {
         "core": {"type": "string", "allowed": ["book", "article"]}
       }

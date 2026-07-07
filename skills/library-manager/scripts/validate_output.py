@@ -55,6 +55,13 @@ def validate(download: dict[str, Any], archive: dict[str, Any]) -> list[str]:
             paths = []
         if status == "archived" and not paths:
             errors.append(f"{prefix} archived 时必须至少有一个资料库路径")
+        if status == "archived":
+            for path in paths:
+                library_path = Path(path).expanduser()
+                if not library_path.is_absolute():
+                    errors.append(f"{prefix}.library_paths 必须使用绝对路径: {path}")
+                elif not library_path.exists():
+                    errors.append(f"{prefix}.library_paths 路径不存在: {path}")
         if status == "skipped" and (
             not isinstance(item.get("duplicate_of"), str) or not item["duplicate_of"].strip()
         ):
