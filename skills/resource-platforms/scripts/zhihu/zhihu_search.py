@@ -44,6 +44,7 @@ log = getLogger("zhihu")
 SEARCH_API = "https://www.zhihu.com/api/v4/search_v3"
 SEARCH_PAGE_URL = "https://www.zhihu.com/search"
 ZHIHU_BASE = "https://www.zhihu.com"
+ZHIHU_ZHUANLAN_BASE = "https://zhuanlan.zhihu.com"
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -90,6 +91,23 @@ def missing_cookie_keys(cookie: str | None) -> list[str]:
         for key in ("z_c0", "d_c0")
         if not re.search(rf"(?:^|;\s*){re.escape(key)}=", value)
     ]
+
+
+def _public_zhihu_url(obj_type: str, obj: dict[str, Any], resource_id: str) -> str:
+    if obj_type == "answer":
+        question = obj.get("question") if isinstance(obj.get("question"), dict) else {}
+        qid = question.get("id") or ""
+        return f"{ZHIHU_BASE}/question/{qid}/answer/{resource_id}" if qid else ""
+    if obj_type == "article":
+        if resource_id:
+            return f"{ZHIHU_ZHUANLAN_BASE}/p/{resource_id}"
+        raw_url = str(obj.get("url") or "")
+        return raw_url.replace("https://api.zhihu.com/articles/", f"{ZHIHU_ZHUANLAN_BASE}/p/")
+    if obj_type == "question":
+        return f"{ZHIHU_BASE}/question/{resource_id}" if resource_id else ""
+
+    raw_url = str(obj.get("url") or "")
+    return raw_url.replace("https://api.zhihu.com/articles/", f"{ZHIHU_ZHUANLAN_BASE}/p/")
 
 
 def _get_auth_headers(cookie: str | None) -> dict[str, str]:
@@ -203,17 +221,8 @@ def _parse_search_item(obj: dict[str, Any], raw_item: dict[str, Any]) -> dict[st
     # 清理 HTML 高亮标签
     title = re.sub(r"<[^>]+>", "", title).strip()
 
-    # 构建 URL
-    source_url = ""
-    if obj_type == "answer":
-        qid = obj.get("question", {}).get("id") or ""
-        source_url = f"{ZHIHU_BASE}/question/{qid}/answer/{resource_id}" if qid else ""
-    elif obj_type == "article":
-        source_url = obj.get("url") or f"{ZHIHU_BASE}/p/{resource_id}"
-    elif obj_type == "question":
-        source_url = f"{ZHIHU_BASE}/question/{resource_id}"
-    else:
-        source_url = obj.get("url") or ""
+    # 构建可直接打开的公开 URL，避免把 API 地址暴露给下游。
+    source_url = _public_zhihu_url(obj_type, obj, resource_id)
 
     if not source_url or not title:
         return None
