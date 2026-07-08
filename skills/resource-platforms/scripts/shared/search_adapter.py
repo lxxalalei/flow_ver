@@ -222,6 +222,9 @@ class CLISearchAdapter(SearchAdapter):
             "bid", "bvid", "catalog", "category_id", "core", "detail_page",
             "mid", "pid", "rank", "search_method", "smartedu_catalog",
             "sub_catalog", "video_id",
+            "doc_id", "file_type", "page_num", "sell_type", "quality_score",
+            "download_count", "source_id", "baiduwenku_scene",
+            "site", "ar_id", "classify", "business_type", "keywords", "query",
         }
         return {
             key: value

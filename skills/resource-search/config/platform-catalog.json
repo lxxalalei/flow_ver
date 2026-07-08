@@ -42,6 +42,13 @@
       "auth": "required",
       "search_parameters": {}
     },
+    "wechat": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "resolve_url": {"type": "boolean"}
+      }
+    },
     "open163": {
       "planning_status": "available",
       "auth": "optional",
@@ -55,14 +62,22 @@
       }
     },
     "baiduwenku": {
-      "planning_status": "planned",
-      "auth": "unknown",
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
+    "kepu": {
+      "planning_status": "available",
+      "auth": "none",
       "search_parameters": {}
     },
     "cctv": {
-      "planning_status": "planned",
-      "auth": "unknown",
-      "search_parameters": {}
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {
+        "type": {"type": "string", "allowed": ["video", "audio"]},
+        "channel": {"type": "string"}
+      }
     }
   }
 }
