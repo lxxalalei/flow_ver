@@ -95,7 +95,6 @@
 - 使用 `site:` 定向与当前需求相关的站点。
 - 仅在文件材料确有学习价值时使用 `filetype:`。
 - 仅在短语容易被拆散时使用引号。
-- 故宫青少年教育资源使用 `site:young.dpm.org.cn`；需要展板、学习手册或教学素材时可加 `filetype:pdf`，例如 `故宫 建筑 学习手册 site:young.dpm.org.cn filetype:pdf`。
 
 同一组 generic 查询的 `params.engines` 必须包含 `duckduckgo`；需要补充中文网页召回时可同时加入 `bing` 或 `baidu`。通常生成 2-3 个互补查询；宽泛需求可以增加角度，窄需求可以更少。
 
