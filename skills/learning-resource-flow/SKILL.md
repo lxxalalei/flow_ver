@@ -51,7 +51,7 @@ description: 儿童成长资料发现、筛选、获取与归档的唯一用户�
 按以下步骤初始化：
 
 1. 原样复制当前用户需求到 `data.raw_request`，不得总结、纠错或补充模型理解。
-2. 只把与当前需求直接有关的历史话语写入 `conversation_evidence`；每条必须包含 `role` 和原文 `content`。
+2. 模型先结合当前对话判断哪些历史话语会影响本次搜索或筛选，再将这些话语原样写入 `conversation_evidence`；不因“历史”本身排除有价值的上下文，也不写入与当前需求无关的内容。每条必须包含 `role` 和原文 `content`。
 3. 创建 `{session_dir}` 和初始 `manifest.json`，将所有阶段设为 `pending`。
 4. 创建 `{session_dir}/request.json`：
 
@@ -77,7 +77,7 @@ python3 learning-resource-flow/scripts/validate_request.py {session_dir}/request
 
 6. 只有校验退出码为 0 时，才把 stage 1 设为 `in_progress` 并调用 `resource-intent`。校验失败时修复 `request.json` 一次；仍失败则在 manifest 中将 stage 1 标记为 `failed`，不得继续。
 
-Stage 1 只能读取该快照，不依赖未持久化的聊天上下文。Flow 后续更新请求时保留 `raw_request` 原文，只追加澄清问题和用户回答；不要提前概括确认事实。
+Intent 只读取该快照，不依赖未持久化的聊天上下文。调用前，Flow 可以利用当前对话判断应持久化哪些原话；一旦写入快照，Intent 只以快照中的原文为事实依据。Flow 后续更新请求时保留 `raw_request` 原文，只追加澄清问题和用户回答；不要提前概括确认事实。
 
 ## manifest
 
@@ -135,12 +135,12 @@ Stage 1 只能读取该快照，不依赖未持久化的聊天上下文。Flow �
 
 #### 调用前凭据预检
 
-1. 读取 `stage2_search_plan.json` 中实际涉及的平台，再读取 `resource-platforms/config/search-registry.json`；只检查本次计划中的平台，不加载无关凭据。
-2. 对注册表中 `auth=required` 的平台，读取对应 `resource-platforms/references/platforms/{platform}.md`，确认可接受的环境变量、Cookie/Token 必需字段和文件格式。
+1. 读取 `stage2_search_plan.json` 中实际涉及的平台，再读取 `resource-platforms/config/search-registry.json`；只检查本次计划中的平台及其实际选中的引擎，不加载无关凭据。
+2. 对注册表中 `auth=required` 的平台，读取对应 `resource-platforms/references/platforms/{platform}.md`，确认可接受的环境变量、Cookie/Token 必需字段和文件格式。对于 `generic`，还要逐条读取 `params.engines`，检查注册表的 `engine_credentials`；当前 `qianfan` 需要 `QIANFAN_API_KEY`，不是 `BAIDU_COOKIE`。
 3. 检查当前运行环境及 Agent Skills 根目录 `.learning-resource-flow/credentials.json` 指向的本地私有文件。只有非空环境变量，或确实存在且非空的凭据文件，才算已配置；不要读取后在消息、计划、manifest 或日志中回显凭据值。
-4. 已配置时，只把当前计划需要的凭据注入执行环境，然后调用 Platform。缺少任一必需凭据时，不得先调用对应平台试错；将 stage 3 标记为 `waiting_user`，按 `references/output-templates.md` 的“搜索凭据提醒”说明缺少的平台和凭据类型，询问用户要“协助配置”还是“跳过这些平台继续”，然后结束当前轮次。
-5. 用户同意配置时，由模型负责接收用户提供的 Cookie、Token 或请求头，按照 `resource-platforms/config/credentials.example.json` 创建对应的本地私有文件并更新 `credentials.json`；不要要求用户自行新建或编辑文件。写入后不得在回复或日志中回显完整凭据。确认文件可用后将 stage 3 设回 `in_progress`，注入环境变量并继续执行。
-6. 用户选择跳过时，不再为本轮重复询问；允许统一执行器把这些平台记录为 `AUTH_REQUIRED`，并继续执行无需登录或凭据已就绪的平台。用户取消时将会话标记为 `cancelled`。
+4. 已配置时，只把当前计划需要的凭据注入执行环境，然后调用 Platform。缺少任一必需的平台或引擎凭据时，不得先调用对应来源试错；将 stage 3 标记为 `waiting_user`，按 `references/output-templates.md` 的“搜索凭据提醒”说明缺少的来源和凭据类型，询问用户要“协助配置”还是“跳过这些来源继续”，然后结束当前轮次。
+5. 用户同意配置时，由模型负责接收用户提供的 Cookie、Token、API Key 或请求头，按照 `resource-platforms/config/credentials.example.json` 创建对应的本地私有文件并更新 `credentials.json`；不要要求用户自行新建或编辑文件。千帆 Key 写入 generic 的 `qianfan_api_key_file` 后注入为 `QIANFAN_API_KEY`。写入后不得在回复或日志中回显完整凭据。确认文件可用后将 stage 3 设回 `in_progress`，注入环境变量并继续执行。
+6. 用户选择跳过时，不再为本轮重复询问；跳过平台时继续其他平台，跳过 generic 的 `qianfan` 时不移除 generic 任务、不注入 Key，由执行器保留 DuckDuckGo 等其余引擎继续搜索。用户取消时将会话标记为 `cancelled`。
 
 #### 搜索执行
 
@@ -150,7 +150,7 @@ Stage 1 只能读取该快照，不依赖未持久化的聊天上下文。Flow �
 - 读取 `_summary.resource_count` 和 `data.errors` 判断继续、重试或调整计划。
 - `resource_count>0` 且不存在尚未交接的认证错误时，将 stage 3 标记为 `completed` 并进入 Stage 4；普通平台失败或用户已明确选择跳过的认证失败不影响已有结果继续使用。
 - `resource_count=0` 时不得调用 Selector。存在可重试错误时按错误建议重试 Stage 3，但不要在外部状态没有变化时重复同一失败调用；仍为零结果时将 stage 3 标记为 `waiting_user`。
-- `data.errors` 出现尚未向用户交接的 `AUTH_REQUIRED`、`AUTH_SESSION_EXPIRED` 或同类认证错误，说明凭据缺失、过期或预检无法发现的服务端失效。按“搜索凭据提醒”暂停并询问用户；配置后从 Stage 3 重试，跳过时才使用其余成功结果继续 Stage 4。用户已明确选择跳过的平台只说明未搜索，不得再次询问。不要为凭据变化重做 Intent 或搜索计划。
+- `data.errors` 出现尚未向用户交接的 `AUTH_REQUIRED`、`AUTH_SESSION_EXPIRED` 或同类认证错误，说明平台或实际选中引擎的凭据缺失、过期或预检无法发现的服务端失效。按“搜索凭据提醒”暂停并询问用户；配置后从 Stage 3 重试，跳过时才使用其余成功结果继续 Stage 4。用户已明确选择跳过的平台或引擎只说明其未搜索，不得再次询问。不要为凭据变化重做 Intent 或搜索计划。
 - 零结果且没有错误表示搜索成功但未召回内容；只有不可重试错误表示当前平台无法提供结果。两种情况都向用户提供调整关键词、扩大平台、修改条件或取消的选择。用户选择调整时从 Stage 2 重跑，选择重试时从 Stage 3 重跑。
 - 只有执行器异常、输出缺失或校验失败时才将 stage 3 标记为 `failed`。
 - 本阶段只执行平台任务、归一化字段和记录错误，不做跨平台筛选或最终质量评分。
@@ -170,7 +170,7 @@ Stage 1 只能读取该快照，不依赖未持久化的聊天上下文。Flow �
 - 输入 `stage3_search_results.json` 和 `stage4_selection.json`，输出 `stage5_download.json`。
 - 运行 `resource-downloader/scripts/validate_output.py {session_dir}`；校验失败时不得进入 Stage 6。
 - 读取 `_summary` 中成功、降级和失败数量用于结果汇报。
-- Downloader 使用自己维护的下载能力或通用方式，并负责重试和降级；不得调用 Platform 搜索层执行下载。
+- 调用 Downloader 表示由模型执行下载判断、工具调用、文件写入和结果组织；已有平台脚本与通用方式是可选工具。模型负责重试和降级，不得调用 Platform 搜索层执行下载。
 
 ### Stage 6：归档
 
@@ -178,7 +178,7 @@ Stage 1 只能读取该快照，不依赖未持久化的聊天上下文。Flow �
 - 输入 Stage 1、3、4、5 文件，输出 `stage6_archive.json`。
 - 运行 `library-manager/scripts/validate_output.py {session_dir}`；只有校验通过才完成会话。
 - 读取 `_summary` 中归档、跳过和失败数量用于最终汇报。
-- 汇总成功、降级、失败和归档位置，将会话标记为 `completed`。
+- 调用 Library Manager 表示由模型执行分类、命名、移动、索引维护和归档结果写入；去重脚本只在需要时辅助判断。汇总成功、降级、失败和归档位置，将会话标记为 `completed`。
 
 ## 恢复与分支
 
@@ -215,3 +215,4 @@ python3 learning-resource-flow/scripts/reset_from_stage.py {session_dir} {stage_
 - `references/workflow-guide.md`：恢复、异常和用户交互规则。
 - `references/output-templates.md`：候选展示、下载进度和最终结果模板。
 - `scripts/reset_from_stage.py`：明确重跑前清理当前阶段及下游旧输出；恢复流程不要调用。
+- `examples/flow-routing-cases.json`：仅在修改 Flow 或进行语义回归验收时读取；不属于正常用户流程输入。

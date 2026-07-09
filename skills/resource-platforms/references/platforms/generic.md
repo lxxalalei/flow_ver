@@ -5,16 +5,17 @@
 - Adapter：`scripts/generic/adapter.py`
 - 搜索脚本：`scripts/generic/generic_search.py`
 - 第三方依赖：无，仅使用 Python 标准库
-- 认证：通常不需要；可选 `BAIDU_COOKIE`、`BING_COOKIE`
-- 计划参数：`engines`，必须包含 `duckduckgo`，可按需额外包含 `bing` 或 `baidu`
+- 认证：DuckDuckGo、Bing、页面版百度通常不需要；`qianfan` 需要 `QIANFAN_API_KEY`，由 Flow 在计划实际选中该引擎时预检并注入。
+- 计划参数：`engines`，必须包含 `duckduckgo`，可按需额外包含 `qianfan`、`bing` 或 `baidu`
 
-Adapter 按计划把一条查询传给 DuckDuckGo、Bing 或百度。多个引擎并行执行，任一引擎失败不取消其他引擎；最终按规范化 URL 去重，并在引擎合并后截取 `max_results`，不是每个引擎各返回 `max_results`。
+Adapter 按计划把一条查询传给千帆、DuckDuckGo、Bing 或百度。多个引擎并行执行，任一引擎失败不取消其他引擎；最终按规范化 URL 去重，并在引擎合并后截取 `max_results`，不是每个引擎各返回 `max_results`。未注入千帆 Key 时，直接脚本跳过该引擎并保留其他无凭据引擎；正常 Flow 会在执行前先提醒用户配置或跳过。
 
 ## 搜索路径
 
 - DuckDuckGo：请求 HTML 搜索页并解析自然结果。
 - Bing：先解析中文搜索 HTML；无结果或受阻时尝试 RSS 搜索。
 - 百度：请求 `https://www.baidu.com/s` 并解析结果页。
+- 千帆：调用百度千帆 `web_search` API，返回标题、链接、摘要和日期；`site:` 查询会转为原生站点过滤。
 - 过滤搜索引擎自身跳转页，只保留可定位的外部 HTTP(S) 地址。
 
 每条结果提供网页标题、链接、摘要，以及 `platform_signals.engine` 和该引擎中的排名。通用搜索只负责网页发现，费用、适龄性、可信度和内容完整性由 Selector 判断。
@@ -28,4 +29,4 @@ Adapter 按计划把一条查询传给 DuckDuckGo、Bing 或百度。多个引�
 
 ## 当前验证状态
 
-2026-07-07 真实搜索以 DuckDuckGo 作为默认通用引擎，可按需补充 Bing 或百度。百度可能触发安全验证，通用结果仍可能跑题；Platform 应保留部分成功和错误，Selector 负责过滤跑题网页。
+2026-07-10 中文网页搜索默认优先千帆、以 DuckDuckGo 兜底；没有 Key 时普通脚本仍可使用无凭据引擎。页面版百度可能触发安全验证，通用结果仍可能跑题；Platform 应保留部分成功和错误，Selector 负责过滤跑题网页。

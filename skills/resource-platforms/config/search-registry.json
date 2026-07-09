@@ -2,7 +2,7 @@
   "schema_version": "platform-search-registry/v1",
   "max_concurrency": 4,
   "platforms": {
-    "generic": {"status": "available", "auth": "optional", "entry": "scripts/generic/adapter.py", "timeout_seconds": 30, "runtime": {"optional_auth_env": ["BAIDU_COOKIE", "BING_COOKIE"]}},
+    "generic": {"status": "available", "auth": "optional", "entry": "scripts/generic/adapter.py", "timeout_seconds": 30, "runtime": {"optional_auth_env": ["BAIDU_COOKIE", "BING_COOKIE"]}, "engine_credentials": {"qianfan": {"auth": "required", "auth_any_env": ["QIANFAN_API_KEY"], "credential_label": "百度千帆 AppBuilder API Key"}}},
     "bilibili": {"status": "available", "auth": "optional", "entry": "scripts/bilibili/adapter.py", "timeout_seconds": 45, "runtime": {"optional_auth_env": ["BILIBILI_COOKIE", "BILIBILI_COOKIE_FILE"]}},
     "ximalaya": {"status": "available", "auth": "optional", "entry": "scripts/ximalaya/adapter.py", "timeout_seconds": 45, "runtime": {"optional_auth_env": ["XIMALAYA_COOKIE"]}},
     "smartedu": {"status": "available", "auth": "optional", "entry": "scripts/smartedu/adapter.py", "timeout_seconds": 90, "runtime": {"optional_auth_env": ["SMARTEDU_ACCESS_TOKEN", "SMARTEDU_COOKIE", "SMARTEDU_AUTHORIZATION", "SMARTEDU_HEADERS"]}},

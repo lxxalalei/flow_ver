@@ -177,9 +177,9 @@ python3 resource-selector/scripts/validate_worker_reviews.py {session_dir} --cle
 
 ### 8. 展示并暂停
 
-读取 `references/display-templates.md`，根据 `selector_review.json` 的展示顺序和 Stage 3 元数据直接生成候选展示文本。
+读取 `references/display-templates.md`，根据 `selector_review.json` 的展示顺序和 Stage 3 元数据直接生成候选展示文本。先从用户当前表达和 Intent 判断展示意图：用户说“推荐”“帮我挑”“直接选”“最值得”等，使用 `recommend`；用户说“看看有哪些”“多给一些”“展开”等，使用 `explore`。展示意图只影响向用户呈现的候选范围，不修改既有 review、评分或选择契约。
 
-默认按资源类型分组展示（视频 → 音频 → 图书与阅读 → 互动与练习 → 实验与活动 → 课程 → 网页与工具），每组以 `{type_icon} {category_name}（{count} 条）` 标题起始。每条候选按四行展示，以 emoji 引导；编号保持与 `selector_review.json:data.candidates` 一致。不要改成 markdown 表格、只列标题链接，或压缩掉摘要与来源信息。
+`explore` 按资源类型分组展示候选；`recommend` 从 review 中选择 3-5 个最值得且彼此互补的候选（合格候选不足时全部展示），不机械取分数最高的连续几项，并先用一两句话说明这组资源分别覆盖了什么。两种模式中每条候选都按四行展示，以 emoji 引导；编号保持与 `selector_review.json:data.candidates` 一致。不要改成 markdown 表格、只列标题链接，或压缩掉摘要与来源信息。
 
 把候选展示和选择说明返回 Flow，由 Flow 将 Stage 4 标记为 `waiting_user` 并向用户展示。本轮停止，不调用 Downloader，不生成 Stage 4。
 
@@ -190,11 +190,12 @@ Flow 把用户选择原话和 `{session_dir}` 交回本 Skill。读取既有 `se
 支持：
 
 - 编号或多个编号。
-- 全部。
+- 本轮推荐全选（仅当前展示的推荐项）。
+- 全部候选（review 中所有候选）。
 - 按平台、资源类型或等级选择。
 - 取消。
 
-先把用户原话解析成明确的 `resource_id`。有歧义时只追问选择范围，不擅自下载。确认选择后运行：
+先把用户原话解析成明确的 `resource_id`。在 `recommend` 模式中，“本轮推荐全选”必须解析成当前展示项的编号集合，不得调用 `--all`；只有用户明确说“全部候选”时才使用 `--all`。有歧义时只追问选择范围，不擅自下载。确认选择后运行：
 
 ```bash
 python3 resource-selector/scripts/finalize_selection.py \

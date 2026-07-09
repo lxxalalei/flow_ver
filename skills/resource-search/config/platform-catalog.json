@@ -5,7 +5,7 @@
       "planning_status": "available",
       "auth": "optional",
       "search_parameters": {
-        "engines": {"type": "array", "allowed": ["duckduckgo", "bing", "baidu"], "required_values": ["duckduckgo"]}
+        "engines": {"type": "array", "allowed": ["qianfan", "duckduckgo", "bing", "baidu"], "required_values": ["duckduckgo"]}
       }
     },
     "bilibili": {

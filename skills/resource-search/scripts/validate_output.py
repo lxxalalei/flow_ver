@@ -141,8 +141,8 @@ def validate(document: dict[str, Any], catalog: dict[str, Any], intent: dict[str
                 ):
                     errors.append(f"{search_path}.params.{name} 必须包含 {required_values}")
 
-    if generic_count != 1:
-        errors.append(f"search_tasks 必须恰好包含一个 generic 任务，实际 {generic_count} 个")
+    if generic_count > 1:
+        errors.append(f"search_tasks 最多包含一个 generic 任务，实际 {generic_count} 个")
     if intent is not None:
         if intent.get("_meta", {}).get("schema_version") != "intent-spec/v1":
             errors.append("输入必须是 intent-spec/v1")

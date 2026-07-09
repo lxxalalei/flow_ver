@@ -89,7 +89,7 @@
     {
       "id": "generic-required",
       "intent": "找一份亲子阅读活动方案",
-      "expect": {"principles": ["包含generic", "generic使用duckduckgo"]}
+      "expect": {"principles": ["包含generic", "中文generic默认优先qianfan且保留duckduckgo"]}
     },
     {
       "id": "history-multiple-experiences",

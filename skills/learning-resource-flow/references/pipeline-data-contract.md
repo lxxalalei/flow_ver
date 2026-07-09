@@ -44,7 +44,7 @@
 - `data.search_tasks[]` 每个平台最多一项。
 - 每项包含 `platform`、`priority`、非空 `searches[]`。
 - 每次搜索包含 `query`、`max_results` 和可选 `params`。
-- 计划恰好包含一个 `generic` 任务；generic 搜索的 `params.engines` 必须包含 `duckduckgo`，可按需额外包含 `bing` 或 `baidu`。
+- 计划最多包含一个 `generic` 任务；generic 搜索的 `params.engines` 必须包含 `duckduckgo`，可按需额外包含 `qianfan`、`bing` 或 `baidu`。`qianfan` 是 generic 内部引擎，需由 Flow 预检 `QIANFAN_API_KEY`，不产生单独的平台任务。
 
 ### platform-results/v1
 

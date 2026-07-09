@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Search the public web through Bing and Baidu, then URL-deduplicate results."""
+"""Search the public web through Qianfan and public search pages, then URL-deduplicate results."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -24,7 +24,9 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
-ALLOWED_ENGINES = {"duckduckgo", "bing", "baidu"}
+ALLOWED_ENGINES = {"qianfan", "duckduckgo", "bing", "baidu"}
+QIANFAN_WEB_SEARCH_URL = "https://qianfan.baidubce.com/v2/ai_search/web_search"
+QIANFAN_QUERY_UNITS_LIMIT = 72
 GENERIC_QUERY_WORDS = {
     "儿童", "孩子", "小孩", "小朋友", "学生", "小学生", "青少年",
     "学习", "资料", "资源", "素材", "内容", "适合", "了解", "推荐",
@@ -32,15 +34,56 @@ GENERIC_QUERY_WORDS = {
 }
 
 
-class SearchBlockedError(RuntimeError):
+class SearchEngineError(RuntimeError):
+    """An engine failure with a stable Stage 3 error code."""
+
+    def __init__(self, error_code: str, message: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.retryable = retryable
+
+
+class SearchBlockedError(SearchEngineError):
     """The engine returned a verification or anti-bot page instead of results."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__("SEARCH_BLOCKED", message, True)
 
-def _clean_text(value: str) -> str:
+
+def _clean_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
     value = re.sub(r"<script\b[^>]*>.*?</script>", " ", value, flags=re.I | re.S)
     value = re.sub(r"<style\b[^>]*>.*?</style>", " ", value, flags=re.I | re.S)
     value = re.sub(r"<[^>]+>", " ", value)
     return re.sub(r"\s+", " ", html.unescape(value)).strip()
+
+
+def _truncate_qianfan_query(value: str) -> str:
+    """Respect Qianfan's documented 72-unit limit (a Han character counts as 2)."""
+
+    units = 0
+    output: list[str] = []
+    for char in value.strip():
+        char_units = 2 if "\u4e00" <= char <= "\u9fff" else 1
+        if units + char_units > QIANFAN_QUERY_UNITS_LIMIT:
+            break
+        output.append(char)
+        units += char_units
+    return "".join(output).strip()
+
+
+def _qianfan_query_and_sites(query: str) -> tuple[str, list[str]]:
+    """Translate generic `site:` syntax into Qianfan's native domain filter."""
+
+    sites: list[str] = []
+    for raw_scope in re.findall(r"(?:^|\s)site:([^\s]+)", query, flags=re.I):
+        candidate = raw_scope.strip().strip("\"'“”‘’.,;；")
+        parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+        if parsed.hostname:
+            sites.append(parsed.hostname.lower())
+    plain_query = re.sub(r"(?:^|\s)site:[^\s]+", " ", query, flags=re.I)
+    return _truncate_qianfan_query(plain_query) or _truncate_qianfan_query(query), list(dict.fromkeys(sites))
 
 
 def _specific_query_terms(query: str) -> list[str]:
@@ -68,7 +111,7 @@ def _matches_query_terms(item: dict[str, Any], terms: list[str]) -> bool:
     return any(term in haystack for term in terms)
 
 
-def _canonical_url(value: str) -> str:
+def _canonical_url(value: str, *, allow_baidu: bool = False) -> str:
     value = html.unescape(value).strip()
     if value.startswith("//"):
         value = "https:" + value
@@ -91,7 +134,9 @@ def _canonical_url(value: str) -> str:
             parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
-    if parsed.netloc.endswith(("baidu.com", "bing.com", "microsoft.com", "duckduckgo.com")):
+    if parsed.netloc.endswith(("bing.com", "microsoft.com", "duckduckgo.com")):
+        return ""
+    if parsed.netloc.endswith("baidu.com") and not allow_baidu:
         return ""
     return parsed._replace(fragment="").geturl()
 
@@ -233,6 +278,92 @@ def _fetch(url: str, timeout: float, cookie: str = "") -> str:
     return body.decode(charset, errors="replace")
 
 
+def _qianfan_error_message(body: bytes) -> str:
+    try:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return _clean_text(body.decode("utf-8", errors="replace"))[:300] or "千帆搜索请求失败"
+    if isinstance(payload, dict):
+        return _clean_text(payload.get("message") or payload.get("error_message"))[:300] or "千帆搜索请求失败"
+    return "千帆搜索请求失败"
+
+
+def _qianfan_error(code: Any, message: str) -> SearchEngineError:
+    lowered = message.lower()
+    if str(code) in {"401", "403", "216003"} or any(
+        marker in lowered for marker in ("authentication", "authorization", "apikey", "api key", "token")
+    ):
+        return SearchEngineError("AUTH_REQUIRED", "百度千帆 API Key 缺失、无效或已失效", False)
+    if str(code) == "429":
+        return SearchEngineError("SEARCH_RATE_LIMITED", "百度千帆搜索请求过于频繁", True)
+    if str(code).startswith("5"):
+        return SearchEngineError("NETWORK_REMOTE_ERROR", f"百度千帆搜索服务暂时不可用: {message}", True)
+    return SearchEngineError("SEARCH_EXECUTION_FAILED", f"百度千帆搜索失败: {message}", False)
+
+
+def search_qianfan(query: str, limit: int, timeout: float, api_key: str) -> list[dict[str, Any]]:
+    if not api_key:
+        raise SearchEngineError("AUTH_REQUIRED", "缺少 QIANFAN_API_KEY", False)
+
+    compact_query, sites = _qianfan_query_and_sites(query)
+    if not compact_query:
+        raise SearchEngineError("SEARCH_EXECUTION_FAILED", "千帆搜索词为空", False)
+    payload: dict[str, Any] = {
+        "messages": [{"role": "user", "content": compact_query}],
+        "search_source": "baidu_search_v2",
+        "resource_type_filter": [{"type": "web", "top_k": min(max(limit, 1), 50)}],
+    }
+    if sites:
+        payload["search_filter"] = {"match": {"site": sites}}
+    request = Request(
+        QIANFAN_WEB_SEARCH_URL,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+            "X-Appbuilder-Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        body, charset = _open_url(request, timeout)
+    except HTTPError as exc:
+        raise _qianfan_error(exc.code, _qianfan_error_message(exc.read())) from exc
+    except (OSError, TimeoutError, URLError) as exc:
+        raise SearchEngineError("NETWORK_REQUEST_FAILED", f"百度千帆请求失败: {type(exc).__name__}", True) from exc
+    try:
+        response = json.loads(body.decode(charset, errors="replace"))
+    except json.JSONDecodeError as exc:
+        raise SearchEngineError("PARSE_FORMAT_NOT_SUPPORTED", "百度千帆返回的不是 JSON", False) from exc
+    if not isinstance(response, dict):
+        raise SearchEngineError("PARSE_FORMAT_NOT_SUPPORTED", "百度千帆返回结构不是 object", False)
+    code = response.get("code")
+    if code not in (None, "", 0, "0"):
+        raise _qianfan_error(code, _clean_text(response.get("message")) or "未知错误")
+
+    results: list[dict[str, Any]] = []
+    references = response.get("references")
+    if not isinstance(references, list):
+        return results
+    for reference in references:
+        if not isinstance(reference, dict) or reference.get("type") not in (None, "web"):
+            continue
+        title = _clean_text(reference.get("title"))
+        url = _canonical_url(str(reference.get("url") or ""), allow_baidu=True)
+        snippet = _clean_text(reference.get("snippet") or reference.get("content"))
+        if not title or not url:
+            continue
+        result = _make_result(title, url, snippet, "qianfan", len(results) + 1, query)
+        published_at = _clean_text(reference.get("date"))
+        if published_at:
+            result["publish_time"] = published_at
+        results.append(result)
+        if len(results) >= limit:
+            break
+    return results
+
+
 def _raise_if_blocked(page: str, engine: str) -> None:
     lowered = page.lower()
     markers = {
@@ -247,9 +378,28 @@ def _raise_if_blocked(page: str, engine: str) -> None:
 def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[str, Any]:
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
     query_terms = _specific_query_terms(query)
     per_engine_limit = max(limit, 1)
+    qianfan_api_key = os.environ.get("QIANFAN_API_KEY", "").strip()
+    skipped_engines = [engine for engine in engines if engine == "qianfan" and not qianfan_api_key]
+    active_engines = [engine for engine in engines if engine not in skipped_engines]
+    if not active_engines:
+        return {
+            "platform": "generic",
+            "query": query,
+            "search_method": "",
+            "total_found": 0,
+            "returned_count": 0,
+            "results": [],
+            "errors": [{
+                "engine": "qianfan",
+                "error_code": "AUTH_REQUIRED",
+                "message": "缺少 QIANFAN_API_KEY",
+                "retryable": False,
+            }],
+            "skipped_engines": skipped_engines,
+        }
     endpoints = {
         "duckduckgo": (
             f"https://lite.duckduckgo.com/lite/?q={quote_plus(query)}",
@@ -257,7 +407,10 @@ def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[s
         ),
         "baidu": (f"https://www.baidu.com/s?wd={quote_plus(query)}&rn={per_engine_limit}", parse_baidu_results),
     }
+
     def run_engine(engine: str) -> tuple[str, list[dict[str, Any]]]:
+        if engine == "qianfan":
+            return engine, search_qianfan(query, per_engine_limit, timeout, qianfan_api_key)
         if engine == "bing":
             cookie = os.environ.get("BING_COOKIE", "") or "SRCHHPGUSR=SRCHLANG=zh-Hans"
             rss_url = f"https://cn.bing.com/search?format=rss&q={quote_plus(query)}&count={per_engine_limit}"
@@ -280,23 +433,35 @@ def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[s
         return engine, parser(page, query, per_engine_limit)
 
     completed: dict[str, list[dict[str, Any]]] = {}
-    with ThreadPoolExecutor(max_workers=len(engines)) as executor:
-        futures = {executor.submit(run_engine, engine): engine for engine in engines}
+    with ThreadPoolExecutor(max_workers=len(active_engines)) as executor:
+        futures = {executor.submit(run_engine, engine): engine for engine in active_engines}
         for future in as_completed(futures):
             engine = futures[future]
             try:
                 _, engine_results = future.result()
                 completed[engine] = engine_results
+            except SearchEngineError as exc:
+                errors.append({
+                    "engine": engine,
+                    "error_code": exc.error_code,
+                    "message": str(exc),
+                    "retryable": exc.retryable,
+                })
             except Exception as exc:  # Engine failures are isolated.
-                errors.append({"engine": engine, "message": f"{type(exc).__name__}: {exc}"})
+                errors.append({
+                    "engine": engine,
+                    "error_code": "SEARCH_EXECUTION_FAILED",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "retryable": False,
+                })
 
     # Merge in the requested engine order so concurrency does not make output unstable.
-    for engine in engines:
+    for engine in active_engines:
         engine_results = completed.get(engine, [])
         for item in engine_results:
             if not _matches_query_terms(item, query_terms):
                 continue
-            canonical = _canonical_url(item["source_url"])
+            canonical = _canonical_url(item["source_url"], allow_baidu=engine == "qianfan")
             if not canonical or canonical in seen:
                 continue
             seen.add(canonical)
@@ -306,16 +471,17 @@ def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[s
     return {
         "platform": "generic",
         "query": query,
-        "search_method": "+".join(engines),
+        "search_method": "+".join(active_engines),
         "total_found": len(merged),
         "returned_count": len(merged),
         "results": merged,
         "errors": errors,
+        "skipped_engines": skipped_engines,
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="使用 DuckDuckGo、Bing 或百度搜索公开网页")
+    parser = argparse.ArgumentParser(description="使用千帆、DuckDuckGo、Bing 或百度搜索公开网页")
     subparsers = parser.add_subparsers(dest="command", required=True)
     command = subparsers.add_parser("search")
     command.add_argument("query")
@@ -328,7 +494,7 @@ def main() -> int:
     engines = list(dict.fromkeys(part.strip().lower() for part in args.engines.split(",") if part.strip()))
     unknown = set(engines) - ALLOWED_ENGINES
     if unknown or not engines:
-        parser.error(f"--engines 只支持 duckduckgo,bing,baidu，收到: {sorted(unknown) or engines}")
+        parser.error(f"--engines 只支持 qianfan,duckduckgo,bing,baidu，收到: {sorted(unknown) or engines}")
     result = search(args.query, engines, max(1, min(args.max_results, 100)), max(1.0, args.timeout))
     payload = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:
