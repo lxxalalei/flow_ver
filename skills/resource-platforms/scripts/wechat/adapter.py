@@ -54,6 +54,9 @@ class WechatSearchAdapter(CLISearchAdapter):
 
         return {"results": results, "error": self._normalize_error(raw.get("error"))}
 
+    def _has_result_container(self, raw: Any) -> bool:
+        return isinstance(raw, dict) and isinstance(raw.get("articles"), list)
+
     def _normalize_article(self, item: Any, query: Any, fallback_rank: int) -> dict[str, Any] | None:
         if not isinstance(item, dict):
             return None

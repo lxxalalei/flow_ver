@@ -47,16 +47,16 @@
 | 错误码 | 说明 | 是否可重试 | 建议重试次数 |
 |--------|------|-----------|-------------|
 | `ANTI_CRAWL_RATE_LIMITED` | 频率限制，被限流 | ✅ 是 | 1-2 次（加长延时） |
-| `ANTI_CRAWL_BLOCKED` | 被反爬系统拦截 | ⚠️ 视情况 | 1 次（换 UA/IP） |
+| `ANTI_CRAWL_BLOCKED` | 被反爬系统拦截 | ❌ 否 | 0 次 |
 | `ANTI_CRAWL_CAPTCHA` | 需要验证码 | ❌ 否 | 0 次 |
 | `ANTI_CRAWL_IP_BANNED` | IP 被封禁 | ❌ 否 | 0 次 |
 | `ANTI_CRAWL_NEED_SIGN` | 需要签名/加密参数 | ❌ 否 | 0 次 |
 
 **处理建议：**
 - 频率限制：加长请求间隔，降低并发
-- 被拦截：换 User-Agent、加请求头、用代理
+- 被拦截：停止自动下载并走公开网页或元数据降级
 - 验证码/IP 封禁：走降级路径，或提示用户手动操作
-- 需要签名：通常需要逆向，难度高，直接降级
+- 需要签名：不逆向或规避站点机制，直接降级
 
 ---
 
@@ -85,13 +85,13 @@
 | `CONTENT_PRIVATE` | 内容为私有，未公开 | ❌ 否 | 0 次 |
 | `CONTENT_PREMIUM_ONLY` | 付费/VIP 专享内容 | ❌ 否 | 0 次 |
 | `CONTENT_DRM_PROTECTED` | 有 DRM 版权保护，无法下载 | ❌ 否 | 0 次 |
-| `CONTENT_REGION_LOCKED` | 地区限制，当前地区无法访问 | ⚠️ 视情况 | 1 次（换代理） |
+| `CONTENT_REGION_LOCKED` | 地区限制，当前地区无法访问 | ❌ 否 | 0 次 |
 | `CONTENT_NOT_AVAILABLE` | 内容暂时不可用 | ✅ 是 | 1 次（稍后再试） |
 
 **处理建议：**
 - 不存在/已删除/私有：直接跳过，从候选中移除
 - 付费/DRM：降级处理（提取摘要、保存链接）
-- 地区限制：有代理可以试一次，没有就降级
+- 地区限制：不绕过限制，直接降级并保留来源说明
 
 ---
 
@@ -121,6 +121,10 @@
 | `DOWNLOAD_DISK_FULL` | 磁盘空间不足 | ❌ 否 | 0 次 |
 | `DOWNLOAD_TOO_LARGE` | 文件过大，超过限制 | ⚠️ 视情况 | 0 次 |
 | `DOWNLOAD_SPEED_TOO_SLOW` | 下载速度过慢 | ✅ 是 | 1 次（换源） |
+| `DOWNLOAD_DEGRADED_TO_WEBPAGE` | 未取得独立原文件，已保存公开网页正文 | ❌ 否 | 0 次 |
+| `DOWNLOAD_NOT_DIRECT_FILE` | 来源 URL 返回网页而不是独立文件 | ❌ 否 | 0 次 |
+| `DOWNLOAD_UNEXPECTED_FORMAT` | 下载成功但没有主文件符合计划期望格式 | ❌ 否 | 0 次 |
+| `DOWNLOAD_PLATFORM_DEGRADED` | 平台入口只取得公开预览、替代版本或完整文稿 | ❌ 否 | 0 次 |
 
 **处理建议：**
 - 通用失败/部分下载：断点续传重试

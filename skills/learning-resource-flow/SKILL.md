@@ -52,7 +52,7 @@ description: 儿童成长资料发现、筛选、获取与归档的唯一用户�
 
 1. 原样复制当前用户需求到 `data.raw_request`，不得总结、纠错或补充模型理解。
 2. 模型先结合当前对话判断哪些历史话语会影响本次搜索或筛选，再将这些话语原样写入 `conversation_evidence`；不因“历史”本身排除有价值的上下文，也不写入与当前需求无关的内容。每条必须包含 `role` 和原文 `content`。
-3. 创建 `{session_dir}` 和初始 `manifest.json`，将所有阶段设为 `pending`。
+3. 创建 `{session_dir}`，运行 `python3 learning-resource-flow/scripts/session_state.py create {session_dir}` 初始化 manifest；不得直接创建或修改 `manifest.json`。
 4. 创建 `{session_dir}/request.json`：
 
 ```json
@@ -75,33 +75,25 @@ description: 儿童成长资料发现、筛选、获取与归档的唯一用户�
 python3 learning-resource-flow/scripts/validate_request.py {session_dir}/request.json
 ```
 
-6. 只有校验退出码为 0 时，才把 stage 1 设为 `in_progress` 并调用 `resource-intent`。校验失败时修复 `request.json` 一次；仍失败则在 manifest 中将 stage 1 标记为 `failed`，不得继续。
+6. 只有校验退出码为 0 时，才运行 `session_state.py start {session_dir} 1` 并调用 `resource-intent`。校验失败时修复 `request.json` 一次；仍失败则运行 `session_state.py fail {session_dir} 1 --error-code INVALID_REQUEST --reason "..."`，不得继续。
 
 Intent 只读取该快照，不依赖未持久化的聊天上下文。调用前，Flow 可以利用当前对话判断应持久化哪些原话；一旦写入快照，Intent 只以快照中的原文为事实依据。Flow 后续更新请求时保留 `raw_request` 原文，只追加澄清问题和用户回答；不要提前概括确认事实。
 
 ## manifest
 
-创建会话时写入：
+所有状态操作必须通过 `scripts/session_state.py` 完成，不得由模型直接拼写或修改 `manifest.json`。状态脚本负责格式校验、原子写入和上游完成检查。
 
-```json
-{
-  "schema_version": "session-manifest/v1",
-  "session_id": "20260630-1030-volcano-earthquake",
-  "updated_at": "ISO 8601",
-  "status": "in_progress",
-  "current_stage": 1,
-  "stages": {
-    "stage1": {"status": "pending"},
-    "stage2": {"status": "pending"},
-    "stage3": {"status": "pending"},
-    "stage4": {"status": "pending"},
-    "stage5": {"status": "pending"},
-    "stage6": {"status": "pending"}
-  }
-}
+```bash
+python3 learning-resource-flow/scripts/session_state.py create {session_dir}
+python3 learning-resource-flow/scripts/session_state.py inspect {session_dir}
+python3 learning-resource-flow/scripts/session_state.py start {session_dir} {stage}
+python3 learning-resource-flow/scripts/session_state.py complete {session_dir} {stage}
+python3 learning-resource-flow/scripts/session_state.py wait {session_dir} {stage} --reason user_input
+python3 learning-resource-flow/scripts/session_state.py fail {session_dir} {stage} --error-code ERROR_CODE --reason "..."
+python3 learning-resource-flow/scripts/session_state.py cancel {session_dir} {stage}
 ```
 
-阶段状态只使用 `pending`、`in_progress`、`waiting_user`、`completed`、`failed`、`cancelled`。`waiting_user` 表示阶段已产生明确问题，正在等待用户回答。调用前标记 `in_progress`；成功后标记 `completed`；失败时增加统一 `error` 对象。文件名和阶段写入者是固定规则，不在 manifest 重复保存。
+每个命令只返回当前阶段、状态和 `next_action`。恢复会话时先运行 `inspect`，校验 Manifest 和所有已完成阶段的真实输出；格式不合法时直接失败，不做兼容或推断。下文中的“标记为某状态”均表示调用对应状态命令，不是直接编辑文件。完整契约位于 `schemas/manifest.schema.json`。
 
 ## 六阶段调度
 
@@ -170,7 +162,7 @@ Intent 只读取该快照，不依赖未持久化的聊天上下文。调用前�
 - 输入 `stage3_search_results.json` 和 `stage4_selection.json`，输出 `stage5_download.json`。
 - 运行 `resource-downloader/scripts/validate_output.py {session_dir}`；校验失败时不得进入 Stage 6。
 - 读取 `_summary` 中成功、降级和失败数量用于结果汇报。
-- 调用 Downloader 表示由模型执行下载判断、工具调用、文件写入和结果组织；已有平台脚本与通用方式是可选工具。模型负责重试和降级，不得调用 Platform 搜索层执行下载。
+- Downloader 先写入受限的 `download_plan.json`，再调用 `resource-downloader/scripts/run_download_plan.py {session_dir}`。模型不直接运行平台下载命令或写 Stage 5；执行器负责临时目录、路径安全、超时、降级和结果组织。
 
 ### Stage 6：归档
 
@@ -178,7 +170,7 @@ Intent 只读取该快照，不依赖未持久化的聊天上下文。调用前�
 - 输入 Stage 1、3、4、5 文件，输出 `stage6_archive.json`。
 - 运行 `library-manager/scripts/validate_output.py {session_dir}`；只有校验通过才完成会话。
 - 读取 `_summary` 中归档、跳过和失败数量用于最终汇报。
-- 调用 Library Manager 表示由模型执行分类、命名、移动、索引维护和归档结果写入；去重脚本只在需要时辅助判断。汇总成功、降级、失败和归档位置，将会话标记为 `completed`。
+- Library Manager 先写入只含分类和命名的 `archive_plan.json`，再调用 `library-manager/scripts/run_archive_plan.py {session_dir}`。模型不直接移动文件或修改索引；执行器负责去重、事务提交、回滚和 Stage 6 写入。汇总成功、降级、失败和归档位置，将会话标记为 `completed`。
 
 ## 恢复与分支
 
@@ -215,4 +207,6 @@ python3 learning-resource-flow/scripts/reset_from_stage.py {session_dir} {stage_
 - `references/workflow-guide.md`：恢复、异常和用户交互规则。
 - `references/output-templates.md`：候选展示、下载进度和最终结果模板。
 - `scripts/reset_from_stage.py`：明确重跑前清理当前阶段及下游旧输出；恢复流程不要调用。
+- `scripts/session_state.py`：创建、检查和更新会话状态的唯一入口。
+- `scripts/validate_manifest.py`：检查 manifest 和所有已完成阶段的真实输出。
 - `examples/flow-routing-cases.json`：仅在修改 Flow 或进行语义回归验收时读取；不属于正常用户流程输入。

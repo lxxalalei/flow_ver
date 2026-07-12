@@ -75,7 +75,7 @@
     },
     "data": {
       "type": "object",
-      "required": ["status", "raw_request", "slots", "constraints", "search_concepts"],
+      "required": ["status", "raw_request"],
       "properties": {
         "status": {"enum": ["ready", "needs_clarification"]},
         "raw_request": {"type": "string", "minLength": 1},
@@ -136,13 +136,17 @@
         {
           "if": {"properties": {"status": {"const": "ready"}}},
           "then": {
+            "required": ["slots", "constraints", "search_concepts"],
             "properties": {"slots": {"required": ["core_topic"]}},
             "not": {"required": ["clarification"]}
           }
         },
         {
           "if": {"properties": {"status": {"const": "needs_clarification"}}},
-          "then": {"required": ["clarification"]}
+          "then": {
+            "required": ["clarification"],
+            "not": {"required": ["search_concepts"]}
+          }
         }
       ],
       "additionalProperties": false

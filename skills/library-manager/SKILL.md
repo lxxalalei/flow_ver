@@ -24,7 +24,7 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
 
 ## 资料库结构
 
-默认资料库根目录为 `~/成长资料库`；用户明确指定其他位置时使用其指定路径。根目录不存在时由模型创建，并在首次归档时创建 `{library_root}/.library/index.json`。不要求用户预先创建配置文件。分类、目录粒度、文件命名、附属文件、待确认目录、备份和空间管理全部按需读取 `references/library-structure.md`；本文件不重复维护目录规则。
+默认资料库根目录为 `~/成长资料库`；用户明确指定其他位置时使用其指定绝对路径。根目录、内部索引和事务目录由 `scripts/run_archive_plan.py` 创建和维护，模型不得直接移动文件或修改 `.library/index.json`。
 
 资料库内部至少维护：
 
@@ -32,7 +32,7 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
 - 元数据索引。
 - 内容指纹和 URL 等去重信息。
 
-模型负责归档时的分类、命名、移动、索引维护和结果写入；`scripts/dedup.py` 用于需要时的确定性去重，不替代模型的语义判断。
+模型负责分类、标签和目标名称等语义计划；执行器负责路径约束、内容指纹去重、文件提交、索引更新、回滚和结果写入。
 
 ## 归档流程
 
@@ -40,9 +40,46 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
 
 - 输入：同会话的 `stage1_intent.json`、`stage3_search_results.json`、`stage4_selection.json` 和 `stage5_download.json`。
 - 输出：`{session_dir}/stage6_archive.json`，Schema 为 `archive/v1`。
+- 执行计划：`{session_dir}/archive_plan.json`，Schema 为 `archive-plan/v1`。
 - 按 `resource_id` 读取需求语义、来源、质量和下载结果；不要求 Stage 5 重复这些字段。
 
-### 2. 入库前去重
+### 2. 生成归档计划
+
+模型为每条 Stage 5 结果填写一个计划项，只表达语义分类和命名，不填写最终绝对文件路径：
+
+```json
+{
+  "_meta": {"schema_version": "archive-plan/v1", "session_id": "继承 Stage 5"},
+  "data": {
+    "library_root": "/absolute/成长资料库",
+    "items": [
+      {
+        "resource_id": "bilibili:BV1example",
+        "primary_domain": "自然与科学",
+        "secondary_domains": [],
+        "audience": "child",
+        "age_or_grade": "8-10岁",
+        "topics": ["火山与地震"],
+        "resource_type": "视频",
+        "formats": ["MP4"],
+        "target_name": "火山形成过程"
+      }
+    ]
+  }
+}
+```
+
+Stage 5 已经 `failed` 的资源只写 `{"resource_id":"..."}`，执行器会直接生成对应归档失败结果，不要求模型补写分类。
+
+### 3. 事务化执行
+
+```bash
+python3 library-manager/scripts/run_archive_plan.py {session_dir}
+```
+
+执行器只接受本次会话 `downloads/` 内的普通文件。每条资源独立执行：计算 SHA-256、检查 `resource_id`、来源 URL 和内容指纹、复制到事务暂存区、提交正式文件、原子更新索引，最后清理下载副本。索引提交失败时删除已提交文件；中断后根据事务日志和索引恢复。
+
+### 4. 入库前去重
 
 按可靠性由高到低组合判断：
 
@@ -55,19 +92,19 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
 
 发现重复时按配置决定保留现有、替换、合并元数据或跳过；因重复跳过时记录 `duplicate_of`。
 
-### 3. 分类和命名
+### 5. 分类和命名
 
 根据资源现有的主题、成长领域、学科方向、适龄、类型和版本信息选择目录。每个资源只选择一个一级主分类，按资源核心内容和主要学习目标判断，不按家长辅助、亲子共用等使用方式判断；跨领域关联写入现有标签或索引，不复制文件到多个一级目录。只有不存在明确主次关系时才使用“综合主题”。分类、适龄或主题证据不足时使用“待确认”。
 
 文件名应简短、可识别并保留扩展名。详细规则只读取 `references/library-structure.md`。
 
-### 4. 保存不同下载状态
+### 6. 保存不同下载状态
 
 - `success`：移动完整文件并更新最终资料库路径。
 - `degraded`：保存预览、正文、摘要或链接记录，并保留降级说明。
 - `failed`：根据现有元数据决定保存来源链接、跳过或记录归档失败，不伪造本地文件。
 
-### 5. 更新索引
+### 7. 更新索引
 
 索引至少保留：
 
@@ -89,9 +126,9 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
 
 这些字段服务检索，不要求为每个字段新建目录，也不替代已有来源、版本、质量和下载状态等元数据。
 
-主索引位于 `{library_root}/.library/index.json`。首次创建时写入 `{"schema_version":"library-index/v1","resources":[]}`；后续由模型在每次归档、整理或删除时维护。索引更新与文件移动应作为同一归档操作；任一关键步骤失败时记录 `archive_error`。
+主索引位于 `{library_root}/.library/index.json`。首次归档时由执行器写入 `{"schema_version":"library-index/v1","resources":[]}`；后续只能通过资料库执行程序更新。索引与文件路径由 Stage 6 校验器交叉核对。
 
-### 6. 写入结果
+### 8. 写入结果
 
 每条 Stage 5 结果只写一条归档结果：
 
@@ -105,7 +142,8 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
   "_meta": {
     "schema_version": "archive/v1",
     "session_id": "继承上游",
-    "created_at": "ISO 8601"
+    "created_at": "ISO 8601",
+    "library_root": "/absolute/成长资料库"
   },
   "_summary": {
     "archived_count": 1,
@@ -150,7 +188,7 @@ description: 成长资料库管理 Skill。用于将 Stage 5 下载或降级结�
 - 跳过和失败均有可解释原因。
 - `_summary` 的三项计数必须能从 `data.results` 核对；只向 Flow 返回 `_summary` 和输出路径。
 
-写入后运行：
+正常流程直接运行统一执行器；需要独立复核时运行：
 
 ```bash
 python3 library-manager/scripts/validate_output.py {session_dir}
@@ -162,3 +200,5 @@ python3 library-manager/scripts/validate_output.py {session_dir}
 
 - `references/library-structure.md`：目录、命名、附属文件、备份和空间管理。
 - `scripts/dedup.py`：下载文件指纹、URL、标题和资料库索引去重实现。
+- `schemas/archive-plan.schema.json`：模型可写的归档语义计划。
+- `scripts/run_archive_plan.py`：事务化归档和索引更新的唯一入口。

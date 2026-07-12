@@ -10,14 +10,17 @@ import html
 import json
 import os
 import re
-import ssl
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from shared.http_client import urlopen_with_fallback
 
 
 USER_AGENT = (
@@ -27,11 +30,6 @@ USER_AGENT = (
 ALLOWED_ENGINES = {"qianfan", "duckduckgo", "bing", "baidu"}
 QIANFAN_WEB_SEARCH_URL = "https://qianfan.baidubce.com/v2/ai_search/web_search"
 QIANFAN_QUERY_UNITS_LIMIT = 72
-GENERIC_QUERY_WORDS = {
-    "儿童", "孩子", "小孩", "小朋友", "学生", "小学生", "青少年",
-    "学习", "资料", "资源", "素材", "内容", "适合", "了解", "推荐",
-    "入门", "免费", "大全",
-}
 
 
 class SearchEngineError(RuntimeError):
@@ -84,31 +82,6 @@ def _qianfan_query_and_sites(query: str) -> tuple[str, list[str]]:
             sites.append(parsed.hostname.lower())
     plain_query = re.sub(r"(?:^|\s)site:[^\s]+", " ", query, flags=re.I)
     return _truncate_qianfan_query(plain_query) or _truncate_qianfan_query(query), list(dict.fromkeys(sites))
-
-
-def _specific_query_terms(query: str) -> list[str]:
-    terms: list[str] = []
-    for part in re.split(r"[\s,，;；]+", query):
-        part = part.strip().strip("\"'“”‘’")
-        if not part or re.match(r"^(site|filetype):", part, re.I):
-            continue
-        term = part
-        for word in sorted(GENERIC_QUERY_WORDS, key=len, reverse=True):
-            term = term.replace(word, "")
-        term = re.sub(r"[^\w\u4e00-\u9fff-]+", "", term).strip("-_")
-        if len(term) >= 2 and term not in GENERIC_QUERY_WORDS:
-            terms.append(term.lower())
-    return list(dict.fromkeys(terms))
-
-
-def _matches_query_terms(item: dict[str, Any], terms: list[str]) -> bool:
-    if not terms:
-        return True
-    haystack = " ".join(
-        str(item.get(key) or "")
-        for key in ("title", "description", "source_url")
-    ).lower()
-    return any(term in haystack for term in terms)
 
 
 def _canonical_url(value: str, *, allow_baidu: bool = False) -> str:
@@ -254,19 +227,8 @@ def parse_duckduckgo_lite_results(page: str, query: str, limit: int) -> list[dic
 
 
 def _open_url(request: Request, timeout: float) -> tuple[bytes, str]:
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            return response.read(), response.headers.get_content_charset() or "utf-8"
-    except URLError as exc:
-        reason = getattr(exc, "reason", None)
-        if isinstance(reason, ssl.SSLCertVerificationError):
-            # Some managed Windows images ship a broken CA bundle for Python.
-            # Retry public search pages without certificate verification so the
-            # adapter can still produce candidates; Stage 3 stores only links.
-            context = ssl._create_unverified_context()
-            with urlopen(request, timeout=timeout, context=context) as response:
-                return response.read(), response.headers.get_content_charset() or "utf-8"
-        raise
+    with urlopen_with_fallback(request, timeout=timeout) as response:
+        return response.read(), response.headers.get_content_charset() or "utf-8"
 
 
 def _fetch(url: str, timeout: float, cookie: str = "") -> str:
@@ -379,7 +341,6 @@ def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[s
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     errors: list[dict[str, Any]] = []
-    query_terms = _specific_query_terms(query)
     per_engine_limit = max(limit, 1)
     qianfan_api_key = os.environ.get("QIANFAN_API_KEY", "").strip()
     skipped_engines = [engine for engine in engines if engine == "qianfan" and not qianfan_api_key]
@@ -447,6 +408,13 @@ def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[s
                     "message": str(exc),
                     "retryable": exc.retryable,
                 })
+            except (OSError, TimeoutError, URLError) as exc:
+                errors.append({
+                    "engine": engine,
+                    "error_code": "NETWORK_REQUEST_FAILED",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "retryable": True,
+                })
             except Exception as exc:  # Engine failures are isolated.
                 errors.append({
                     "engine": engine,
@@ -459,8 +427,6 @@ def search(query: str, engines: list[str], limit: int, timeout: float) -> dict[s
     for engine in active_engines:
         engine_results = completed.get(engine, [])
         for item in engine_results:
-            if not _matches_query_terms(item, query_terms):
-                continue
             canonical = _canonical_url(item["source_url"], allow_baidu=engine == "qianfan")
             if not canonical or canonical in seen:
                 continue

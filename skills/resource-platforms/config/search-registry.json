@@ -14,6 +14,9 @@
     "wechat": {"status": "available", "auth": "optional", "entry": "scripts/wechat/adapter.py", "timeout_seconds": 75, "runtime": {"optional_auth_env": ["SOGOU_WEIXIN_COOKIE"]}},
     "baiduwenku": {"status": "available", "auth": "none", "entry": "scripts/baiduwenku/adapter.py", "timeout_seconds": 45},
     "kepu": {"status": "available", "auth": "none", "entry": "scripts/kepu/adapter.py", "timeout_seconds": 45},
+    "nlc": {"status": "available", "auth": "none", "entry": "scripts/nlc/adapter.py", "timeout_seconds": 45},
+    "yixi": {"status": "available", "auth": "none", "entry": "scripts/yixi/adapter.py", "timeout_seconds": 45},
+    "runoob": {"status": "available", "auth": "none", "entry": "scripts/runoob/adapter.py", "timeout_seconds": 45},
     "cctv": {"status": "available", "auth": "none", "entry": "scripts/cctv/adapter.py", "timeout_seconds": 45}
   }
 }

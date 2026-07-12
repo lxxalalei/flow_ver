@@ -137,6 +137,7 @@
 {
   "data": {
     "status": "needs_clarification",
+    "raw_request": "帮我找点资料",
     "clarification": {
       "question": "目前最想让孩子了解或学习什么主题？",
       "reason": "当前请求还没有可用于搜索的主题"
@@ -145,7 +146,7 @@
 }
 ```
 
-`reason` 解释为什么必须问。已有槽位已经表达当前掌握的信息，不再额外维护 ambiguity 和 missing-information 列表。
+`reason` 解释为什么必须问。已经确认且确有价值的 `slots`、`constraints` 可以保留；没有内容时省略，不输出空对象。澄清状态不生成 `search_concepts`，也不再额外维护 ambiguity 和 missing-information 列表。
 
 ## 7. 持续澄清与停止条件
 

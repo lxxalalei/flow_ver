@@ -93,9 +93,19 @@ class CLISearchAdapter(SearchAdapter):
                     return self._process_error(self._diagnostic(proc) or str(exc))
                 return self._error("PARSE_FORMAT_NOT_SUPPORTED", str(exc), False)
         normalized = self._normalize_response(raw)
-        if proc.returncode != 0 and not normalized["results"] and not normalized["error"]:
+        if (
+            proc.returncode != 0
+            and not normalized["results"]
+            and not normalized["error"]
+            and not self._has_result_container(raw)
+        ):
             return self._process_error(self._diagnostic(proc))
         return normalized
+
+    def _has_result_container(self, raw: Any) -> bool:
+        return isinstance(raw, dict) and any(
+            isinstance(raw.get(key), list) for key in ("results", "candidates", "items")
+        )
 
     @staticmethod
     def _diagnostic(proc: subprocess.CompletedProcess[str]) -> str:
@@ -225,6 +235,8 @@ class CLISearchAdapter(SearchAdapter):
             "doc_id", "file_type", "page_num", "sell_type", "quality_score",
             "download_count", "source_id", "baiduwenku_scene",
             "site", "ar_id", "classify", "business_type", "keywords", "query",
+            "scope", "data_source", "source_database", "publisher",
+            "document_type", "isbn", "file_path",
         }
         return {
             key: value

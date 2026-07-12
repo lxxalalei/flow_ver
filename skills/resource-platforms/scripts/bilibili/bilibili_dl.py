@@ -32,7 +32,7 @@ import urllib.request
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from wbi_sign import wbi_sign, WBI_KEY_TABLE
 from shared.utils import safe_filename

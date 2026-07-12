@@ -150,16 +150,22 @@ Schema 约束输出结构，不替代语义推理。不要为了满足字段而�
 - 两条明确要求无法同时满足 → 指出冲突，只确认不能延后处理的差异。
 - "找几道数学练习题" → 不问，用户已说清要练习类。
 
-需要澄清时仍写入当前部分语义结果：
+需要澄清时只要求保留原始请求和澄清问题。已经确认且确有价值的 `slots`、`constraints` 可以保留；没有内容时省略，不输出空对象。此时不得生成 `search_concepts`，因为 Search 尚不能运行：
 
 ```json
 {
+  "_meta": {
+    "schema_version": "intent-spec/v1",
+    "session_id": "继承 request.json",
+    "created_at": "ISO 8601"
+  },
   "_summary": {
     "status": "needs_clarification",
     "question": "目前最想让孩子了解或学习什么主题？"
   },
   "data": {
     "status": "needs_clarification",
+    "raw_request": "帮我找点资料",
     "clarification": {
       "question": "目前最想让孩子了解或学习什么主题？",
       "reason": "当前请求还没有可用于搜索的主题"
@@ -168,7 +174,7 @@ Schema 约束输出结构，不替代语义推理。不要为了满足字段而�
 }
 ```
 
-写完后停止，不生成 Search 输入。Flow 负责向用户提问、更新 `request.json` 并重新调用本 Skill。
+写完后停止，不生成 Search 输入。Flow 负责向用户提问、更新 `request.json` 并重新调用本 Skill。只有状态变为 `ready` 后才生成完整的 `slots`、`constraints` 和 `search_concepts`。
 
 ### 5. 生成搜索概念，不生成查询
 

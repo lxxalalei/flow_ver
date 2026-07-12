@@ -1,6 +1,6 @@
 ---
 name: resource-selector
-description: 儿童成长资料候选筛选与用户选择 Skill。读取 Intent 与 Platform 的真实搜索结果，利用模型语义判断执行主题相关性、成长价值和儿童安全过滤、跨平台相似判断、证据化质量评分与排序，向用户展示候选，并在明确选择后写入 Stage 4。用于搜索完成后的候选审查，不执行搜索或下载。
+description: learning-resource-flow 内部 Stage 4 候选审查与用户选择 Skill。仅当 Flow 已创建会话，且 `{session_dir}/stage1_intent.json` 与 `{session_dir}/stage3_search_results.json` 均存在并通过对应阶段校验时调用；执行语义筛选、跨平台相似判断、证据化排序和选择交接。不要直接响应普通终端用户的完整资源搜索需求，也不执行新搜索或下载。
 ---
 
 # resource-selector
@@ -15,6 +15,8 @@ description: 儿童成长资料候选筛选与用户选择 Skill。读取 Intent
 
 - `{session_dir}/stage1_intent.json`
 - `{session_dir}/stage3_search_results.json`
+
+这是 `learning-resource-flow` 的内部 Stage 4，不是独立用户入口。任一阶段输入缺失或无效时，停止并把控制权交还 Flow，不自行补做需求澄清或搜索。
 
 私有工作文件：
 

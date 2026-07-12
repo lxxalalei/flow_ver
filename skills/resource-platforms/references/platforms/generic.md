@@ -6,9 +6,9 @@
 - 搜索脚本：`scripts/generic/generic_search.py`
 - 第三方依赖：无，仅使用 Python 标准库
 - 认证：DuckDuckGo、Bing、页面版百度通常不需要；`qianfan` 需要 `QIANFAN_API_KEY`，由 Flow 在计划实际选中该引擎时预检并注入。
-- 计划参数：`engines`，必须包含 `duckduckgo`，可按需额外包含 `qianfan`、`bing` 或 `baidu`
+- 计划参数：`engines`，必须包含 `duckduckgo`；中文网页默认使用无凭据的 `duckduckgo` 与 `bing`，可按需额外包含 `qianfan` 或 `baidu`
 
-Adapter 按计划把一条查询传给千帆、DuckDuckGo、Bing 或百度。多个引擎并行执行，任一引擎失败不取消其他引擎；最终按规范化 URL 去重，并在引擎合并后截取 `max_results`，不是每个引擎各返回 `max_results`。未注入千帆 Key 时，直接脚本跳过该引擎并保留其他无凭据引擎；正常 Flow 会在执行前先提醒用户配置或跳过。
+Adapter 按计划把一条查询传给千帆、DuckDuckGo、Bing 或百度。多个引擎并行执行，任一引擎失败不取消其他引擎；最终按规范化 URL 去重，并在引擎合并后截取 `max_results`，不是每个引擎各返回 `max_results`。只有计划明确选中 `qianfan` 时 Flow 才预检 Key 并在缺失时询问配置或跳过；普通搜索不会因千帆凭据暂停。
 
 ## 搜索路径
 
@@ -29,4 +29,4 @@ Adapter 按计划把一条查询传给千帆、DuckDuckGo、Bing 或百度。多
 
 ## 当前验证状态
 
-2026-07-10 中文网页搜索默认优先千帆、以 DuckDuckGo 兜底；没有 Key 时普通脚本仍可使用无凭据引擎。页面版百度可能触发安全验证，通用结果仍可能跑题；Platform 应保留部分成功和错误，Selector 负责过滤跑题网页。
+2026-07-10 中文网页搜索默认使用 DuckDuckGo 与 Bing，不要求凭据；千帆只在用户明确要求或环境已明确启用时加入。页面版百度可能触发安全验证，通用结果仍可能跑题；Platform 应保留部分成功和错误，Selector 负责过滤跑题网页。

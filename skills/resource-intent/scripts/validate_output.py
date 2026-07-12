@@ -85,7 +85,11 @@ def validate(document: dict[str, Any]) -> list[str]:
         errors.append("data.raw_request 必须是非空字符串")
 
     slots = data.get("slots")
-    if not isinstance(slots, dict):
+    if "slots" not in data:
+        if status == "ready":
+            errors.append("ready 状态必须提供 data.slots")
+        slots = {}
+    elif not isinstance(slots, dict):
         errors.append("data.slots 必须是 object")
         slots = {}
     extra_slots = set(slots) - SLOT_NAMES
@@ -136,7 +140,11 @@ def validate(document: dict[str, Any]) -> list[str]:
         errors.append(f"search_mode 非法: {search_mode!r}")
 
     constraints = data.get("constraints")
-    if not isinstance(constraints, dict):
+    if "constraints" not in data:
+        if status == "ready":
+            errors.append("ready 状态必须提供 data.constraints")
+        constraints = {}
+    elif not isinstance(constraints, dict):
         errors.append("data.constraints 必须是 object")
         constraints = {}
     elif set(constraints) - {"must", "prefer", "exclude"}:
@@ -150,7 +158,12 @@ def validate(document: dict[str, Any]) -> list[str]:
         errors.append(f"must 与 exclude 冲突: {sorted(must & excluded)}")
 
     concepts = data.get("search_concepts")
-    if not isinstance(concepts, dict):
+    if status == "needs_clarification" and "search_concepts" in data:
+        errors.append("needs_clarification 状态不得输出 data.search_concepts")
+    elif "search_concepts" not in data:
+        if status == "ready":
+            errors.append("ready 状态必须提供 data.search_concepts")
+    elif not isinstance(concepts, dict):
         errors.append("data.search_concepts 必须是 object")
     else:
         extra = set(concepts) - {"canonical_terms", "synonyms", "related_terms"}

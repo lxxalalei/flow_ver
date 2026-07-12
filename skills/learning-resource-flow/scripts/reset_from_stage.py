@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+
+from session_state import STAGE_OUTPUTS, ensure_current_manifest, save_manifest
 
 
 STAGE_ARTIFACTS: dict[int, tuple[str, ...]] = {
@@ -18,28 +16,9 @@ STAGE_ARTIFACTS: dict[int, tuple[str, ...]] = {
     2: ("stage2_search_plan.json",),
     3: ("stage3_search_results.json",),
     4: ("selector_input.json", "selector_worker_reviews", "selector_review.json", "stage4_selection.json"),
-    5: ("stage5_download.json", "downloads"),
-    6: ("stage6_archive.json",),
+    5: ("download_plan.json", "stage5_download.json", "downloads"),
+    6: ("archive_plan.json", "stage6_archive.json"),
 }
-
-
-def load_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"{path}: 根节点必须是 object")
-    return value
-
-
-def atomic_write(path: Path, document: dict[str, Any]) -> None:
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(document, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 def artifact_names(from_stage: int) -> list[str]:
@@ -52,8 +31,7 @@ def artifact_names(from_stage: int) -> list[str]:
 
 def reset(session_dir: Path, from_stage: int, dry_run: bool = False) -> dict[str, Any]:
     session_dir = session_dir.resolve()
-    manifest_path = session_dir / "manifest.json"
-    manifest = load_object(manifest_path)
+    manifest = ensure_current_manifest(session_dir)
     session_id = manifest.get("session_id")
     if not isinstance(session_id, str) or not session_id:
         raise ValueError("manifest.session_id 必须是非空字符串")
@@ -72,18 +50,17 @@ def reset(session_dir: Path, from_stage: int, dry_run: bool = False) -> dict[str
         elif path.is_dir():
             shutil.rmtree(path)
 
-    stages = manifest.get("stages")
-    if not isinstance(stages, dict):
-        stages = {}
-        manifest["stages"] = stages
+    stages = manifest["stages"]
     for stage in range(from_stage, 7):
-        stages[f"stage{stage}"] = {"status": "pending"}
+        stages[f"stage{stage}"] = {
+            "status": "pending",
+            "output": STAGE_OUTPUTS[stage],
+        }
     manifest["status"] = "in_progress"
     manifest["current_stage"] = from_stage
-    manifest["updated_at"] = datetime.now(timezone.utc).astimezone().isoformat()
     for field in ("error", "completed_at", "cancelled_at", "cancelled_stage"):
         manifest.pop(field, None)
-    atomic_write(manifest_path, manifest)
+    save_manifest(session_dir, manifest)
     return {"from_stage": from_stage, "removed": existing, "reset_stages": list(range(from_stage, 7))}
 
 

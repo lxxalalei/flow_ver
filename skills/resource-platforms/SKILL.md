@@ -83,6 +83,7 @@ Cookie、Token、浏览器状态路径和 CDP 地址只使用注册表及平台�
 
 - `_summary.resource_count` 等于 `data.resources` 数量。
 - `_summary.failed_platforms` 只包含完全没有成功结果且存在错误的平台。
+- `_summary.empty_platforms` 包含正常完成但没有返回资源、且没有错误的平台。
 - 执行器尝试每个计划任务；Stage 3 只持久化有效资源和真实错误，零结果且无错误的查询不增加占位记录。
 - 输出不包含搜索计划改写、跨平台筛选或下载结果。
 - 只向 Flow 返回 `_summary` 和输出路径。

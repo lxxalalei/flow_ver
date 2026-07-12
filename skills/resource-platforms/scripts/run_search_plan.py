@@ -186,15 +186,19 @@ def validate_output(document: dict[str, Any], plan: dict[str, Any]) -> list[str]
     if summary.get("resource_count") != len(resources):
         errors.append("_summary.resource_count 必须等于 data.resources 数量")
     expected_failed = []
+    expected_empty = []
     for task in plan.get("data", {}).get("search_tasks", []):
         platform = task.get("platform")
-        if (
-            not any(item.get("platform") == platform for item in resources if isinstance(item, dict))
-            and any(item.get("platform") == platform for item in stage_errors if isinstance(item, dict))
-        ):
+        has_resources = any(item.get("platform") == platform for item in resources if isinstance(item, dict))
+        has_errors = any(item.get("platform") == platform for item in stage_errors if isinstance(item, dict))
+        if not has_resources and has_errors:
             expected_failed.append(platform)
+        elif not has_resources:
+            expected_empty.append(platform)
     if summary.get("failed_platforms") != expected_failed:
         errors.append("_summary.failed_platforms 与资源和错误不一致")
+    if "empty_platforms" in summary and summary.get("empty_platforms") != expected_empty:
+        errors.append("_summary.empty_platforms 与资源和错误不一致")
     return errors
 
 
@@ -211,19 +215,26 @@ async def run(plan: dict[str, Any], registry_document: dict[str, Any]) -> dict[s
     resources = exact_dedup([item for result, _ in executions for item in result])
     errors = [error for _, task_errors in executions for error in task_errors]
     failed_platforms = []
+    empty_platforms = []
     for task in tasks:
         platform = task.get("platform")
         platform_results = [item for item in resources if item.get("platform") == platform]
         platform_errors = [item for item in errors if item.get("platform") == platform]
         if not platform_results and platform_errors:
             failed_platforms.append(platform)
+        elif not platform_results:
+            empty_platforms.append(platform)
     return {
         "_meta": {
             "schema_version": "platform-results/v1",
             "session_id": plan.get("_meta", {}).get("session_id", ""),
             "created_at": datetime.now(timezone.utc).astimezone().isoformat(),
         },
-        "_summary": {"resource_count": len(resources), "failed_platforms": failed_platforms},
+        "_summary": {
+            "resource_count": len(resources),
+            "failed_platforms": failed_platforms,
+            "empty_platforms": empty_platforms,
+        },
         "data": {"resources": resources, "errors": errors},
     }
 

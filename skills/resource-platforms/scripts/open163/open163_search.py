@@ -701,7 +701,7 @@ def main() -> int:
             cookie=args.cookie,
         )
         output_candidates(results, args.keyword, args.output)
-        return 0 if results else 1
+        return 0
 
     parser.print_help()
     return 1

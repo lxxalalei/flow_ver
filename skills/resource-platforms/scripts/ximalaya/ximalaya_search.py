@@ -711,7 +711,7 @@ def main() -> int:
             sort_by=args.sort,
         )
         output_candidates(results, args.keyword, args.core, args.output)
-        return 0 if results else 1
+        return 0
 
     parser.print_help()
     return 1

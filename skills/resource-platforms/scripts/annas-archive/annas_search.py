@@ -501,7 +501,7 @@ def main() -> int:
             max_results=max(1, min(args.max, 100)),
         )
         output_results(results, args.query, args.core, args.output)
-        return 0 if results else 1
+        return 0
     
     parser.print_help()
     return 1

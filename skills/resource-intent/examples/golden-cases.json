@@ -36,6 +36,16 @@
       }
     },
     {
+      "id": "open-programming-user-authorized",
+      "request": "想让孩子学编程，先看看有哪些适合儿童的入门方向，你来决定",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["core_topic"],
+        "omitted_slots": ["resource_types", "format_preferences", "file_formats"],
+        "must_not_clarify": ["learning_goal", "platform", "resource_types"]
+      }
+    },
+    {
       "id": "user-delegates-choice",
       "request": "想找点恐龙科普，形式你看着办",
       "expect": {

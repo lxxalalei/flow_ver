@@ -25,6 +25,39 @@ def validate(download: dict[str, Any], archive: dict[str, Any]) -> list[str]:
         errors.append("Stage 6 schema_version 必须为 archive/v1")
     if meta.get("session_id") != download.get("_meta", {}).get("session_id"):
         errors.append("Stage 6 session_id 必须继承 Stage 5")
+    library_root_value = meta.get("library_root")
+    if not isinstance(library_root_value, str) or not library_root_value.strip():
+        errors.append("Stage 6 _meta.library_root 必须是非空绝对路径")
+        library_root = None
+    else:
+        library_root = Path(library_root_value).expanduser()
+        if not library_root.is_absolute():
+            errors.append("Stage 6 _meta.library_root 必须是绝对路径")
+            library_root = None
+        else:
+            library_root = library_root.resolve()
+    index_resources: dict[str, dict[str, Any]] = {}
+    if library_root is not None:
+        index_path = library_root / ".library" / "index.json"
+        try:
+            index = load_object(index_path)
+            if index.get("schema_version") != "library-index/v1" or not isinstance(index.get("resources"), list):
+                errors.append("资料库索引必须符合 library-index/v1")
+            else:
+                index_ids = [
+                    item.get("resource_id")
+                    for item in index["resources"]
+                    if isinstance(item, dict) and isinstance(item.get("resource_id"), str)
+                ]
+                if len(index_ids) != len(set(index_ids)):
+                    errors.append("资料库索引 resource_id 不得重复")
+                index_resources = {
+                    item.get("resource_id"): item
+                    for item in index["resources"]
+                    if isinstance(item, dict) and isinstance(item.get("resource_id"), str)
+                }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(f"无法读取资料库索引: {exc}")
     results = data.get("results") if isinstance(data, dict) else None
     if not isinstance(results, list):
         return errors + ["Stage 6 data.results 必须是 array"]
@@ -60,14 +93,37 @@ def validate(download: dict[str, Any], archive: dict[str, Any]) -> list[str]:
                 library_path = Path(path).expanduser()
                 if not library_path.is_absolute():
                     errors.append(f"{prefix}.library_paths 必须使用绝对路径: {path}")
-                elif not library_path.exists():
+                    continue
+                try:
+                    resolved = library_path.resolve(strict=True)
+                except OSError:
                     errors.append(f"{prefix}.library_paths 路径不存在: {path}")
+                    continue
+                if not resolved.is_file():
+                    errors.append(f"{prefix}.library_paths 必须指向文件: {path}")
+                if library_root is not None and resolved != library_root and library_root not in resolved.parents:
+                    errors.append(f"{prefix}.library_paths 必须位于资料库根目录: {path}")
+                if library_path.is_symlink():
+                    errors.append(f"{prefix}.library_paths 不得使用符号链接: {path}")
+            indexed = index_resources.get(resource_id)
+            if not isinstance(indexed, dict):
+                errors.append(f"{prefix} archived 资源必须存在于资料库索引")
+            elif set(indexed.get("library_paths") or []) != set(paths):
+                errors.append(f"{prefix}.library_paths 必须与资料库索引一致")
         if status == "skipped" and (
             not isinstance(item.get("duplicate_of"), str) or not item["duplicate_of"].strip()
         ):
             errors.append(f"{prefix} skipped 时必须提供 duplicate_of")
+        elif status == "skipped":
+            duplicate = index_resources.get(item.get("duplicate_of"))
+            if not isinstance(duplicate, dict):
+                errors.append(f"{prefix}.duplicate_of 必须引用资料库索引中的资源")
+            elif set(paths) != set(duplicate.get("library_paths") or []):
+                errors.append(f"{prefix}.library_paths 必须与 duplicate_of 的索引路径一致")
         if status == "failed" and not isinstance(item.get("archive_error"), dict):
             errors.append(f"{prefix} failed 时必须提供 archive_error")
+        if status == "failed" and paths:
+            errors.append(f"{prefix} failed 的 library_paths 必须为空")
 
     comparable_ids = all(isinstance(value, str) and value for value in actual_ids + expected_ids)
     if not comparable_ids or len(actual_ids) != len(set(actual_ids)) or set(actual_ids) != set(expected_ids):

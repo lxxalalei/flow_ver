@@ -1,6 +1,6 @@
 ---
 name: resource-search
-description: 为孩子及其家长规划主题开放的成长资料搜索。将已确认的需求转化为多平台搜索计划，理解成长主题、目标、适龄表达、使用场景和资源形态，动态判断去哪里搜索、各平台搜索什么；生成查询词和真实接口参数，但不执行搜索、筛选结果或下载资源。
+description: learning-resource-flow 内部 Stage 2 搜索规划 Skill。仅当 Flow 已创建会话，且 `{session_dir}/stage1_intent.json` 存在、校验通过并处于 ready 状态时调用；将已确认需求转化为多平台搜索计划，生成查询词和真实接口参数。不要直接响应普通终端用户的完整资源搜索需求，也不执行搜索、筛选或下载。
 ---
 
 # resource-search
@@ -8,6 +8,8 @@ description: 为孩子及其家长规划主题开放的成长资料搜索。将�
 ## 目标
 
 读取 `{session_dir}/stage1_intent.json`，为下一阶段生成 `{session_dir}/stage2_search_plan.json`。
+
+这是 `learning-resource-flow` 的内部 Stage 2，不是独立用户入口。缺少已校验且 `data.status=ready` 的 Stage 1 文件时，停止并把控制权交还 Flow，不直接接管用户需求。
 
 为孩子及其家长搜集能够帮助理解世界、理解自己、发展能力、建立习惯、获得体验或完成学习目标的成长资料。先判断资源由孩子直接使用，还是由家长理解、选择或组织后陪伴孩子使用；搜索方向和平台选择应与这个角色一致。
 
@@ -46,7 +48,7 @@ Intent 尚未就绪时停止，不重新澄清或改写上游需求。
 
 形成平台方案后读取 `config/platform-catalog.json`，排除当前不可执行的平台，并确认认证条件。Catalog 不替代语义判断，也不根据固定字段自动选平台。
 
-默认加入一个 `generic` 任务，用于发现未接入站点、长尾网页和具体文件；每条 generic 搜索的 `params.engines` 必须包含 `duckduckgo`。中文网页或白名单查询默认使用 `["qianfan", "duckduckgo"]`，将千帆放在前面以优先取得稳定的中文网页结果；用户明确不要使用需凭据接口时只保留无凭据引擎，也可按需额外加入 `bing` 或 `baidu`。当用户明确要求只搜索某个原生平台，或明确排除通用网页搜索时，不生成 generic 任务。用户只限定某个网站时，仍可使用 generic，但所有查询必须以该网站的 `site:` 范围约束。
+默认加入一个 `generic` 任务，用于发现未接入站点、长尾网页和具体文件；每条 generic 搜索的 `params.engines` 必须包含 `duckduckgo`。中文网页或白名单查询默认使用无凭据引擎 `["duckduckgo", "bing"]`。只有用户明确要求使用千帆，或 Flow、执行环境明确表明千帆已配置并启用时，才把 `qianfan` 加入引擎列表；不得为了普通搜索询问 API Key。其他引擎仅在明确需要且 catalog 显示可执行时加入。当用户明确要求只搜索某个原生平台，或明确排除通用网页搜索时，不生成 generic 任务。用户只限定某个网站时，仍可使用 generic，但所有查询必须以该网站的 `site:` 范围约束。
 
 ### 3. 生成差异化查询
 
@@ -102,7 +104,7 @@ Intent 尚未就绪时停止，不重新澄清或改写上游需求。
 - 查询保留主题核心，扩展角度与需求相关。
 - 用户约束得到体现，召回假设没有被写成强制条件。
 - 所有平台和 `params` 均由 catalog 支持。
-- 最多包含一个 `generic` 任务；未包含 generic 时，必须能从 Intent 的明确表述确认用户限定只搜索原生平台或排除通用网页搜索。若包含 generic，每条搜索的 `params.engines` 都包含 `duckduckgo`。
+- 最多包含一个 `generic` 任务；未包含 generic 时，必须能从 Intent 的明确表述确认用户限定只搜索原生平台或排除通用网页搜索。若包含 generic，每条搜索的 `params.engines` 都包含 `duckduckgo`；中文 generic 未明确启用其他引擎时使用 `["duckduckgo", "bing"]`，不因普通搜索请求千帆凭据。
 - **互补形态探索**：未限定形态时，默认覆盖两个与主题相关且学习体验不同的方向；宽泛或 exhaustive 需求通常覆盖三个。明确限定形态、窄任务或单一形态足以满足目标时允许收敛。只在文件材料确有帮助时使用 `filetype:` 查询。
 
 运行：

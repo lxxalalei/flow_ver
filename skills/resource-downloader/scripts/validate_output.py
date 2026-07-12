@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from content_validation import validate_download_file
+
 
 def load_object(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -29,6 +31,36 @@ def error_is_valid(value: Any) -> bool:
 
 def validate(session_dir: Path, selection: dict[str, Any], stage3: dict[str, Any], output: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    downloads_root = (session_dir / "downloads").resolve()
+    archived_results: dict[str, dict[str, Any]] = {}
+    archive_path = session_dir / "stage6_archive.json"
+    if archive_path.is_file():
+        try:
+            archive = load_object(archive_path)
+            if archive.get("_meta", {}).get("session_id") == output.get("_meta", {}).get("session_id"):
+                archived_results = {
+                    item.get("resource_id"): item
+                    for item in archive.get("data", {}).get("results", [])
+                    if isinstance(item, dict) and isinstance(item.get("resource_id"), str)
+                }
+        except (OSError, ValueError, json.JSONDecodeError):
+            archived_results = {}
+
+    def has_archived_replacement(resource_id: Any) -> bool:
+        archived = archived_results.get(resource_id)
+        if not isinstance(archived, dict) or archived.get("archive_status") not in {"archived", "skipped"}:
+            return False
+        paths = archived.get("library_paths")
+        return (
+            isinstance(paths, list)
+            and bool(paths)
+            and all(
+                isinstance(raw_path, str)
+                and Path(raw_path).is_absolute()
+                and Path(raw_path).resolve().is_file()
+                for raw_path in paths
+            )
+        )
     selection_meta = selection.get("_meta", {})
     meta = output.get("_meta", {})
     summary = output.get("_summary", {})
@@ -81,9 +113,36 @@ def validate(session_dir: Path, selection: dict[str, Any], stage3: dict[str, Any
             for raw_path in files:
                 path = Path(raw_path)
                 if not path.is_absolute():
-                    path = session_dir / path
-                if not path.is_file():
-                    errors.append(f"{prefix}.files 文件不存在: {raw_path}")
+                    errors.append(f"{prefix}.files 必须使用绝对路径: {raw_path}")
+                    continue
+                try:
+                    resolved = path.resolve(strict=True)
+                except OSError:
+                    if not has_archived_replacement(resource_id):
+                        errors.append(f"{prefix}.files 文件不存在: {raw_path}")
+                    continue
+                if not resolved.is_file():
+                    errors.append(f"{prefix}.files 不是文件: {raw_path}")
+                    continue
+                if resolved == downloads_root or downloads_root not in resolved.parents:
+                    errors.append(f"{prefix}.files 必须位于本次会话 downloads 目录: {raw_path}")
+                if path.is_symlink():
+                    errors.append(f"{prefix}.files 不得使用符号链接: {raw_path}")
+                validation = validate_download_file(resolved)
+                if not validation.get("valid"):
+                    issues = validation.get("errors")
+                    messages = [
+                        str(issue.get("message"))
+                        for issue in issues
+                        if isinstance(issue, dict) and issue.get("message")
+                    ] if isinstance(issues, list) else []
+                    errors.append(f"{prefix}.files 内容校验失败: {raw_path}: {'; '.join(messages) or '未知格式或损坏文件'}")
+                try:
+                    relative = resolved.relative_to(downloads_root)
+                    if relative.parts and relative.parts[0] == ".partial":
+                        errors.append(f"{prefix}.files 不得指向未完成下载目录: {raw_path}")
+                except ValueError:
+                    pass
         if status == "success" and ("degraded_level" in item or "error" in item):
             errors.append(f"{prefix} success 不得包含 degraded_level 或 error")
         if status == "degraded":

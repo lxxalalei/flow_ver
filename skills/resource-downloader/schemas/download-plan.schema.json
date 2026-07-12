@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "download-plan/v1",
+  "type": "object",
+  "required": ["_meta", "data"],
+  "properties": {
+    "_meta": {
+      "type": "object",
+      "required": ["schema_version", "session_id"],
+      "properties": {
+        "schema_version": {"const": "download-plan/v1"},
+        "session_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "object",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["resource_id"],
+            "properties": {
+              "resource_id": {"type": "string", "minLength": 1},
+              "strategy": {"enum": ["auto", "platform", "direct", "webpage", "metadata"]},
+              "allow_metadata_fallback": {"type": "boolean"},
+              "filename": {"type": "string", "minLength": 1},
+              "formats": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "expected_formats": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "max_bytes": {"type": "integer", "minimum": 1},
+              "timeout_seconds": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

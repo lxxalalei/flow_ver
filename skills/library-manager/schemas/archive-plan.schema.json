@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "archive-plan/v1",
+  "type": "object",
+  "required": ["_meta", "data"],
+  "properties": {
+    "_meta": {
+      "type": "object",
+      "required": ["schema_version", "session_id"],
+      "properties": {
+        "schema_version": {"const": "archive-plan/v1"},
+        "session_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "object",
+      "required": ["library_root", "items"],
+      "properties": {
+        "library_root": {"type": "string", "minLength": 1},
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["resource_id"],
+            "properties": {
+              "resource_id": {"type": "string", "minLength": 1},
+              "primary_domain": {"type": "string", "minLength": 1},
+              "secondary_domains": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "audience": {"enum": ["child", "parent", "family", "unknown"]},
+              "age_or_grade": {"type": "string", "minLength": 1},
+              "topics": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "minLength": 1}},
+              "resource_type": {"type": "string", "minLength": 1},
+              "formats": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+              "target_name": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

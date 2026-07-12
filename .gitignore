@@ -1,1 +1,3 @@
 skills/.learning-resource-flow/
+__pycache__/
+*.pyc

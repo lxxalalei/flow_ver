@@ -18,7 +18,7 @@ from typing import Any
 
 
 BASE_URL = "https://www.kepuchina.cn"
-SEARCH_URL = BASE_URL + "/search?keyword={query}"
+SEARCH_URL = BASE_URL + "/search/index?search={query}&search_type=0"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"

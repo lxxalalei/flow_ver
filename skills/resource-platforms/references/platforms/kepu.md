@@ -11,7 +11,7 @@
 
 第一版使用科普中国公开搜索页：
 
-`https://www.kepuchina.cn/search?keyword={query}`
+`https://www.kepuchina.cn/search/index?search={query}&search_type=0`
 
 脚本解析服务端返回的搜索结果卡片，输出文章/视频标题、详情页、摘要、来源、发布日期、封面和关键词。当前不聚合中国数字科技馆，因为实测公开搜索入口会循环重定向，暂不够稳定。
 

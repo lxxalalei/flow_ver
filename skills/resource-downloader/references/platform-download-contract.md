@@ -1,77 +1,52 @@
-# 平台下载接口契约
+# 平台单资源下载接口
 
-本契约用于 Downloader 调用已有平台下载脚本时约束单资源结果。重试、降级选择和最终 Stage 5 文件由 Downloader 负责。
+平台脚本只负责把一个已选资源写入指定临时目录。重试、校验、降级、Stage 5 结果和正式目录提交全部由 Downloader 统一执行器负责。
 
-## 输入
+## 命令接口
 
-```json
-{
-  "resource_id": "bilibili:BV1example",
-  "source_url": "https://www.bilibili.com/video/BV1example",
-  "output_dir": "/absolute/session/downloads",
-  "params": {"quality": "auto"}
-}
+每个平台入口至少支持：
+
+```bash
+python scripts/platforms/{platform}_download.py download <source_url> -o <output_dir>
 ```
 
-| 字段 | 必填 | 说明 |
-|---|:---:|---|
-| `resource_id` | 是 | Stage 3 稳定 ID |
-| `source_url` | 是 | 原始来源地址 |
-| `output_dir` | 是 | 绝对下载目录 |
-| `params` | 否 | 只有当前平台入口明确支持时才传递 |
+- `source_url`：Stage 3 的公开来源地址。
+- `output_dir`：Downloader 创建的绝对 `.partial/` 临时目录。
+- 成功返回码为 `0`，并至少产生一个普通文件。
+- 失败返回非 `0`，向 stderr 输出简洁、可分类的原因。
+- 不向 stdout 输出凭据、Cookie、token 或大段页面内容。
+- 入口只能取得预览、替代版本或公开文稿时，可在 stdout 输出 `Level 1`—`Level 3` 产物提示；最终状态仍由 Downloader 根据文件和提示统一生成。
 
-调用哪个 adapter 已经确定平台，因此不重复传 `platform`。超时、重试次数、认证和是否降级属于运行配置，不写入资源数据；凭证只通过安全运行环境传递。
+入口可以按平台支持以下可选参数：
 
-## 输出
+- `--cookie <path>`：安全运行环境提供的 Cookie 文件。
+- `--cdp <url>`：用户已经授权的浏览器会话。
+- `--timeout <seconds>`、`--max-bytes <bytes>`：执行限制。
+- 平台明确需要的格式筛选参数。
 
-成功：
+## 文件规则
 
-```json
-{
-  "resource_id": "bilibili:BV1example",
-  "download_status": "success",
-  "files": ["/absolute/session/downloads/example.mp4"]
-}
-```
+- 只写入 `output_dir`，不得引用或移动电脑中其他既有文件。
+- 不创建符号链接、快捷方式或指向外部路径的清单。
+- 临时分片在脚本返回前完成合并或清理；未完成文件不能伪装为成功。
+- 文件名应稳定、安全，并保留可识别扩展名。
+- 可以产生字幕、封面和 JSON 等 sidecar；至少一个主文件必须与资源能力相符。
 
-降级：
+Downloader 会在脚本返回后统一检查：
 
-```json
-{
-  "resource_id": "bilibili:BV1example",
-  "download_status": "degraded",
-  "degraded_level": "Level 2",
-  "files": ["/absolute/session/downloads/example-summary.md"],
-  "error": {
-    "error_code": "CONTENT_PREMIUM_ONLY",
-    "message": "原文件需要付费，已保存公开摘要",
-    "retryable": false
-  }
-}
-```
+- 进程退出码和超时。
+- 文件是否存在、是否位于临时目录、是否为符号链接。
+- 文件魔数、容器结构、错误 HTML 页面和期望格式。
+- 全部通过后才原子提交到 `{session_dir}/downloads/`。
 
-失败：
+## 职责边界
 
-```json
-{
-  "resource_id": "bilibili:BV1example",
-  "download_status": "failed",
-  "files": [],
-  "error": {
-    "error_code": "CONTENT_NOT_FOUND",
-    "message": "内容不存在或已删除",
-    "retryable": false
-  }
-}
-```
+平台入口不负责：
 
-规则：
+- 搜索、推荐、评分或替换资源。
+- 生成 `stage5_download.json`。
+- 单独写入最终 Level 0—3、决定是否重试或是否元数据降级。
+- 决定正式资料库目录。
+- 绕过登录、付费墙、DRM、验证码、地区限制或其他访问控制。
 
-- `success`：至少一个真实文件，不写 `degraded_level` 或 `error`。
-- `degraded`：`degraded_level` 为 Level 1—3，至少一个保存降级内容的文件，并提供 `error` 说明原因。
-- `failed`：`files=[]`，必须提供 `error`。
-- Level 2/3 内容必须先落盘，不把大段正文嵌入接口 JSON。
-- 文件大小、格式和校验值按需从文件读取，不作为跨 Skill 必填字段。
-- 平台入口不推荐替代资源、不生成最终质量等级、不决定归档位置。
-
-错误码统一见 `error-codes.md`。
+新增平台后，在 `run_download_plan.py` 注册入口，并通过 `platform_is_applicable()` 限制适用资源类型。

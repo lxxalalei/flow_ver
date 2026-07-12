@@ -71,6 +71,23 @@
       "auth": "none",
       "search_parameters": {}
     },
+    "nlc": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {
+        "scope": {"type": "string", "allowed": ["catalog", "site", "digital", "ebook"]}
+      }
+    },
+    "yixi": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
+    "runoob": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
     "cctv": {
       "planning_status": "available",
       "auth": "none",

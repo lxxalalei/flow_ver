@@ -1,6 +1,6 @@
 ---
 name: resource-downloader
-description: 成长资料下载调度器。读取用户已确认的资源，根据来源平台、资源页和已授权访问条件选择专属下载能力或通用下载方式，执行重试和 Level 0-3 降级，并输出完整下载结果。用于流水线 Stage 5，不负责搜索、筛选、评分或归档。
+description: 成长资料下载调度器。用于流水线 Stage 5，读取用户已确认的资源，自动选择平台单资源下载、公开文件直链或网页正文归档，校验文件真实格式和完整性，执行受控重试与 Level 0-3 降级并输出下载结果。不负责搜索、筛选、评分或正式归档。
 ---
 
 # resource-downloader
@@ -19,44 +19,62 @@ description: 成长资料下载调度器。读取用户已确认的资源，根�
 
 本 Skill 拥有 `download/v1` 的输出格式。输入只引用 Stage 3 的来源信息和 Stage 4 的用户选择，不复制它们的完整资源字段。
 
-模型负责本阶段的下载判断、工具调用、文件写入和结果组织；已有脚本是优先使用的可靠工具，不是必须经过的统一调度层。
+模型通常只需列出待下载的 `resource_id`；`scripts/run_download_plan.py` 默认使用 `auto` 自动选择平台下载、文件直链或网页归档。只有用户明确限制结果形态时，模型才覆盖策略。执行器是唯一执行入口，负责工具调用、临时目录、超时、文件校验、降级和结果写入。模型不得直接运行平台下载命令或手工写 `stage5_download.json`。
 
 ## 输入
 
 - 会话目录：绝对 `{session_dir}`。
 - 输入文件：`{session_dir}/stage4_selection.json` 和 `stage3_search_results.json`。
 - 输出文件：`{session_dir}/stage5_download.json`，Schema 为 `download/v1`。
+- 执行计划：`{session_dir}/download_plan.json`，Schema 为 `download-plan/v1`。
 - 下载目录：`{session_dir}/downloads/`。
 
 只有 Stage 4 `data.status=selected` 且 `data.selected` 非空时执行。每个选择必须能按 `resource_id` 在 Stage 3 找到唯一资源。
 
 ## 执行流程
 
-### 1. 确定下载通道
+### 1. 生成下载计划
 
-Downloader 不读取 Platform 的搜索注册表。模型根据资源页面、平台说明和当前可用访问条件判断下载路径：优先使用 `scripts/platforms/` 中已有的平台下载脚本；没有专属脚本时，根据 `references/download-methods.md` 选择合适的通用方法。来源 URL 只是候选入口，不把它当作保证可完整下载的直链。需要 Cookie、token 或浏览器会话时，只通过环境变量、配置或运行时会话传递，不写入阶段文件。
+每个 Stage 4 选择恰好写一项。`strategy` 可省略，省略时默认为 `auto`：
 
-执行已有平台下载脚本前，由模型读取 Platform 共用的本地凭据约定和对应平台文档，再把当前下载需要的凭据注入环境变量。需要登录但凭据缺失或失效时，停止无意义重试并询问用户是否需要协助配置。配置完成后重新调用下载脚本；不把凭据写入下载结果或日志。
+- `auto`：优先使用适用的平台入口；无入口时根据 URL 选择文件直链或网页归档，并执行受控降级。
+- `platform`：使用受支持的平台单资源下载入口。
+- `direct`：仅用于确认是公开 `http/https` 文件直链的资源。
+- `webpage`：保存公开来源页 HTML、可读 Markdown 和页面元数据，结果为 Level 2。
+- `metadata`：明确只保存标题、简介和来源链接，结果为 Level 3 降级。
 
-平台入口、认证和限制需要进一步确认时，按需读取 `../resource-platforms/references/platforms/{platform}.md`。
+```json
+{
+  "_meta": {"schema_version": "download-plan/v1", "session_id": "继承 Stage 4"},
+  "data": {
+    "items": [
+      {
+        "resource_id": "bilibili:BV1example",
+        "strategy": "auto",
+        "allow_metadata_fallback": true
+      }
+    ]
+  }
+}
+```
 
-### 2. 执行与进度
+凭据只通过环境变量或已有安全会话提供，不写入计划。没有明确要求时使用 `auto`；只有已确认文件直链时才显式使用 `direct`。
 
-- 逐条处理用户选择，必要时限制并发。
-- 文件先写入临时目录，完成后再移动到 `{session_dir}/downloads/`。
-- 每条资源始终产生一条结果，不因失败从数组删除。
-- 进度只展示当前数量、标题和状态，不输出凭证或内部堆栈。
+`formats` 只传给明确支持源格式筛选的平台入口；需要约束最终文件格式时使用 `expected_formats`。两者都不是必填字段。
 
-### 3. 重试
+通用 HTTP 下载默认只访问公网地址，并检查重定向目标；本机、内网和保留地址不会自动访问。确有受信任内网资料需求时，只能由运行环境显式设置 `LRS_ALLOW_PRIVATE_NETWORK=1`。
 
-根据统一错误对象的 `retryable` 决定是否重试：
+### 2. 统一执行
 
-- 网络超时、连接失败：有限次数退避重试。
-- 限流：降低频率并延迟重试。
-- 登录过期：存在安全刷新路径时重试一次。
-- 内容不存在、付费限制、DRM、验证码：不做无意义重试，直接进入降级或失败。
+```bash
+python3 resource-downloader/scripts/run_download_plan.py {session_dir}
+```
 
-完整下载错误码与建议动作读取 `references/error-codes.md`。
+执行器保证文件先写入 `{session_dir}/downloads/.partial/`，完成格式、内容和符号链接检查后再原子提交到正式下载目录。任何成功或降级文件都必须位于本次会话 `downloads/`；不允许引用电脑中的既有外部文件。
+
+### 3. 错误和降级
+
+执行器负责将依赖、认证、超时、付费、格式损坏和下载失败转换为结构化错误。`auto` 会按“平台或文件 → 网页正文 → 元数据”降级；`allow_metadata_fallback=true` 时最终失败会保存 `source.md` 并输出 Level 3，否则输出失败。执行器不绕过登录、付费墙、DRM、验证码或其他访问控制。
 
 ### 4. Level 0-3 降级
 
@@ -113,7 +131,7 @@ Level 2/3 的正文、摘要或来源记录先保存成文件，再把路径写�
 - 所有失败或降级均有结构化原因。
 - `_summary` 的三项计数必须能从 `data.results` 核对；只向 Flow 返回 `_summary` 和输出路径。
 
-写入后运行：
+正常流程直接运行统一执行器；需要独立复核时运行：
 
 ```bash
 python3 resource-downloader/scripts/validate_output.py {session_dir}
@@ -127,3 +145,5 @@ python3 resource-downloader/scripts/validate_output.py {session_dir}
 - `references/troubleshooting.md`：具体故障排查。
 - `references/platform-download-contract.md`：平台下载脚本的接口约定。
 - `references/error-codes.md`：下载错误码。
+- `schemas/download-plan.schema.json`：模型可写的受限下载计划。
+- `scripts/run_download_plan.py`：唯一下载执行入口。

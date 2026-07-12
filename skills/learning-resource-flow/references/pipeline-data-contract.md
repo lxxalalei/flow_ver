@@ -23,7 +23,7 @@
 | `stage5_download.json` | `download/v1` | resource-downloader | library-manager |
 | `stage6_archive.json` | `archive/v1` | library-manager | learning-resource-flow |
 
-`manifest.json` 由 Flow 独立维护，不作为业务数据输入。
+`manifest.json` 由 Flow 通过 `learning-resource-flow/scripts/session_state.py` 独立维护，不作为业务数据输入。恢复前运行 `inspect`；格式不符合 `session-manifest/v1` 时直接失败，模型不得直接修改 manifest。
 
 ## 阶段边界
 
@@ -35,7 +35,7 @@
 ### intent-spec/v1
 
 - `_summary.status` 与 `data.status` 一致，值为 `ready` 或 `needs_clarification`。
-- `data` 必含 `raw_request`、`slots`、`constraints`、`search_concepts`。
+- `data.raw_request` 始终必填。`ready` 时必须包含 `slots`、`constraints`、`search_concepts`；`needs_clarification` 时只强制包含 `clarification`，可保留已有的非空 `slots`、`constraints`，不得生成 `search_concepts`。
 - 槽位出现时必须有非空 `value`；数组槽位不得为空或重复。
 - `needs_clarification` 时必须有唯一问题；`ready` 时必须有 `core_topic`。
 
@@ -51,6 +51,7 @@
 - `_summary.resource_count` 等于 `data.resources` 数量。
 - 每条资源必含 `resource_id`、`platform`、`title`、`source_url`。
 - `data.errors[]` 只记录真实错误，包含 `platform`、`error_code`、`message`、`retryable`；零结果不是错误。
+- `_summary.empty_platforms[]` 记录正常完成但没有资源、且没有错误的平台。
 
 ### selection/v1
 
@@ -64,6 +65,7 @@
 - `download_status` 为 `success`、`degraded` 或 `failed`。
 - 成功和降级必须有真实文件；降级和失败必须有结构化 `error`；失败文件数组为空。
 - `_summary` 的成功、降级和失败计数从结果数组计算。
+- 成功和降级文件必须位于本次会话 `downloads/`，不得引用外部文件或符号链接。
 
 ### archive/v1
 
@@ -71,3 +73,4 @@
 - `archive_status` 为 `archived`、`skipped` 或 `failed`。
 - `archived` 必须有资料库路径；`skipped` 只表示重复并必须有 `duplicate_of`；`failed` 必须有 `archive_error`。
 - `_summary` 的归档、跳过和失败计数从结果数组计算。
+- `_meta.library_root` 是归档计划指定的绝对资料库根目录；已归档路径必须位于该目录并与 `.library/index.json` 一致。

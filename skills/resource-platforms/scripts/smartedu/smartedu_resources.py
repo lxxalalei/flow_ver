@@ -424,7 +424,7 @@ def run_scan_catalog(args: argparse.Namespace) -> int:
         },
     }
     write_output(args.output, output)
-    return 0 if candidates else 1
+    return 0
 
 
 def candidate_key(candidate: dict[str, Any]) -> str:
@@ -498,7 +498,7 @@ def run_scan_site(args: argparse.Namespace) -> int:
         },
     }
     write_output(args.output, output)
-    return 0 if candidates else 1
+    return 0
 
 
 def run_page_profile(args: argparse.Namespace) -> int:
