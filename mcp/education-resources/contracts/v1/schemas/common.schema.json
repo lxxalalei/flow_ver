@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v1/schemas/common.schema.json",
+  "title": "Education Resource MCP common definitions v1",
+  "$defs": {
+    "contract_version": {"type": "string", "const": "1.0.0"},
+    "flow_id": {"type": "string", "pattern": "^flow_[A-Za-z0-9_-]{16,64}$"},
+    "resource_id": {"type": "string", "pattern": "^res_[A-Za-z0-9_-]{16,64}$"},
+    "plan_id": {"type": "string", "pattern": "^plan_[A-Za-z0-9_-]{16,64}$"},
+    "job_id": {"type": "string", "pattern": "^job_[A-Za-z0-9_-]{16,64}$"},
+    "asset_id": {"type": "string", "pattern": "^asset_[A-Za-z0-9_-]{16,64}$"},
+    "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "confirmation_token": {"type": "string", "minLength": 24, "maxLength": 256, "pattern": "^[A-Za-z0-9._~-]+$"},
+    "cursor": {"type": "string", "minLength": 8, "maxLength": 512, "pattern": "^[A-Za-z0-9._~-]+$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "http_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+    "platform_id": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "resource_type": {"type": "string", "enum": ["article", "book", "document", "video", "audio", "course", "dataset", "other"]},
+    "flow_stage": {"type": "string", "enum": ["intent_ready", "searching", "selecting", "prepared", "downloading", "ready_to_archive", "archived", "failed", "cancelled"]},
+    "job_status": {"type": "string", "enum": ["queued", "running", "cancelling", "succeeded", "failed", "cancelled"]},
+    "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+    "error_context_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {"type": "string", "minLength": 1, "maxLength": 64},
+        "value": {"type": "string", "maxLength": 512}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retriable", "context"],
+      "properties": {
+        "code": {"$ref": "../error-codes.json#/$defs/error_code"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "retriable": {"type": "boolean"},
+        "context": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/error_context_entry"}}
+      }
+    },
+    "error_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "error"],
+      "properties": {
+        "contract_version": {"$ref": "#/$defs/contract_version"},
+        "ok": {"const": false},
+        "flow_id": {"$ref": "#/$defs/flow_id"},
+        "resource_id": {"$ref": "#/$defs/resource_id"},
+        "plan_id": {"$ref": "#/$defs/plan_id"},
+        "job_id": {"$ref": "#/$defs/job_id"},
+        "asset_id": {"$ref": "#/$defs/asset_id"},
+        "error": {"$ref": "#/$defs/error"}
+      }
+    },
+    "resource_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_id", "platform", "title", "resource_type", "canonical_url", "availability"],
+      "properties": {
+        "resource_id": {"$ref": "#/$defs/resource_id"},
+        "platform": {"$ref": "#/$defs/platform_id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 512},
+        "summary": {"type": "string", "maxLength": 4000},
+        "resource_type": {"$ref": "#/$defs/resource_type"},
+        "canonical_url": {"$ref": "#/$defs/http_url"},
+        "author": {"type": "string", "maxLength": 256},
+        "language": {"type": "string", "minLength": 2, "maxLength": 35},
+        "duration_seconds": {"type": "integer", "minimum": 0},
+        "published_at": {"$ref": "#/$defs/timestamp"},
+        "quality_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "availability": {"type": "string", "enum": ["available", "auth_required", "unavailable", "unknown"]},
+        "rights_hint": {"type": "string", "maxLength": 512}
+      }
+    },
+    "item_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retriable"],
+      "properties": {
+        "platform": {"$ref": "#/$defs/platform_id"},
+        "resource_id": {"$ref": "#/$defs/resource_id"},
+        "code": {"$ref": "../error-codes.json#/$defs/error_code"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "retriable": {"type": "boolean"}
+      }
+    },
+    "asset_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "resource_id", "media_type", "size_bytes", "sha256", "validation_status"],
+      "properties": {
+        "asset_id": {"$ref": "#/$defs/asset_id"},
+        "resource_id": {"$ref": "#/$defs/resource_id"},
+        "media_type": {"type": "string", "minLength": 3, "maxLength": 127, "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "validation_status": {"type": "string", "const": "validated"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "string_tags": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 64}
+    }
+  }
+}
+

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "session-manager"
+version = "0.1.0"
+description = "Standalone MCP service for capturing, storing and validating platform login cookies"
+requires-python = ">=3.12"
+dependencies = [
+  "mcp==2.0.0",
+]
+
+[project.scripts]
+session-manager = "session_manager.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

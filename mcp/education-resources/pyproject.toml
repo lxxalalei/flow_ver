@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "education-resource-mcp"
+version = "0.1.0"
+description = "Local MCP service for education resource search, controlled download, jobs, and archive"
+requires-python = ">=3.12"
+dependencies = [
+  "mcp==2.0.0",
+]
+
+[project.scripts]
+education-resource-mcp = "education_resource_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+

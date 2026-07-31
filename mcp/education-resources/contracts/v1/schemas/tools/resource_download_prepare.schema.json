@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v1/schemas/tools/resource_download_prepare.schema.json",
+  "title": "resource_download_prepare contract v1",
+  "oneOf": [
+    {"$ref": "#/$defs/input"},
+    {"$ref": "#/$defs/output"}
+  ],
+  "$defs": {
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferred_container": {"type": "string", "enum": ["original", "pdf", "epub", "mp4", "mp3", "html", "text"]},
+        "max_bytes_per_resource": {"type": "integer", "minimum": 1, "maximum": 5368709120},
+        "allow_safe_fallback": {"type": "boolean", "default": true}
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "flow_id", "idempotency_key", "selection_version"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "idempotency_key": {"$ref": "../common.schema.json#/$defs/idempotency_key"},
+        "selection_version": {"type": "integer", "minimum": 1},
+        "options": {"$ref": "#/$defs/options"}
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "level", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "level": {"$ref": "../common.schema.json#/$defs/risk_level"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "plan_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_id", "platform", "planned_container", "estimated_size_bytes", "effective_max_bytes", "risks"],
+      "properties": {
+        "resource_id": {"$ref": "../common.schema.json#/$defs/resource_id"},
+        "platform": {"$ref": "../common.schema.json#/$defs/platform_id"},
+        "planned_container": {"type": "string", "enum": ["original", "pdf", "epub", "mp4", "mp3", "html", "text"]},
+        "estimated_size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "effective_max_bytes": {"type": "integer", "minimum": 1},
+        "risks": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/risk"}}
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "flow_id", "stage", "plan_id", "selection_version", "expires_at", "confirmation_required", "confirmation_token", "items"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "stage": {"type": "string", "const": "prepared"},
+        "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
+        "selection_version": {"type": "integer", "minimum": 1},
+        "expires_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
+        "confirmation_required": {"const": true},
+        "confirmation_token": {"$ref": "../common.schema.json#/$defs/confirmation_token"},
+        "items": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "#/$defs/plan_item"}}
+      }
+    },
+    "output": {
+      "oneOf": [
+        {"$ref": "#/$defs/success"},
+        {"$ref": "../common.schema.json#/$defs/error_result"}
+      ]
+    }
+  }
+}
+

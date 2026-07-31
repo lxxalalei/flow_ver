@@ -1,0 +1,258 @@
+{
+  "schema_version": "intent-golden/v2",
+  "purpose": "评估 resource-intent 的语义决策。expect.status=needs_clarification 表示对话中继续提问，不表示生成 intent-spec/v1 文件；只有 ready 才应生成并校验 stage1_intent.json。",
+  "artifact_contract": {
+    "needs_clarification": "no_stage1_intent_file",
+    "ready": "write_stage1_intent_once"
+  },
+  "cases": [
+    {
+      "id": "explicit-age-volcano-documentary",
+      "request": "找适合8岁孩子了解火山喷发的纪录片",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["core_topic", "target_age", "format_preferences"],
+        "inferred_slots": ["learning_domain", "resource_types"],
+        "omitted_slots": ["grade_level", "version", "file_formats"],
+        "must": [],
+        "prefer": [],
+        "exclude": []
+      }
+    },
+    {
+      "id": "audio-scenario-inference",
+      "request": "想找些孩子睡前听的中国历史故事",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["resource_types", "format_preferences", "use_scenario"],
+        "must": [],
+        "prefer": ["适合睡前听"]
+      }
+    },
+    {
+      "id": "open-programming-exploration",
+      "request": "想让孩子学编程",
+      "expect": {
+        "status": "needs_clarification",
+        "explicit_slots": ["core_topic"],
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["图形化", "Scratch", "Python", "机器人", "入门"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "open-programming-user-authorized",
+      "request": "想让孩子学编程，先看看有哪些适合儿童的入门方向，你来决定",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["core_topic"],
+        "omitted_slots": ["resource_types", "format_preferences", "file_formats"],
+        "must_not_clarify": ["learning_goal", "platform", "resource_types"]
+      }
+    },
+    {
+      "id": "user-delegates-choice",
+      "request": "想找点恐龙科普，形式你看着办",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["core_topic", "resource_types"],
+        "slot_values": {"resource_types": ["不限"]},
+        "omitted_slots": ["format_preferences", "file_formats"]
+      }
+    },
+    {
+      "id": "must-free-prefer-official",
+      "request": "只要免费的，最好是官方的小学安全教育资源",
+      "expect": {
+        "status": "ready",
+        "must": ["免费"],
+        "prefer": ["官方来源"]
+      }
+    },
+    {
+      "id": "exclude-video",
+      "request": "不要视频，找适合孩子了解昆虫生命周期的资料",
+      "expect": {
+        "status": "ready",
+        "exclude": ["视频"],
+        "explicit_slots": ["core_topic"]
+      }
+    },
+    {
+      "id": "version-explicit",
+      "request": "人教版五年级上册数学同步练习",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["version", "grade_level", "core_topic", "learning_goal"]
+      }
+    },
+    {
+      "id": "broad-grade-math-route",
+      "request": "一年级数学",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["课内同步", "练习巩固", "趣味", "启蒙"],
+        "must_not_clarify": ["platform", "resource_types", "file_formats"]
+      }
+    },
+    {
+      "id": "age-grade-conflict",
+      "request": "给6岁的四年级孩子找数学同步课",
+      "expect": {
+        "status": "needs_clarification",
+        "ambiguity_fields": ["target_age", "grade_level"]
+      }
+    },
+    {
+      "id": "broad-category",
+      "request": "帮我找点资料",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "core_topic"
+      }
+    },
+    {
+      "id": "observation-problem-to-goal",
+      "request": "孩子总分不清昆虫和蜘蛛",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["core_topic", "learning_goal"],
+        "must": []
+      }
+    },
+    {
+      "id": "exhaustive-mode",
+      "request": "把适合小学生的天文科普资源尽量全面地找一下",
+      "expect": {
+        "status": "ready",
+        "slot_values": {"search_mode": "exhaustive"}
+      }
+    },
+    {
+      "id": "english-content-language-unknown",
+      "request": "找英语启蒙资源",
+      "expect": {
+        "status": "ready",
+        "unknown_or_defaulted_slots": ["language"],
+        "forbid_assumption": "资源必须全英文"
+      }
+    },
+    {
+      "id": "clear-topic-no-age",
+      "request": "找恐龙科普资源，视频图文都可以",
+      "expect": {
+        "status": "ready",
+        "unknown_or_inferred_slots": ["target_age"],
+        "must_not_clarify": ["target_age"]
+      }
+    },
+    {
+      "id": "clear-age-weather-activity",
+      "request": "找适合8岁孩子做的天气观察活动",
+      "expect": {
+        "status": "ready",
+        "explicit_slots": ["target_age", "core_topic", "format_preferences"],
+        "must_not_clarify": ["grade_level", "resource_types", "file_formats"]
+      }
+    },
+    {
+      "id": "broad-math-exploration",
+      "request": "孩子数学不太好，想补一补",
+      "expect": {
+        "status": "needs_clarification",
+        "inferred_slots": ["core_topic", "learning_goal"],
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["计算", "应用题", "课内同步", "基础"],
+        "must_not_clarify": ["platform", "resource_types"]
+      }
+    },
+    {
+      "id": "broad-poetry-learning-route",
+      "request": "适合小学生的古诗文学习资料",
+      "expect": {
+        "status": "needs_clarification",
+        "explicit_slots": ["core_topic", "target_age"],
+        "clarification_field": "learning_goal",
+        "question_mentions_any": ["课内同步", "朗读背诵", "启蒙欣赏", "理解赏析"],
+        "must_not_clarify": ["platform", "file_formats"]
+      }
+    },
+    {
+      "id": "constraint-conflict-media",
+      "request": "不要视频，最好找动画讲解",
+      "expect": {
+        "status": "needs_clarification",
+        "ambiguity_fields": ["format_preferences", "constraints"]
+      }
+    },
+    {
+      "id": "sensitive-topic-age-matters",
+      "request": "想找儿童身体边界教育资源",
+      "expect": {
+        "status": "needs_clarification",
+        "clarification_field": "target_age",
+        "reason_contains": "适龄"
+      }
+    },
+    {
+      "id": "no-platform-question",
+      "request": "推荐几个古诗启蒙动画",
+      "expect": {
+        "status": "ready",
+        "must_not_clarify": ["source_constraints", "platform"]
+      }
+    },
+    {
+      "id": "user-wants-first-look",
+      "request": "先给我看看有哪些儿童情绪管理资源",
+      "expect": {
+        "status": "ready",
+        "must_not_clarify": ["resource_types", "format_preferences", "file_formats", "source_constraints"]
+      }
+    },
+    {
+      "id": "independent-multiple-goals",
+      "request": "想找鸟类观察资料，也想找儿童画入门教程",
+      "expect": {
+        "status": "needs_clarification",
+        "question_mentions_any": ["先", "分别", "哪个"]
+      }
+    },
+    {
+      "id": "explicit-file-format-and-resource-form",
+      "request": "找太阳系 PDF 思维导图，最好也有 PPT 讲解课件",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["resource_types"],
+        "explicit_slots": ["format_preferences", "file_formats"],
+        "slot_values": {
+          "resource_types": ["文档类", "图片类"],
+          "file_formats": ["PDF", "PPT"]
+        },
+        "prefer": ["PPT讲解课件"]
+      }
+    },
+    {
+      "id": "unspecified-resource-form-stays-unknown",
+      "request": "找适合小学生了解太阳系的资源",
+      "expect": {
+        "status": "ready",
+        "omitted_slots": ["resource_types", "format_preferences", "file_formats"],
+        "forbid_assumption": "默认使用视频、图文或文档"
+      }
+    },
+    {
+      "id": "printable-is-not-file-format",
+      "request": "找可打印的儿童鸟类观察卡片",
+      "expect": {
+        "status": "ready",
+        "inferred_slots": ["resource_types"],
+        "explicit_slots": ["format_preferences"],
+        "omitted_slots": ["file_formats"],
+        "must": ["可打印"],
+        "forbid_file_formats": ["可打印"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v1/schemas/tool-catalog.schema.json",
+  "title": "Education Resource MCP tool catalog schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "catalog_version", "contract_version", "server_id", "tools"],
+  "properties": {
+    "$schema": {"type": "string", "const": "schemas/tool-catalog.schema.json"},
+    "catalog_version": {"type": "string", "const": "1.0.0"},
+    "contract_version": {"$ref": "common.schema.json#/$defs/contract_version"},
+    "server_id": {"type": "string", "const": "learning_resources"},
+    "tools": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description", "side_effect", "requires_flow_id", "idempotency_required", "input_schema", "output_schema"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^resource_[a-z_]+$"},
+          "description": {"type": "string", "minLength": 1, "maxLength": 512},
+          "side_effect": {"type": "string", "enum": ["none", "state_write", "job_control", "archive_write"]},
+          "requires_flow_id": {"type": "boolean"},
+          "idempotency_required": {"type": "boolean"},
+          "input_schema": {"type": "string", "pattern": "^schemas/tools/[a-z_]+\\.schema\\.json#/[/$A-Za-z0-9_-]+$"},
+          "output_schema": {"type": "string", "pattern": "^schemas/tools/[a-z_]+\\.schema\\.json#/[/$A-Za-z0-9_-]+$"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v1/schemas/tools/resource_selection_save.schema.json",
+  "title": "resource_selection_save contract v1",
+  "oneOf": [
+    {"$ref": "#/$defs/input"},
+    {"$ref": "#/$defs/output"}
+  ],
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "flow_id", "idempotency_key", "presented_version", "selected_resource_ids"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "idempotency_key": {"$ref": "../common.schema.json#/$defs/idempotency_key"},
+        "presented_version": {"type": "integer", "minimum": 1},
+        "selected_resource_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/resource_id"}
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "flow_id", "stage", "selection_version", "selected_resource_ids", "cancelled"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "stage": {"type": "string", "enum": ["selecting", "cancelled"]},
+        "selection_version": {"type": "integer", "minimum": 1},
+        "selected_resource_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/resource_id"}
+        },
+        "cancelled": {"type": "boolean"}
+      }
+    },
+    "output": {
+      "oneOf": [
+        {"$ref": "#/$defs/success"},
+        {"$ref": "../common.schema.json#/$defs/error_result"}
+      ]
+    }
+  }
+}

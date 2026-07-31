@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session-manifest/v1",
+  "title": "Learning resource flow session manifest",
+  "type": "object",
+  "required": ["schema_version", "session_id", "created_at", "updated_at", "status", "current_stage", "stages"],
+  "properties": {
+    "schema_version": {"const": "session-manifest/v1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "status": {
+      "description": "Session/UI status. During Stage 1 clarification this may be waiting_user while stages.stage1.status remains in_progress.",
+      "enum": ["in_progress", "waiting_user", "completed", "failed", "cancelled"]
+    },
+    "current_stage": {"type": "integer", "minimum": 1, "maximum": 6},
+    "stages": {
+      "type": "object",
+      "required": ["stage1", "stage2", "stage3", "stage4", "stage5", "stage6"],
+      "additionalProperties": false,
+      "properties": {
+        "stage1": {"$ref": "#/$defs/stage"},
+        "stage2": {"$ref": "#/$defs/stage"},
+        "stage3": {"$ref": "#/$defs/stage"},
+        "stage4": {"$ref": "#/$defs/stage"},
+        "stage5": {"$ref": "#/$defs/stage"},
+        "stage6": {"$ref": "#/$defs/stage"}
+      }
+    },
+    "error": {"type": "object"},
+    "completed_at": {"type": "string"},
+    "cancelled_at": {"type": "string"}
+  },
+  "$defs": {
+    "stage": {
+      "type": "object",
+      "required": ["status", "output"],
+      "properties": {
+        "status": {"enum": ["pending", "in_progress", "waiting_user", "completed", "failed", "cancelled"]},
+        "output": {"type": "string", "minLength": 1},
+        "started_at": {"type": "string"},
+        "completed_at": {"type": "string"},
+        "waiting_for": {
+          "description": "External input currently awaited. It does not imply that an active stage has been stopped.",
+          "type": "string"
+        },
+        "error": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "waiting_user"},
+          "current_stage": {"const": 1}
+        },
+        "required": ["status", "current_stage"]
+      },
+      "then": {
+        "properties": {
+          "stages": {
+            "properties": {
+              "stage1": {
+                "properties": {
+                  "status": {
+                    "description": "in_progress is the current representation; waiting_user is accepted for legacy manifests.",
+                    "enum": ["in_progress", "waiting_user"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

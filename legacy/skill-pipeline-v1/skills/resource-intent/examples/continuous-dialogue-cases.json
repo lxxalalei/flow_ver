@@ -1,0 +1,124 @@
+{
+  "schema_version": "intent-continuous-dialogue/v1",
+  "purpose": "回归验证 Stage 1 中的澄清回答会增量更新同一份模型理解，而不是重新初始化 Intent 或为中间轮次生成正式文件。",
+  "invariants": [
+    "resource-intent 在整个 Stage 1 持续生效",
+    "用户短回答结合上一轮问题理解",
+    "未受新证据影响的已确认语义保持稳定",
+    "澄清步骤不创建或校验 stage1_intent.json",
+    "只有最终 ready 步骤写入一次 stage1_intent.json",
+    "最终槽位证据只引用用户话语，不把助手选项单独当作用户事实"
+  ],
+  "cases": [
+    {
+      "id": "poetry-sync-continuous-understanding",
+      "initial_request": "帮我找些古诗学习资料",
+      "turns": [
+        {
+          "assistant_question": "古诗学习资料这次更偏课内同步、朗读背诵，还是启蒙欣赏？",
+          "user_answer": "课内同步",
+          "expect": {
+            "decision": "clarify",
+            "preserve": ["core_topic=古诗学习"],
+            "update": ["learning_goal=课内同步"],
+            "clarification_focus": "grade_level",
+            "artifact": "absent"
+          }
+        },
+        {
+          "assistant_question": "如果需要按课内篇目匹配，孩子现在读几年级？",
+          "user_answer": "五年级",
+          "expect": {
+            "decision": "ready",
+            "preserve": ["core_topic=古诗学习", "learning_goal=课内同步"],
+            "update": ["grade_level=五年级"],
+            "artifact": "write_once",
+            "evidence_must_include": ["帮我找些古诗学习资料", "课内同步", "五年级"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "constraint-correction-is-incremental",
+      "initial_request": "不要视频，最好找动画讲解",
+      "turns": [
+        {
+          "assistant_question": "你是完全不要视频，还是可以接受短动画讲解？",
+          "user_answer": "可以接受短动画，但不要真人长视频",
+          "expect": {
+            "decision": "ready",
+            "update": [
+              "remove exclude=视频",
+              "add prefer=短动画讲解",
+              "add exclude=真人长视频"
+            ],
+            "artifact": "write_once"
+          }
+        }
+      ]
+    },
+    {
+      "id": "safety-age-answer-completes-existing-intent",
+      "initial_request": "想找儿童身体边界教育资源",
+      "turns": [
+        {
+          "assistant_question": "孩子大概多大？这个主题不同年龄的表达尺度差异较大。",
+          "user_answer": "小学低年级",
+          "expect": {
+            "decision": "ready",
+            "preserve": ["core_topic=儿童身体边界教育"],
+            "update": ["target_age=小学低年级"],
+            "artifact": "write_once"
+          }
+        }
+      ]
+    },
+    {
+      "id": "multiple-clarifications-remain-one-stage",
+      "initial_request": "帮我找点资料",
+      "turns": [
+        {
+          "assistant_question": "目前最想让孩子了解或学习什么主题？",
+          "user_answer": "想提高表达能力",
+          "expect": {
+            "decision": "clarify",
+            "update": ["core_topic=表达能力"],
+            "artifact": "absent"
+          }
+        },
+        {
+          "assistant_question": "更想改善日常讲述、课堂发言，还是舞台表达？",
+          "user_answer": "日常讲事情总是没有条理",
+          "expect": {
+            "decision": "ready",
+            "preserve": ["core_topic=表达能力"],
+            "update": ["learning_goal=有条理地进行日常口头叙述"],
+            "artifact": "write_once"
+          }
+        }
+      ]
+    },
+    {
+      "id": "recovery-rebuilds-but-does-not-restart",
+      "initial_request": "小学英语资料",
+      "persisted_conversation_evidence": [
+        {
+          "role": "assistant",
+          "content": "这次更偏课内同步、听说启蒙、阅读，还是单词积累？"
+        },
+        {
+          "role": "user",
+          "content": "阅读"
+        }
+      ],
+      "expect": {
+        "action": "rebuild_current_understanding_and_continue",
+        "must_not": [
+          "treat 阅读 as a new standalone request",
+          "emit needs_clarification intent-spec/v1",
+          "discard core_topic=小学英语"
+        ]
+      }
+    }
+  ]
+}

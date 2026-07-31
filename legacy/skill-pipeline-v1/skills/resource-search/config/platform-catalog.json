@@ -1,0 +1,100 @@
+{
+  "schema_version": "search-platform-catalog/v1",
+  "platforms": {
+    "generic": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "engines": {"type": "array", "allowed": ["qianfan", "duckduckgo", "bing", "baidu"], "required_values": ["duckduckgo"]}
+      }
+    },
+    "bilibili": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {}
+    },
+    "ximalaya": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "core": {"type": "string", "allowed": ["album", "track"]},
+        "free_only": {"type": "boolean"},
+        "sort": {"type": "string", "allowed": ["relevance", "popularity", "newest"]}
+      }
+    },
+    "smartedu": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {}
+    },
+    "zhihu": {
+      "planning_status": "available",
+      "auth": "required",
+      "search_parameters": {}
+    },
+    "douyin": {
+      "planning_status": "available",
+      "auth": "required",
+      "search_parameters": {}
+    },
+    "weibo": {
+      "planning_status": "available",
+      "auth": "required",
+      "search_parameters": {}
+    },
+    "wechat": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {
+        "resolve_url": {"type": "boolean"}
+      }
+    },
+    "open163": {
+      "planning_status": "available",
+      "auth": "optional",
+      "search_parameters": {}
+    },
+    "annas-archive": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {
+        "core": {"type": "string", "allowed": ["book", "article"]}
+      }
+    },
+    "baiduwenku": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
+    "kepu": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
+    "nlc": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {
+        "scope": {"type": "string", "allowed": ["catalog", "site", "digital", "ebook"]}
+      }
+    },
+    "yixi": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
+    "runoob": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {}
+    },
+    "cctv": {
+      "planning_status": "available",
+      "auth": "none",
+      "search_parameters": {
+        "type": {"type": "string", "allowed": ["video", "audio"]},
+        "channel": {"type": "string"}
+      }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schema_version": "flow-routing-cases/v1",
+  "purpose": "仅用于 Flow 的语义回归验收。每个样例评估模型是否理解用户当前要完成的工作，不验证外部平台当时是否有结果。",
+  "cases": [
+    {
+      "id": "discovery-inherits-relevant-context",
+      "conversation": [
+        {"role": "user", "content": "孩子 7 岁，每次最多能专注 20 分钟。"},
+        {"role": "assistant", "content": "明白，我会优先考虑短时、可独立使用的内容。"},
+        {"role": "user", "content": "继续帮我找天文资料。"}
+      ],
+      "expected": {
+        "mode": "discovery",
+        "entry_stage": 1,
+        "persist_evidence": [
+          "孩子 7 岁，每次最多能专注 20 分钟。"
+        ],
+        "must_not": [
+          "把年龄和时长当成未提供的信息",
+          "把助手先前的概括当成用户事实"
+        ]
+      }
+    },
+    {
+      "id": "evaluate-existing-link-before-discovery",
+      "conversation": [
+        {"role": "user", "content": "看看这个资源适不适合 7 岁孩子，合适就帮我存起来：https://example.edu/resources/volcano.pdf"}
+      ],
+      "expected": {
+        "mode": "evaluate_existing",
+        "first_action": "核验用户提供的资源页面或文件",
+        "must_not": [
+          "在核验该资源前发起无关的全网搜索",
+          "把链接当作普通主题关键词"
+        ]
+      }
+    },
+    {
+      "id": "archive-existing-local-file",
+      "conversation": [
+        {"role": "user", "content": "这个 PDF 已经下载好了，帮我按资料库规则归档：/Users/me/Downloads/儿童火山活动单.pdf"}
+      ],
+      "expected": {
+        "mode": "archive_existing",
+        "first_action": "读取本地文件信息并归档",
+        "must_not": [
+          "重新搜索候选资源",
+          "要求用户自行创建目录或索引文件"
+        ]
+      }
+    },
+    {
+      "id": "retrieve-library-by-cross-filters",
+      "conversation": [
+        {"role": "user", "content": "找资料库里可打印的亲子科学活动。"}
+      ],
+      "expected": {
+        "mode": "library_query",
+        "filters": {
+          "secondary_domains": ["亲子陪伴"],
+          "primary_domain_or_topics": ["自然与科学"],
+          "formats": ["PDF"]
+        },
+        "must_not": [
+          "创建新的搜索会话",
+          "只按文件夹名称检索"
+        ]
+      }
+    },
+    {
+      "id": "recommend-a-small-curated-set",
+      "conversation": [
+        {"role": "user", "content": "周末帮我直接挑 3 个最值得和孩子一起做的自然观察活动。"}
+      ],
+      "expected": {
+        "mode": "discovery",
+        "selection_style": "curated_recommendation",
+        "candidate_goal": "少量、高质量、彼此互补的活动",
+        "must_not": [
+          "为了展示全面性而默认输出长候选清单",
+          "把同质活动都列为推荐"
+        ]
+      }
+    },
+    {
+      "id": "preserve-hard-source-constraint",
+      "conversation": [
+        {"role": "user", "content": "只看人民教育出版社官网的五年级数学资料。"}
+      ],
+      "expected": {
+        "mode": "discovery",
+        "source_constraint": "pep.com.cn",
+        "must_not": [
+          "扩展到其他来源",
+          "将来源限制降级为偏好"
+        ]
+      }
+    },
+    {
+      "id": "qianfan-key-uses-existing-credential-gate",
+      "conversation": [
+        {"role": "user", "content": "帮我找适合孩子读的古诗文赏析资料。"}
+      ],
+      "expected": {
+        "mode": "discovery",
+        "when_generic_engines_include": ["qianfan", "duckduckgo"],
+        "missing_credential": "QIANFAN_API_KEY",
+        "stage3_status": "waiting_user",
+        "user_choices": ["协助配置", "跳过千帆并继续", "取消"],
+        "after_skip": "保留 generic 的 DuckDuckGo 等无凭据引擎继续搜索",
+        "must_not": [
+          "要求用户自行创建凭据文件",
+          "把 API Key 写入搜索计划或结果"
+        ]
+      }
+    }
+  ]
+}

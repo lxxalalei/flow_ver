@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v1/schemas/tools/resource_search.schema.json",
+  "title": "resource_search contract v1",
+  "oneOf": [
+    {"$ref": "#/$defs/input"},
+    {"$ref": "#/$defs/output"}
+  ],
+  "$defs": {
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platforms": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/platform_id"}
+        },
+        "resource_types": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/resource_type"}
+        },
+        "languages": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 2, "maxLength": 35}
+        },
+        "published_after": {"$ref": "../common.schema.json#/$defs/timestamp"},
+        "max_duration_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "flow_id", "idempotency_key", "query"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "idempotency_key": {"$ref": "../common.schema.json#/$defs/idempotency_key"},
+        "query": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "filters": {"$ref": "#/$defs/filters"},
+        "cursor": {"$ref": "../common.schema.json#/$defs/cursor"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20}
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "flow_id", "stage", "presented_version", "resources", "failures", "has_more"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "stage": {"type": "string", "const": "selecting"},
+        "presented_version": {"type": "integer", "minimum": 1},
+        "resources": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {"$ref": "../common.schema.json#/$defs/resource_summary"}
+        },
+        "failures": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"$ref": "../common.schema.json#/$defs/item_failure"}
+        },
+        "next_cursor": {"$ref": "../common.schema.json#/$defs/cursor"},
+        "has_more": {"type": "boolean"}
+      }
+    },
+    "output": {
+      "oneOf": [
+        {"$ref": "#/$defs/success"},
+        {"$ref": "../common.schema.json#/$defs/error_result"}
+      ]
+    }
+  }
+}
+

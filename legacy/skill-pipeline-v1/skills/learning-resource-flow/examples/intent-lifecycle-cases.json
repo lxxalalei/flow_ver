@@ -1,0 +1,79 @@
+{
+  "schema_version": "intent-lifecycle-cases/v1",
+  "purpose": "回归验收 Flow 是否把 Intent 作为连续生效的模型能力，而不是每轮重启的程序。",
+  "cases": [
+    {
+      "id": "clarification-keeps-intent-active",
+      "conversation": [
+        {"role": "user", "content": "帮我找些古诗学习资料。"},
+        {"role": "assistant", "content": "这次更偏课内同步、朗读背诵，还是启蒙欣赏？"}
+      ],
+      "expected": {
+        "stage": 1,
+        "session_status": "waiting_user",
+        "stage1_status": "in_progress",
+        "formal_stage1_intent_exists": false,
+        "must_not": [
+          "把 needs_clarification 写成正式 stage1_intent.json",
+          "结束或重置 Intent 生命周期"
+        ]
+      }
+    },
+    {
+      "id": "answer-continues-current-intent",
+      "conversation": [
+        {"role": "user", "content": "帮我找些古诗学习资料。"},
+        {"role": "assistant", "content": "这次更偏课内同步、朗读背诵，还是启蒙欣赏？"},
+        {"role": "user", "content": "课内同步。"}
+      ],
+      "expected": {
+        "action": "incrementally_update_active_intent",
+        "preserve_understanding": ["古诗学习资料"],
+        "new_evidence": ["课内同步"],
+        "must_not": [
+          "重新调用 resource-intent",
+          "重新初始化 Stage 1",
+          "先写文件再重新读取才能理解回答"
+        ]
+      }
+    },
+    {
+      "id": "ready-materializes-once",
+      "conversation": [
+        {"role": "user", "content": "帮我找些古诗学习资料。"},
+        {"role": "assistant", "content": "这次更偏课内同步、朗读背诵，还是启蒙欣赏？"},
+        {"role": "user", "content": "课内同步。"},
+        {"role": "assistant", "content": "孩子现在读几年级？"},
+        {"role": "user", "content": "五年级。"}
+      ],
+      "expected": {
+        "intent_status": "ready",
+        "formal_output": "stage1_intent.json",
+        "formal_output_write_count": 1,
+        "next_stage": 2,
+        "must_not": [
+          "保留 needs_clarification 正式文件供 Search 读取",
+          "在 ready 前调用 Search"
+        ]
+      }
+    },
+    {
+      "id": "recover-after-context-loss",
+      "precondition": {
+        "stage": 1,
+        "session_status": "waiting_user",
+        "stage1_status": "in_progress",
+        "active_model_context_available": false,
+        "recovery_snapshot_available": true
+      },
+      "expected": {
+        "action": "reconstruct_then_continue_same_intent",
+        "formal_stage1_intent_exists": false,
+        "must_not": [
+          "把恢复当作每轮澄清的正常路径",
+          "恢复时伪造 ready 输出"
+        ]
+      }
+    }
+  ]
+}
