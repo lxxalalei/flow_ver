@@ -8,7 +8,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
+from concurrent.futures import ThreadPoolExecutor
+
 from .adapters import generic_web
+from .adapters.base import PlatformSearchAdapter
 from .config import Settings
 from .errors import DomainError
 
@@ -238,11 +241,144 @@ class SearXNGSearchProvider:
         return all_resources[:limit], all_errors
 
 
-def default_search_provider(settings: Settings) -> SearchProvider:
-    """Pick SearXNG when configured, otherwise fall back to generic web scraping."""
-    if settings.searxng_base_url:
-        return SearXNGSearchProvider(settings)
-    return GenericWebSearchProvider(settings)
+class MultiPlatformSearchProvider:
+    """SearchProvider that dispatches to per-platform adapters.
+
+    Wraps a *generic_provider* (``GenericWebSearchProvider`` or
+    ``SearXNGSearchProvider``) for ``"generic"`` searches and delegates
+    platform-specific IDs (``"bilibili"``, ``"zhihu"``, …) to registered
+    :class:`PlatformSearchAdapter` instances.  Unknown platform IDs
+    produce ``PLATFORM_UNAVAILABLE`` errors, matching the previous
+    behaviour of ``GenericWebSearchProvider``.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        session_store: Any,
+        generic_provider: SearchProvider,
+    ) -> None:
+        self.settings = settings
+        self.session_store = session_store
+        self.generic_provider = generic_provider
+        self._adapters: dict[str, PlatformSearchAdapter] = {}
+        self._register_default_adapters()
+
+    def _register_default_adapters(self) -> None:
+        """Instantiate built-in platform adapters."""
+        # Lazy imports to avoid hard dependency at module import time —
+        # an adapter that fails to import (e.g. missing optional dep on
+        # one platform) should not break the others.
+        adapter_classes: list[tuple[str, type]] = []
+        try:
+            from .adapters.bilibili import BilibiliSearchAdapter
+            adapter_classes.append(("bilibili", BilibiliSearchAdapter))
+        except ImportError:
+            pass
+        try:
+            from .adapters.zhihu import ZhihuSearchAdapter
+            adapter_classes.append(("zhihu", ZhihuSearchAdapter))
+        except ImportError:
+            pass
+        try:
+            from .adapters.smartedu import SmartEduSearchAdapter
+            adapter_classes.append(("smartedu", SmartEduSearchAdapter))
+        except ImportError:
+            pass
+        for pid, cls in adapter_classes:
+            self.register_adapter(cls(self.session_store, self.settings))
+
+    def register_adapter(self, adapter: PlatformSearchAdapter) -> None:
+        """Register or replace a platform adapter."""
+        self._adapters[adapter.platform_id] = adapter
+
+    def search(
+        self, query: str, limit: int, platforms: list[str] | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        requested = platforms or ["generic"]
+
+        # Partition into platform adapters, generic, and unknown.
+        platform_ids = [p for p in requested if p in self._adapters]
+        has_generic = "generic" in requested
+        unknown = [p for p in requested if p != "generic" and p not in self._adapters]
+
+        errors: list[dict[str, Any]] = [
+            {
+                "platform": p,
+                "code": "PLATFORM_UNAVAILABLE",
+                "message": "该平台尚未接入搜索适配器",
+                "retryable": False,
+            }
+            for p in unknown
+        ]
+
+        if not platform_ids and not has_generic:
+            return [], errors
+
+        # Run platform adapters and generic search concurrently.
+        targets: list[tuple[str, Any]] = [(pid, self._adapters[pid]) for pid in platform_ids]
+        worker_count = max(1, min(len(targets) + (1 if has_generic else 0), self.settings.max_workers))
+
+        results_by_key: dict[str, tuple[list[dict[str, Any]], Any]] = {}
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            futures: dict[Any, str] = {}
+            for pid, adapter in targets:
+                futures[pool.submit(adapter.search, query, limit)] = pid
+            if has_generic:
+                futures[pool.submit(
+                    self.generic_provider.search, query, limit, ["generic"]
+                )] = "generic"
+
+            for future, key in futures.items():
+                try:
+                    results_by_key[key] = future.result()
+                except Exception as exc:  # pragma: no cover - defensive
+                    results_by_key[key] = ([], {
+                        "code": "PARTIAL_FAILURE",
+                        "message": f"{type(exc).__name__}: {exc}",
+                        "retryable": True,
+                    })
+
+        # Merge in stable order: platform IDs first (in requested order),
+        # then generic last.
+        all_resources: list[dict[str, Any]] = []
+        ordered_keys = platform_ids + (["generic"] if has_generic else [])
+        for key in ordered_keys:
+            value = results_by_key.get(key)
+            if value is None:
+                continue
+            resources, error = value
+            all_resources.extend(resources[:limit - len(all_resources)] if limit > len(all_resources) else resources)
+            if key == "generic":
+                # generic_provider returns (resources, errors_list).
+                if isinstance(error, list):
+                    for e in error:
+                        errors.append({"platform": "generic", **e} if "platform" not in e else e)
+                elif error:
+                    errors.append({"platform": "generic", **error})
+            elif error:
+                errors.append({"platform": key, **error})
+
+        return all_resources[:limit], errors
+
+
+def default_search_provider(
+    settings: Settings, session_store: Any = None
+) -> SearchProvider:
+    """Pick SearXNG when configured, otherwise fall back to generic web scraping.
+
+    When *session_store* is provided, wrap the generic provider in a
+    :class:`MultiPlatformSearchProvider` so platform-specific adapters
+    (bilibili, zhihu, smartedu, …) become available.
+    """
+    generic: SearchProvider = (
+        SearXNGSearchProvider(settings)
+        if settings.searxng_base_url
+        else GenericWebSearchProvider(settings)
+    )
+    if session_store is not None:
+        return MultiPlatformSearchProvider(settings, session_store, generic)
+    return generic
 
 
 class StaticSearchProvider:

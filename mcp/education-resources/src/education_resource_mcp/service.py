@@ -39,10 +39,12 @@ class ResourceService:
         self.settings = settings or Settings.from_env()
         self.settings.ensure_directories()
         self.store = store or Store(self.settings.database_path)
-        self.search_provider = search_provider or default_search_provider(self.settings)
+        self.session_store = SessionStore(self.settings.data_dir)
+        self.search_provider = search_provider or default_search_provider(
+            self.settings, self.session_store
+        )
         self.download_provider = download_provider or PublicHttpDownloader(self.settings)
         self.job_runner = job_runner or JobRunner(self.settings.max_workers)
-        self.session_store = SessionStore(self.settings.data_dir)
         self._mutation_lock = threading.RLock()
         self.store.mark_incomplete_jobs_failed()
 
