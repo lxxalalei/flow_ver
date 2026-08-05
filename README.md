@@ -26,7 +26,7 @@ skills/
 
 mcp/
 └── education-resources/
-    ├── contracts/v1/
+    ├── contracts/v2/
     ├── src/education_resource_mcp/
     │   ├── adapters/
     │   ├── server.py
@@ -46,11 +46,13 @@ mcp/
 
 ## 当前能力
 
-MCP 暴露 9 个领域工具：
+MCP v2 暴露 11 个领域工具：
 
 ```text
 resource_flow_start
+resource_flow_status
 resource_search
+resource_presentation_save
 resource_selection_save
 resource_download_prepare
 resource_download_start
@@ -62,8 +64,10 @@ resource_library_search
 
 约束：
 
-- 当前搜索只启用 `generic` 公开网页搜索，默认使用 DuckDuckGo 和 Bing。
-- 当前下载只支持公开网页和公开文件直链。
+- 当前搜索由 `generic` 公开网页搜索和已接入的平台 Adapter 共同提供；需要登录的平台
+  由独立 `session-manager` 管理授权状态，单个平台失败不会伪装成整体成功。
+- 当前下载支持公开网页/文件直链，以及 Bilibili、SmartEdu、喜马拉雅等已接入且具备合法授权的
+  平台下载器；未接入或未授权的平台不会被静默绕过。
 - 下载必须经过 `prepare -> 用户明确确认 -> start`。
 - Job 异步执行，支持状态查询和取消。
 - 归档只接受服务端返回的 `asset_id`，不接受模型提供的文件路径。
@@ -134,7 +138,7 @@ cd mcp/education-resources
   -m unittest discover -s tests -v
 ```
 
-成功基线：Python 测试全部通过，MCP doctor 为 `ok`，probe 发现 9 个工具且
+成功基线：Python 测试全部通过，MCP doctor 为 `ok`，probe 精确发现 11 个工具且
 `diagnostics=[]`。
 
 ## 安全与数据边界

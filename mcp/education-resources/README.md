@@ -3,7 +3,8 @@
 本目录是教育资源工作区唯一的执行与权威状态服务。当前 Python stdio MCP 已运行
 `contracts/v2/` 的 `2.0.0` 控制面，并且公共 catalog **仅暴露 11 个工具**。
 
-`contracts/v1/` 冻结在 `1.0.0`，只保留作历史兼容、审计和显式回滚依据；不再向 v1 增加字段、工具或运行语义。
+教育资源主链当前只保留 `contracts/v2/` 的 `2.0.0` 契约；历史 v1 已从工作区清理，迁移差异
+保留在 `contracts/v2/compatibility.md` 和 Git 历史中。
 
 v2 权威状态链为：
 
@@ -20,7 +21,6 @@ education-resources 的 11 工具 catalog。education-resources 不向模型暴�
 ## 目录
 
 ```text
-contracts/v1/                  # 冻结的 1.0.0 历史契约
 contracts/v2/                  # 当前运行的 2.0.0 控制面契约
 src/education_resource_mcp/
 ├── adapters/                  # MCP 内部平台 Adapter
@@ -119,7 +119,7 @@ current_job
 
 ## 搜索、下载和登录边界
 
-当前 Generic 搜索 Adapter 已内聚到 MCP 包，不依赖 `legacy/`。下载只允许通过服务端策略校验的 HTTP(S) 来源，
+当前 Generic 和平台搜索 Adapter 已内聚到 MCP 包，不依赖 `legacy/`。下载只允许通过服务端策略校验的 HTTP(S) 来源，
 并强制执行网络边界、重定向、大小、内容类型和真实格式校验。
 
 需要认证的平台返回 `AUTH_REQUIRED` 后，应暂停资源状态转换，调用独立 `session-manager` 完成合法登录与会话保存，

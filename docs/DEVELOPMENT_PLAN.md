@@ -7,8 +7,12 @@
 本文同时记录未来产品路线和当前开发实现状态。截至 2026-08-03，本地 Python
 stdio MCP、active contract `mcp/education-resources/contracts/v2/`（`2.0.0`）、
 唯一入口 Skill、OpenClaw 专用 Agent/MCP 注册和 MCP doctor/probe 已完成；v1 已冻结，
-仅保留为兼容参考。`glm-req/glm-5.2` Provider probe 和最小真实 Agent 回合也已通过。
+仅保留为迁移参考。2026-08-06 已删除工作区中的教育资源 v1 契约，当前仅保留 v2。
+`glm-req/glm-5.2` Provider probe 和最小真实 Agent 回合也已通过。
 完整教育资源业务回合仍未完成验收。
+
+当前 macOS 检查环境尚未安装 `openclaw`，且项目 Python 依赖未安装；历史 WSL
+OpenClaw doctor/probe 结果仍保留在本文件，不能当作本机当前环境的实时验证。
 
 当前实现是本地开发 MVP，不代表高风险平台、多租户安全隔离或教育平台生产部署
 已经完成。
@@ -123,8 +127,9 @@ File SecretRef 从 `~/.claude/settings.json` 的 `/env/ANTHROPIC_AUTH_TOKEN` 读
 
 ### 3.6 active v2 控制面与后续契约能力
 
-`mcp/education-resources/contracts/v2/` 是当前 active contract，版本为 `2.0.0`；
-`contracts/v1/` 已冻结，不再增加字段或工具。v2 已完成以下控制面边界：
+`mcp/education-resources/contracts/v2/` 是当前唯一 active contract，版本为 `2.0.0`；
+历史 v1 已从工作区清理，迁移差异保留在 `contracts/v2/compatibility.md` 和 Git 历史中。
+v2 已完成以下控制面边界：
 
 - `FlowTask` 使用目标导向结构：必填 `goal.topic`，可选 `goal.outcome`；`user_role` 与
   `resource_target` 独立且均可未知；其他用户明示条件进入 `constraints` 数组。
@@ -152,7 +157,7 @@ FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Ass
 - 候选证据模型，包括来源可追溯证据、内容定位、使用门槛、安全提示和重要未知。
 
 这些能力应在运行时需求、迁移和测试方案明确后，通过后续显式契约版本引入，不回填或
-继续扩展冻结的 v1，也不能破坏 v2 已建立的展示、选择与下载绑定边界。
+重新引入旧 v1 语义，也不能破坏 v2 已建立的展示、选择与下载绑定边界。
 
 ## 4. 目标目录
 
@@ -161,7 +166,6 @@ mcp/
 └── education-resources/
     ├── README.md
     ├── pyproject.toml
-    ├── contracts/v1/                  # 冻结的 1.0.0 契约
     ├── contracts/v2/                  # active 2.0.0 契约
     ├── src/education_resource_mcp/
     │   ├── adapters/
@@ -346,8 +350,8 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 
 - active `mcp/education-resources/contracts/v2/` 已提供领域不变量、41 个稳定错误码、
   严格 11 个工具目录和 Draft 2020-12 输入/输出 Schema；契约版本为 `2.0.0`。
-  `contracts/v1/` 冻结为 `1.0.0`，其中 31 个既有错误码在 v2 中继续保留，v2 追加
-  10 个控制面与任务终态错误码。
+  v2 延续历史 v1 中仍有效的错误语义，并追加控制面与任务终态错误码；旧 v1 文件不再
+  作为工作区契约分发。
 - Python stdio MCP、SQLite repository、配置、结构化业务错误和协议 smoke test
   已实现。
 - MCP initialize、tools/list 和 tools/call 测试通过；运行数据写入独立 data 目录，
@@ -364,11 +368,12 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 - 实现 `resource_search`、`resource_presentation_save` 与 `resource_selection_save`。
 - 支持分页、部分失败、重试上限和 Flow 恢复。
 
-当前结果：已包装 Generic 搜索兼容层，并以
+当前结果：已包装 Generic 搜索兼容层，并接入 Bilibili、知乎、SmartEdu、CCTV、NLC、
+喜马拉雅、网易公开课、微信、微博等平台 Adapter；以
 `resource_search -> ResultSet -> resource_presentation_save -> Presentation -> resource_selection_save -> Selection`
 建立搜索、实际展示和位置选择的权威边界；同时保留分页、部分失败结构和重启后 SQLite
-恢复。CCTV、NLC 及其他平台仍按后续 Adapter 迁移计划逐个接入；Bilibili 仅在公开接口
-和真实验收通过后开启。
+恢复。平台是否可用仍取决于真实来源、授权状态和逐平台验收，不能把 Adapter 已接入
+描述成所有平台的生产可用保证。
 
 验收：搜索结果可重放；用户只能选择本轮展示集合；重启 MCP 后选择状态不丢失；单个平台失败不破坏整个 Flow。
 
@@ -379,7 +384,8 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 - 实现 `resource_download_prepare`、`resource_download_start`、状态和取消工具。
 - 服务端重新执行来源、Selection、策略、大小和路径验证。
 - 建立 Job worker、幂等和临时文件提交协议。
-- 首先支持公开网页正文归档与公开文件直链。
+- 首批支持公开网页正文、公开文件直链，以及已接入的 Bilibili、SmartEdu、喜马拉雅下载器；
+  平台下载仍需合法会话和逐平台真实验收。
 
 当前结果：已实现 prepare/confirmation/start 两阶段、幂等 Job、状态查询、取消、
 受控临时目录、公开 HTTP(S) 下载和资产提交；网络与路径策略测试覆盖私网/保留地址、
@@ -545,7 +551,7 @@ openclaw agent --agent main --local \
 优先完成 active v2 控制面的运行时收敛和阶段 6 完整业务回合验收：
 
 1. 让 Python 实现、SQLite 状态、唯一入口 Skill 和契约测试完整采用
-   `mcp/education-resources/contracts/v2/`，并冻结 `contracts/v1/`。
+   `mcp/education-resources/contracts/v2/`；教育资源 v1 已不再随工作区分发。
 2. 通过默认 Agent `main` 跑通
    “澄清 -> 搜索 -> ResultSet -> 实际展示 -> 选择 -> 确认 -> 下载 -> 归档 -> 检索”，
    验证完整状态链
