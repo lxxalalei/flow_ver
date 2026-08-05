@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tools/resource_archive.schema.json",
+  "title": "resource_archive contract v2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/input"
+    },
+    {
+      "$ref": "#/$defs/output"
+    }
+  ],
+  "$defs": {
+    "archive_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "collection": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tags": {
+          "$ref": "../common.schema.json#/$defs/string_tags"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "flow_id",
+        "job_id",
+        "asset_id",
+        "idempotency_key"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "job_id": {
+          "$ref": "../common.schema.json#/$defs/job_id"
+        },
+        "asset_id": {
+          "$ref": "../common.schema.json#/$defs/asset_id"
+        },
+        "idempotency_key": {
+          "$ref": "../common.schema.json#/$defs/idempotency_key"
+        },
+        "metadata": {
+          "$ref": "#/$defs/archive_metadata"
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "ok",
+        "flow_id",
+        "job_id",
+        "asset_id",
+        "resource_id",
+        "archived_at",
+        "deduplicated"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "ok": {
+          "const": true
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "job_id": {
+          "$ref": "../common.schema.json#/$defs/job_id"
+        },
+        "asset_id": {
+          "$ref": "../common.schema.json#/$defs/asset_id"
+        },
+        "resource_id": {
+          "$ref": "../common.schema.json#/$defs/resource_id"
+        },
+        "archived_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        },
+        "deduplicated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/success"
+        },
+        {
+          "$ref": "../common.schema.json#/$defs/error_result"
+        }
+      ]
+    }
+  }
+}

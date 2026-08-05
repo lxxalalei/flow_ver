@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/session-manager/v1/schemas/tools/resource_session_save.schema.json",
+  "title": "resource_session_save contract v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/input"
+    },
+    {
+      "$ref": "#/$defs/output"
+    }
+  ],
+  "$defs": {
+    "cookie": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "object",
+          "null"
+        ]
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$"
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^/[^\\u0000-\\u001F\\u007F]{0,1023}$"
+        },
+        "expires": {
+          "type": "number"
+        },
+        "httpOnly": {
+          "type": "boolean"
+        },
+        "secure": {
+          "type": "boolean"
+        },
+        "sameSite": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "partitionKey": {}
+      }
+    },
+    "cookie_session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cookies"
+      ],
+      "properties": {
+        "cookies": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/cookie"
+          }
+        }
+      }
+    },
+    "token_session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens"
+      ],
+      "properties": {
+        "tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "accessToken"
+          ],
+          "properties": {
+            "accessToken": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            },
+            "x-nd-auth": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            }
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "platform",
+        "session_data"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "platform": {
+          "$ref": "../common.schema.json#/$defs/platform"
+        },
+        "session_data": {
+          "$ref": "#/$defs/browser_session"
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idempotency_key": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/idempotency_key"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "ok",
+        "platform",
+        "status",
+        "auth_kind",
+        "session_revision",
+        "captured_at",
+        "expires_at",
+        "stored_credential_count",
+        "discarded_credential_count",
+        "idempotent_replay"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "ok": {
+          "const": true
+        },
+        "platform": {
+          "$ref": "../common.schema.json#/$defs/platform"
+        },
+        "status": {
+          "const": "stored"
+        },
+        "auth_kind": {
+          "type": "string",
+          "enum": [
+            "cookie",
+            "token"
+          ]
+        },
+        "captured_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stored_credential_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "discarded_credential_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "idempotent_replay": {
+          "type": "boolean"
+        },
+        "session_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      }
+    },
+    "output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/success"
+        },
+        {
+          "$ref": "../common.schema.json#/$defs/error_result"
+        }
+      ]
+    },
+    "token_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 2,
+      "properties": {
+        "accessToken": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "x-nd-auth": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      }
+    },
+    "storage_map": {
+      "type": "object",
+      "maxProperties": 512,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 65536
+      }
+    },
+    "browser_session": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "cookies": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/cookie"
+          }
+        },
+        "tokens": {
+          "$ref": "#/$defs/token_map"
+        },
+        "storage_origin": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https?://[^/?#]+/?$"
+        },
+        "local_storage": {
+          "$ref": "#/$defs/storage_map"
+        },
+        "session_storage": {
+          "$ref": "#/$defs/storage_map"
+        }
+      }
+    }
+  }
+}

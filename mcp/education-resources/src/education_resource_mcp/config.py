@@ -38,6 +38,7 @@ class Settings:
     max_workers: int = 2
     plan_ttl_seconds: int = 15 * 60
     searxng_base_url: str = ""
+    session_manager_data_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -71,6 +72,12 @@ class Settings:
             searxng_base_url=os.environ.get(
                 "EDUCATION_RESOURCE_MCP_SEARXNG_URL", ""
             ).rstrip("/"),
+            session_manager_data_dir=(
+                Path(os.environ["EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR"])
+                .expanduser()
+                if os.environ.get("EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR")
+                else None
+            ),
         )
 
     def ensure_directories(self) -> None:

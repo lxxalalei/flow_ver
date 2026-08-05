@@ -7,8 +7,18 @@ from typing import Any, Callable, Literal
 from mcp.server.mcpserver import MCPServer
 
 from .errors import DomainError, failure, ok
-from .models import ArchiveMetadata, DownloadOptions, FlowIntent, LibraryFilters, SearchFilters
+from .models import (
+    ArchiveMetadata,
+    DownloadOptions,
+    FlowTask,
+    LibraryFilters,
+    SearchFilters,
+    SearchTask,
+)
 from .service import ResourceService
+
+
+CONTRACT_VERSION = "2.0.0"
 
 
 def _invoke(
@@ -25,78 +35,123 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     server = MCPServer(
         name="education-resources",
         title="Education Resources",
-        description="Search, select, confirm, download, inspect, and archive education resources",
-        version="0.1.0",
+        description="Search, present, select, confirm, download, inspect, and archive education resources",
+        version="0.2.0",
         instructions=(
-            "Start a flow before searching. Save only explicitly selected resource IDs. "
-            "Downloads require prepare, user confirmation, then start. Never invent IDs."
+            "Use contract 2.0.0. Start a FlowTask, search into a ResultSet, save the exact "
+            "resources actually shown with resource_presentation_save, then save only the "
+            "user-selected display positions. Downloads require prepare, explicit user "
+            "confirmation, then start. Use resource_flow_status to recover durable state. "
+            "Never invent IDs, positions, paths, commands, or download URLs."
         ),
     )
 
     @server.tool(structured_output=True)
     def resource_flow_start(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         idempotency_key: str,
-        intent: FlowIntent,
+        task: FlowTask,
     ) -> dict[str, Any]:
-        """Start a durable education-resource flow and return its flow_id."""
+        """Start a durable v2 education-resource FlowTask."""
         return _invoke(
-            lambda: resource_service.flow_start(idempotency_key, intent.model_dump())
+            lambda: resource_service.flow_start(idempotency_key, task.model_dump())
         )
 
     @server.tool(structured_output=True)
     def resource_search(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         flow_id: str,
+        task_version: int,
         idempotency_key: str,
-        query: str,
+        search_tasks: list[SearchTask],
         filters: SearchFilters | None = None,
-        cursor: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Search and persist the exact candidate set presented for this flow."""
+        """Search across multiple platforms in parallel into a durable ResultSet.
+
+        Each SearchTask specifies one platform and one or more queries.
+        Platforms run in parallel; queries within a platform run serially.
+        """
         return _invoke(
             lambda: resource_service.search(
                 flow_id,
                 idempotency_key,
-                query,
+                [t.model_dump() for t in search_tasks],
+                task_version=task_version,
                 filters=filters.model_dump(exclude_none=True) if filters else None,
-                cursor=cursor,
                 limit=limit,
             ),
             flow_id=flow_id,
         )
 
     @server.tool(structured_output=True)
-    def resource_selection_save(
-        contract_version: Literal["1.0.0"],
+    def resource_presentation_save(
+        contract_version: Literal["2.0.0"],
         flow_id: str,
+        result_set_id: str,
+        displayed_resource_ids: list[str],
         idempotency_key: str,
-        presented_version: int,
-        selected_resource_ids: list[str],
     ) -> dict[str, Any]:
-        """Persist the user's explicit selection from the current presented set."""
+        """Persist the exact ResultSet resources and order actually shown to the user."""
         return _invoke(
-            lambda: resource_service.selection_save(
-                flow_id, idempotency_key, presented_version, selected_resource_ids
+            lambda: resource_service.presentation_save(
+                flow_id,
+                result_set_id,
+                displayed_resource_ids,
+                idempotency_key,
             ),
             flow_id=flow_id,
         )
 
     @server.tool(structured_output=True)
-    def resource_download_prepare(
-        contract_version: Literal["1.0.0"],
+    def resource_selection_save(
+        contract_version: Literal["2.0.0"],
         flow_id: str,
         idempotency_key: str,
+        presentation_id: str,
+        presented_version: int,
+        selected_positions: list[int],
+    ) -> dict[str, Any]:
+        """Save explicit user choices by position from the current Presentation."""
+        return _invoke(
+            lambda: resource_service.selection_save(
+                flow_id,
+                idempotency_key,
+                presentation_id,
+                presented_version,
+                selected_positions,
+            ),
+            flow_id=flow_id,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_flow_status(
+        contract_version: Literal["2.0.0"],
+        flow_id: str,
+    ) -> dict[str, Any]:
+        """Recover the authoritative current Flow state and allowed next actions."""
+        return _invoke(lambda: resource_service.flow_status(flow_id), flow_id=flow_id)
+
+    @server.tool(structured_output=True)
+    def resource_download_prepare(
+        contract_version: Literal["2.0.0"],
+        flow_id: str,
+        idempotency_key: str,
+        presentation_id: str,
+        presented_version: int,
         selection_version: int,
+        selection_digest: str,
         options: DownloadOptions | None = None,
     ) -> dict[str, Any]:
-        """Prepare a bounded download plan without downloading anything."""
+        """Prepare a bounded Plan bound to the current Selection without downloading."""
         return _invoke(
             lambda: resource_service.download_prepare(
                 flow_id,
                 idempotency_key,
                 selection_version,
+                presentation_id=presentation_id,
+                presented_version=presented_version,
+                selection_digest=selection_digest,
                 options=options.model_dump(exclude_none=True) if options else None,
             ),
             flow_id=flow_id,
@@ -104,16 +159,29 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_download_start(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         flow_id: str,
         plan_id: str,
+        presentation_id: str,
+        presented_version: int,
+        selection_version: int,
+        selection_digest: str,
+        plan_digest: str,
         confirmation_token: str,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        """Start an asynchronous download only after explicit user confirmation."""
+        """Start an asynchronous download after explicit user confirmation."""
         return _invoke(
             lambda: resource_service.download_start(
-                flow_id, plan_id, confirmation_token, idempotency_key
+                flow_id,
+                plan_id,
+                confirmation_token,
+                idempotency_key,
+                presentation_id=presentation_id,
+                presented_version=presented_version,
+                selection_version=selection_version,
+                selection_digest=selection_digest,
+                plan_digest=plan_digest,
             ),
             flow_id=flow_id,
             plan_id=plan_id,
@@ -121,11 +189,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_job_status(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         flow_id: str,
         job_id: str,
     ) -> dict[str, Any]:
-        """Return durable status and validated asset metadata for a download job."""
+        """Return durable status and validated asset metadata for a download Job."""
         return _invoke(
             lambda: resource_service.job_status(flow_id, job_id),
             flow_id=flow_id,
@@ -134,13 +202,13 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_job_cancel(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         flow_id: str,
         job_id: str,
         idempotency_key: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        """Request cancellation; cancelled assets are quarantined and cannot be archived."""
+        """Request cancellation; cancelled assets are quarantined."""
         return _invoke(
             lambda: resource_service.job_cancel(
                 flow_id, job_id, idempotency_key, reason
@@ -151,14 +219,14 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_archive(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         flow_id: str,
         job_id: str,
         asset_id: str,
         idempotency_key: str,
         metadata: ArchiveMetadata | None = None,
     ) -> dict[str, Any]:
-        """Archive a ready asset by asset_id; local paths are never accepted."""
+        """Archive a ready Asset by asset_id; local paths are never accepted."""
         return _invoke(
             lambda: resource_service.archive(
                 flow_id,
@@ -174,13 +242,13 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_library_search(
-        contract_version: Literal["1.0.0"],
+        contract_version: Literal["2.0.0"],
         flow_id: str,
         filters: LibraryFilters | None = None,
         cursor: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Search archived assets by title or metadata."""
+        """Search archived Assets by bounded metadata filters."""
         return _invoke(
             lambda: resource_service.library_search(
                 flow_id,
@@ -191,62 +259,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             flow_id=flow_id,
         )
 
-    @server.tool(structured_output=True)
-    def resource_session_status(
-        contract_version: Literal["1.0.0"],
-        platforms: list[str] | None = None,
-        deep: bool = False,
-    ) -> dict[str, Any]:
-        """Check which platforms have valid, expired, or missing sessions.
-
-        Returns a batch status for all known platforms or only the requested
-        ones.  ``needs_login`` lists platforms that require user login before
-        search or download can proceed.  Set ``deep`` to true to actively
-        probe each stored session against the platform so a cookie that is
-        still file-valid but rejected server-side is reported as
-        ``probe_status="invalid"``.
-        """
-        return _invoke(
-            lambda: resource_service.session_status(platforms, deep=deep)
-        )
-
-    @server.tool(structured_output=True)
-    def resource_session_save(
-        contract_version: Literal["1.0.0"],
-        platform: str,
-        session_data: dict[str, Any],
-        expires_at: str | None = None,
-    ) -> dict[str, Any]:
-        """Persist a captured browser session (cookies/tokens) for a platform.
-
-        Called after the user completes login via browser automation.  The
-        stored session is reused for subsequent search and download requests
-        until it expires.
-        """
-        return _invoke(
-            lambda: resource_service.session_save(
-                platform, session_data, expires_at=expires_at
-            ),
-            platform=platform,
-        )
-
-    @server.tool(structured_output=True)
-    def resource_session_delete(
-        contract_version: Literal["1.0.0"],
-        platform: str,
-    ) -> dict[str, Any]:
-        """Remove a stored platform session."""
-        return _invoke(
-            lambda: resource_service.session_delete(platform),
-            platform=platform,
-        )
-
     return server
 
 
 def main() -> None:
     create_server().run("stdio")
-
-
-if __name__ == "__main__":
-    main()

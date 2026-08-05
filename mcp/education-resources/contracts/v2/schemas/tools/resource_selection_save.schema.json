@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tools/resource_selection_save.schema.json",
+  "title": "resource_selection_save contract v2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/input"
+    },
+    {
+      "$ref": "#/$defs/output"
+    }
+  ],
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "flow_id",
+        "presentation_id",
+        "presented_version",
+        "idempotency_key",
+        "selected_positions"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "presentation_id": {
+          "$ref": "../common.schema.json#/$defs/presentation_id"
+        },
+        "presented_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "idempotency_key": {
+          "$ref": "../common.schema.json#/$defs/idempotency_key"
+        },
+        "selected_positions": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "ok",
+        "flow_id",
+        "stage",
+        "presentation_id",
+        "presented_version",
+        "selection_version",
+        "selection_digest",
+        "selected_positions",
+        "selected_resource_ids",
+        "cancelled",
+        "updated_at"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "ok": {
+          "const": true
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "selected",
+            "cancelled"
+          ]
+        },
+        "presentation_id": {
+          "$ref": "../common.schema.json#/$defs/presentation_id"
+        },
+        "presented_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "selection_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "selection_digest": {
+          "$ref": "../common.schema.json#/$defs/selection_digest"
+        },
+        "selected_positions": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "selected_resource_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "../common.schema.json#/$defs/resource_id"
+          }
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "updated_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "cancelled"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          },
+          "then": {
+            "properties": {
+              "selected_positions": {
+                "maxItems": 0
+              },
+              "selected_resource_ids": {
+                "maxItems": 0
+              },
+              "cancelled": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "selected_positions": {
+                "minItems": 1
+              },
+              "selected_resource_ids": {
+                "minItems": 1
+              },
+              "cancelled": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/success"
+        },
+        {
+          "$ref": "../common.schema.json#/$defs/error_result"
+        }
+      ]
+    }
+  }
+}

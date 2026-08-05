@@ -14,7 +14,7 @@ from referencing import Registry, Resource
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS_ROOT = SERVICE_ROOT / "contracts" / "v1"
+CONTRACTS_ROOT = SERVICE_ROOT / "contracts" / "v2"
 SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -22,10 +22,26 @@ if str(SRC) not in sys.path:
 from education_resource_mcp.config import Settings
 from education_resource_mcp.downloader import DownloadResult
 from education_resource_mcp.errors import DomainError, failure, ok
-from education_resource_mcp.models import FlowIntent
+from education_resource_mcp.models import FlowTask
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
-from pydantic import ValidationError
+
+
+TERMINAL_JOB_STATES = {"succeeded", "failed", "cancelled"}
+EXPECTED_FLOW_STATUS_FIELDS = {
+    "current_result_set",
+    "current_presentation",
+    "current_selection",
+    "current_plan",
+    "current_job",
+}
+LEGACY_FLOW_STATUS_FIELDS = {"latest_result_set", "active_plan", "latest_job"}
+BINDING_FIELDS = {
+    "presentation_id",
+    "presented_version",
+    "selection_version",
+    "selection_digest",
+}
 
 
 class ContractDownloader:
@@ -34,9 +50,8 @@ class ContractDownloader:
         self.wait_for_cancel = wait_for_cancel
 
     def download(self, resource, job_id, strategy, max_bytes, cancel_event):
-        if self.wait_for_cancel:
-            if cancel_event.wait(2):
-                raise DomainError("JOB_CANCELLED", "cancelled")
+        if self.wait_for_cancel and cancel_event.wait(2):
+            raise DomainError("JOB_CANCELLED", "cancelled")
         payload = b"<html>contract fixture</html>"
         directory = self.jobs_dir / job_id
         directory.mkdir(parents=True, exist_ok=True)
@@ -79,7 +94,7 @@ class ContractOutputTests(unittest.TestCase):
             max_workers=2,
             plan_ttl_seconds=60,
         )
-        provider = StaticSearchProvider(
+        self.provider = StaticSearchProvider(
             [
                 {
                     "platform": "generic",
@@ -88,13 +103,20 @@ class ContractOutputTests(unittest.TestCase):
                     "resource_type": "article",
                     "summary": "公开资料",
                     "metadata": {"language": "zh-CN"},
-                }
+                },
+                {
+                    "platform": "generic",
+                    "title": "恐龙化石资料",
+                    "source_url": "https://example.com/fossil",
+                    "resource_type": "article",
+                    "summary": "化石资料",
+                    "metadata": {"language": "zh-CN"},
+                },
             ]
         )
-        self.provider = provider
         self.service = ResourceService(
             self.settings,
-            search_provider=provider,
+            search_provider=self.provider,
             download_provider=ContractDownloader(self.settings.jobs_dir),
         )
 
@@ -102,90 +124,191 @@ class ContractOutputTests(unittest.TestCase):
         self.service.close()
         self.temp.cleanup()
 
-    def test_teacher_is_not_an_active_audience(self) -> None:
-        schema = json.loads(
-            (
-                CONTRACTS_ROOT
-                / "schemas/tools/resource_flow_start.schema.json"
-            ).read_text(encoding="utf-8")
-        )
-        audience_values = schema["$defs"]["input"]["properties"]["intent"][
-            "properties"
-        ]["audience"]["enum"]
-        self.assertNotIn("teacher", audience_values)
-        with self.assertRaises(ValidationError):
-            FlowIntent(topic="恐龙", audience="teacher")
-
     def assert_contract(self, tool_name: str, instance: dict) -> None:
-        path = (
-            CONTRACTS_ROOT
-            / f"schemas/tools/{tool_name}.schema.json"
-        )
+        path = CONTRACTS_ROOT / "schemas" / "tools" / f"{tool_name}.schema.json"
         schema = json.loads(path.read_text(encoding="utf-8"))
+        validation_schema = schema
+        if instance.get("ok") is True:
+            validation_schema = {
+                **schema,
+                "$ref": "#/$defs/success",
+            }
+            validation_schema.pop("oneOf", None)
         validator = Draft202012Validator(
-            schema, registry=self.registry, format_checker=FormatChecker()
+            validation_schema,
+            registry=self.registry,
+            format_checker=FormatChecker(),
         )
         errors = sorted(validator.iter_errors(instance), key=lambda item: list(item.path))
-        self.assertEqual([], [error.message for error in errors])
+        messages = [
+            f"/{'/'.join(str(part) for part in error.absolute_path)}: {error.message}"
+            for error in errors
+        ]
+        self.assertEqual([], messages)
+
+    def _flow_task(self) -> dict:
+        return FlowTask(
+            goal={"topic": "恐龙", "outcome": "找到适合入门理解的资料"},
+            user_role="parent",
+            resource_target="child",
+            constraints=[],
+        ).model_dump(exclude_none=True)
 
     def _wait(self, flow_id: str, job_id: str) -> dict:
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             result = self.service.job_status(flow_id, job_id)
-            if result["status"] in {"succeeded", "failed", "cancelled"}:
+            if result["status"] in TERMINAL_JOB_STATES:
                 return result
             time.sleep(0.01)
         self.fail("job timeout")
 
-    def test_success_outputs_match_all_non_cancel_contracts(self) -> None:
+    def _prepare_flow(self, key_suffix: str) -> dict[str, dict]:
         flow = self.service.flow_start(
-            "contract-flow-key-01", {"topic": "恐龙", "audience": "primary"}
+            f"contract-flow-{key_suffix}-0001", self._flow_task()
         )
-        self.assert_contract("resource_flow_start", ok(flow))
-
         search = self.service.search(
-            flow["flow_id"], "contract-search-001", "恐龙", limit=20
+            flow["flow_id"],
+            f"contract-search-{key_suffix}-001",
+            [{"platform": "generic", "queries": [{"query": "恐龙"}]}],
+            task_version=flow["task_version"],
+            filters={
+                "resource_types": ["article"],
+                "languages": ["zh-CN"],
+            },
+            limit=20,
         )
-        self.assert_contract("resource_search", ok(search))
-        resource_id = search["resources"][0]["resource_id"]
-
+        displayed = [
+            search["candidates"][1]["resource_id"],
+            search["candidates"][0]["resource_id"],
+        ]
+        presentation = self.service.presentation_save(
+            flow["flow_id"],
+            search["result_set_id"],
+            displayed,
+            f"contract-present-{key_suffix}-01",
+        )
         selection = self.service.selection_save(
             flow["flow_id"],
-            "contract-select-001",
-            search["presented_version"],
-            [resource_id],
+            f"contract-select-{key_suffix}-001",
+            presentation["presentation_id"],
+            presentation["presented_version"],
+            [1],
         )
-        self.assert_contract("resource_selection_save", ok(selection))
-
+        binding = {
+            "presentation_id": presentation["presentation_id"],
+            "presented_version": presentation["presented_version"],
+            "selection_version": selection["selection_version"],
+            "selection_digest": selection["selection_digest"],
+        }
         plan = self.service.download_prepare(
             flow["flow_id"],
-            "contract-prepare-01",
+            f"contract-prepare-{key_suffix}-01",
             selection["selection_version"],
+            presentation_id=binding["presentation_id"],
+            presented_version=binding["presented_version"],
+            selection_digest=binding["selection_digest"],
+            options={"preferred_container": "html"},
         )
-        self.assert_contract("resource_download_prepare", ok(plan))
+        return {
+            "flow": flow,
+            "search": search,
+            "presentation": presentation,
+            "selection": selection,
+            "binding": binding,
+            "plan": plan,
+        }
+
+    def test_success_outputs_match_all_v2_contracts_except_cancel(self) -> None:
+        state = self._prepare_flow("success")
+        flow = state["flow"]
+        search = state["search"]
+        presentation = state["presentation"]
+        selection = state["selection"]
+        binding = state["binding"]
+        plan = state["plan"]
+
+        with self.subTest(public_shape="search"):
+            self.assertIn("candidates", search)
+            self.assertEqual(flow["task_version"], search["task_version"])
+        with self.subTest(public_shape="presentation"):
+            self.assertIn("items", presentation)
+            self.assertIn("empty", presentation)
+            self.assertNotIn("displayed_items", presentation)
+        with self.subTest(public_shape="prepare"):
+            self.assertIn("plan_digest", plan)
+            self.assertEqual(
+                {field: plan[field] for field in BINDING_FIELDS}, binding
+            )
+
+        status_before_start = self.service.flow_status(flow["flow_id"])
+        with self.subTest(public_shape="flow_status_before_start"):
+            self.assertTrue(EXPECTED_FLOW_STATUS_FIELDS.issubset(status_before_start))
+            self.assertTrue(LEGACY_FLOW_STATUS_FIELDS.isdisjoint(status_before_start))
+            self.assertEqual(
+                status_before_start["current_plan"]["plan_digest"],
+                plan["plan_digest"],
+            )
+            self.assertNotIn(
+                "confirmation_token", status_before_start["current_plan"]
+            )
 
         started = self.service.download_start(
             flow["flow_id"],
             plan["plan_id"],
             plan["confirmation_token"],
-            "contract-start-0001",
+            "contract-start-success-001",
+            **binding,
         )
-        self.assert_contract("resource_download_start", ok(started))
         status = self._wait(flow["flow_id"], started["job_id"])
-        self.assert_contract("resource_job_status", ok(status))
+        self.assertEqual("succeeded", status["status"])
+        with self.subTest(public_shape="download_start"):
+            self.assertEqual(
+                {field: started[field] for field in BINDING_FIELDS}, binding
+            )
+            self.assertEqual(started["plan_digest"], plan["plan_digest"])
+        with self.subTest(public_shape="job_status"):
+            self.assertEqual(status["plan_id"], plan["plan_id"])
+            self.assertEqual(
+                {field: status[field] for field in BINDING_FIELDS}, binding
+            )
+            self.assertEqual(status["plan_digest"], plan["plan_digest"])
+
+        status_after_start = self.service.flow_status(flow["flow_id"])
+        with self.subTest(public_shape="flow_status_after_start"):
+            self.assertTrue(EXPECTED_FLOW_STATUS_FIELDS.issubset(status_after_start))
+            self.assertEqual(
+                status_after_start["current_job"]["job_id"], started["job_id"]
+            )
 
         archived = self.service.archive(
             flow["flow_id"],
             started["job_id"],
             status["assets"][0]["asset_id"],
-            idempotency_key="contract-archive-01",
+            idempotency_key="contract-archive-success-01",
             metadata={"title": "恐龙资料", "collection": "科学", "tags": ["恐龙"]},
         )
-        self.assert_contract("resource_archive", ok(archived))
-        library = self.service.library_search(flow["flow_id"], limit=20)
-        self.assert_contract("resource_library_search", ok(library))
+        library = self.service.library_search(
+            flow["flow_id"], filters={"query": "恐龙"}, limit=20
+        )
 
-    def test_cancel_and_error_outputs_match_contracts(self) -> None:
+        outputs = {
+            "resource_flow_start": flow,
+            "resource_search": search,
+            "resource_presentation_save": presentation,
+            "resource_selection_save": selection,
+            "resource_download_prepare": plan,
+            "resource_flow_status": status_after_start,
+            "resource_download_start": started,
+            "resource_job_status": status,
+            "resource_archive": archived,
+            "resource_library_search": library,
+        }
+        for tool_name, output in outputs.items():
+            with self.subTest(contract=tool_name):
+                self.assert_contract(tool_name, ok(output))
+
+    def test_job_cancel_success_output_matches_v2_contract(self) -> None:
         self.service.close()
         self.service = ResourceService(
             self.settings,
@@ -194,39 +317,37 @@ class ContractOutputTests(unittest.TestCase):
                 self.settings.jobs_dir, wait_for_cancel=True
             ),
         )
-        flow = self.service.flow_start(
-            "contract-flow-key-02", {"topic": "恐龙", "audience": "primary"}
-        )
-        search = self.service.search(
-            flow["flow_id"], "contract-search-002", "恐龙", limit=20
-        )
-        selection = self.service.selection_save(
-            flow["flow_id"],
-            "contract-select-002",
-            search["presented_version"],
-            [search["resources"][0]["resource_id"]],
-        )
-        plan = self.service.download_prepare(
-            flow["flow_id"], "contract-prepare-02", selection["selection_version"]
-        )
+        state = self._prepare_flow("cancel")
+        flow = state["flow"]
+        plan = state["plan"]
+        binding = state["binding"]
         started = self.service.download_start(
             flow["flow_id"],
             plan["plan_id"],
             plan["confirmation_token"],
-            "contract-start-0002",
+            "contract-start-cancel-0001",
+            **binding,
         )
         cancelled = self.service.job_cancel(
             flow["flow_id"],
             started["job_id"],
-            "contract-cancel-0001",
+            "contract-cancel-output-01",
             "user cancelled",
         )
         self.assert_contract("resource_job_cancel", ok(cancelled))
 
+    def test_structured_error_output_matches_v2_schema(self) -> None:
         error = failure(
-            DomainError("FLOW_NOT_FOUND", "Flow 不存在"),
+            DomainError(
+                "FLOW_NOT_FOUND",
+                "Flow 不存在",
+                retryable=False,
+                details={"operation": "resource_search"},
+            ),
             flow_id="flow_0000000000000000",
         )
+        self.assertFalse(error["ok"])
+        self.assertEqual("FLOW_NOT_FOUND", error["error"]["code"])
         self.assert_contract("resource_search", error)
 
 

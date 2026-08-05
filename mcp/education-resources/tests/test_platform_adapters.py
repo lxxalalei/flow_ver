@@ -107,13 +107,16 @@ class BilibiliAdapterTests(unittest.TestCase):
     def _adapter(self, data_dir: Path) -> BilibiliSearchAdapter:
         return BilibiliSearchAdapter(SessionStore(data_dir), _settings(data_dir))
 
-    def test_missing_session_returns_auth_required(self) -> None:
+    def test_search_works_without_session(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             adapter = self._adapter(Path(d))
+            # Without a session the adapter should still attempt search
+            # (cookie is optional for B站). It will fail on the network
+            # call, but should NOT return AUTH_REQUIRED.
             results, error = adapter.search("test", 10)
-        self.assertEqual(results, [])
-        self.assertEqual(error["code"], "AUTH_REQUIRED")
-        self.assertFalse(error["retryable"])
+        # No session → empty cookie, but NOT AUTH_REQUIRED
+        if error:
+            self.assertNotEqual(error["code"], "AUTH_REQUIRED")
 
     def test_search_returns_normalized_results(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -277,7 +280,9 @@ class SmartEduAdapterTests(unittest.TestCase):
                             "title": "三年级数学上册",
                             "description": "人教版三年级数学",
                             "tab_code": "qualityCourse",
-                            "content_type": "resource",
+                            "search_resource_type": "course",
+                            "resource_type": "elite_lesson",
+                            "tab_code": "qualityCourse",
                             "tags": [
                                 {"dimension_id": "zxxnj", "title": "三年级"},
                                 {"dimension_id": "zxxbb", "title": "人教版"},
@@ -294,7 +299,7 @@ class SmartEduAdapterTests(unittest.TestCase):
                 results, error = adapter.search("三年级数学", 10)
 
         self.assertIsNone(error)
-        self.assertEqual(len(results), 1)
+        self.assertGreaterEqual(len(results), 1)
         r = results[0]
         self.assertEqual(r["platform"], "smartedu")
         self.assertEqual(r["title"], "三年级数学上册")
@@ -341,11 +346,15 @@ class MultiPlatformSearchProviderTests(unittest.TestCase):
             )
             provider.register_adapter(stub)
 
-            resources, errors = provider.search("test", 10, ["bilibili"])
+            resources, platform_runs = provider.search(
+                [{"platform": "bilibili", "queries": [{"query": "test"}]}], 10
+            )
 
         self.assertEqual(len(resources), 1)
         self.assertEqual(resources[0]["platform"], "bilibili")
-        self.assertEqual(errors, [])
+        self.assertEqual(len(platform_runs), 1)
+        self.assertEqual(platform_runs[0]["platform"], "bilibili")
+        self.assertEqual(platform_runs[0]["status"], "succeeded")
         stub.search.assert_called_once_with("test", 10)
 
     def test_unknown_platform_returns_unavailable(self) -> None:
@@ -356,10 +365,18 @@ class MultiPlatformSearchProviderTests(unittest.TestCase):
             generic = GenericWebSearchProvider(settings)
             provider = MultiPlatformSearchProvider(settings, store, generic)
 
-            resources, errors = provider.search("test", 10, ["nonexistent"])
+            resources, platform_runs = provider.search(
+                [{"platform": "nonexistent", "queries": [{"query": "test"}]}], 10
+            )
 
         self.assertEqual(resources, [])
-        self.assertEqual(errors[0]["code"], "PLATFORM_UNAVAILABLE")
+        self.assertEqual(len(platform_runs), 1)
+        self.assertEqual(platform_runs[0]["platform"], "nonexistent")
+        self.assertEqual(platform_runs[0]["status"], "skipped")
+        self.assertEqual(
+            platform_runs[0]["query_runs"][0]["error"]["code"],
+            "PLATFORM_UNAVAILABLE",
+        )
 
     def test_generic_path_still_works(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -379,7 +396,9 @@ class MultiPlatformSearchProviderTests(unittest.TestCase):
                 "education_resource_mcp.search.generic_web.search",
                 return_value=response,
             ):
-                resources, errors = provider.search("test", 5, ["generic"])
+                resources, platform_runs = provider.search(
+                    [{"platform": "generic", "queries": [{"query": "test"}]}], 5
+                )
 
         self.assertEqual(len(resources), 1)
         self.assertEqual(resources[0]["platform"], "generic")

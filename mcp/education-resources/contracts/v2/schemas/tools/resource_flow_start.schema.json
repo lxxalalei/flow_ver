@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tools/resource_flow_start.schema.json",
+  "title": "resource_flow_start contract v2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/input"
+    },
+    {
+      "$ref": "#/$defs/output"
+    }
+  ],
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "idempotency_key",
+        "task"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "idempotency_key": {
+          "$ref": "../common.schema.json#/$defs/idempotency_key"
+        },
+        "task": {
+          "$ref": "../common.schema.json#/$defs/input_flow_task"
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "ok",
+        "flow_id",
+        "task_version",
+        "stage",
+        "task",
+        "created_at"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "ok": {
+          "const": true
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "task_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "stage": {
+          "type": "string",
+          "const": "task_ready"
+        },
+        "task": {
+          "$ref": "../common.schema.json#/$defs/persisted_flow_task"
+        },
+        "created_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        }
+      }
+    },
+    "output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/success"
+        },
+        {
+          "$ref": "../common.schema.json#/$defs/error_result"
+        }
+      ]
+    }
+  }
+}

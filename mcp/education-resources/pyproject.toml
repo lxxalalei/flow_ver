@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "education-resource-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local MCP service for education resource search, controlled download, jobs, and archive"
 requires-python = ">=3.12"
 dependencies = [
   "mcp==2.0.0",
+  "pycryptodome>=3.20",
 ]
 
 [project.scripts]

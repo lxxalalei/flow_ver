@@ -34,7 +34,14 @@ class DownloadProvider(Protocol):
         strategy: str,
         max_bytes: int,
         cancel_event: threading.Event,
-    ) -> DownloadResult: ...
+    ) -> DownloadResult | list[DownloadResult]:
+        """Download one or more files for *resource*.
+
+        Most providers return a single ``DownloadResult``.  Platform-specific
+        downloaders may return a list when a single resource (e.g. a SmartEdu
+        course) contains multiple sub-resources (video + worksheets + exercises).
+        """
+        ...
 
 
 class _SafeRedirectHandler(HTTPRedirectHandler):

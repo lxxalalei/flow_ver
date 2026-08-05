@@ -10,6 +10,10 @@ from education_resource_mcp.config import Settings
 from education_resource_mcp.search import GenericWebSearchProvider, SearXNGSearchProvider
 
 
+def _task(platform: str, query: str) -> dict:
+    return {"platform": platform, "queries": [{"query": query}]}
+
+
 class GenericWebSearchProviderTests(unittest.TestCase):
     def test_uses_mcp_owned_adapter_and_normalizes_results(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
@@ -38,14 +42,17 @@ class GenericWebSearchProviderTests(unittest.TestCase):
                 "education_resource_mcp.search.generic_web.search",
                 return_value=response,
             ) as search:
-                resources, errors = provider.search("测试主题", 5, ["generic"])
+                resources, platform_runs = provider.search([_task("generic", "测试主题")], 5)
 
             search.assert_called_once_with("测试主题", ["duckduckgo"], 5, 20.0)
-            self.assertEqual(errors, [])
             self.assertEqual(len(resources), 1)
             self.assertEqual(resources[0]["source_url"], "https://example.com/resource")
+            self.assertEqual(len(platform_runs), 1)
+            self.assertEqual(platform_runs[0]["platform"], "generic")
+            self.assertEqual(platform_runs[0]["status"], "succeeded")
+            self.assertEqual(platform_runs[0]["query_runs"][0]["candidate_count"], 1)
 
-    def test_reports_platforms_not_migrated_to_mcp(self) -> None:
+    def test_non_generic_platform_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
             root = Path(data_dir)
             settings = Settings(
@@ -55,11 +62,12 @@ class GenericWebSearchProviderTests(unittest.TestCase):
                 library_dir=root / "library",
             )
             provider = GenericWebSearchProvider(settings)
-            resources, errors = provider.search("测试主题", 5, ["bilibili"])
+            resources, platform_runs = provider.search([_task("bilibili", "测试主题")], 5)
 
         self.assertEqual(resources, [])
-        self.assertEqual(errors[0]["platform"], "bilibili")
-        self.assertEqual(errors[0]["code"], "PLATFORM_UNAVAILABLE")
+        self.assertEqual(len(platform_runs), 1)
+        self.assertEqual(platform_runs[0]["platform"], "bilibili")
+        self.assertEqual(platform_runs[0]["status"], "skipped")
 
 
 class SearXNGSearchProviderTests(unittest.TestCase):
@@ -93,15 +101,16 @@ class SearXNGSearchProviderTests(unittest.TestCase):
             mock_resp.__enter__ = MagicMock(return_value=mock_resp)
             mock_resp.__exit__ = MagicMock(return_value=False)
             with patch("education_resource_mcp.search.urlopen", return_value=mock_resp):
-                resources, errors = provider.search("太阳系", 10, ["generic"])
+                resources, platform_runs = provider.search([_task("generic", "太阳系")], 10)
 
         self.assertEqual(len(resources), 1)
         self.assertEqual(resources[0]["title"], "儿童科普太阳系")
         self.assertEqual(resources[0]["source_url"], "https://example.com/solar")
         self.assertEqual(resources[0]["platform"], "generic")
         self.assertEqual(resources[0]["metadata"]["engine"], "baidu")
-        self.assertEqual(len(errors), 1)
-        self.assertEqual(errors[0]["code"], "PARTIAL_FAILURE")
+        self.assertEqual(len(platform_runs), 1)
+        self.assertEqual(platform_runs[0]["status"], "partial")
+        self.assertEqual(platform_runs[0]["query_runs"][0]["failure_count"], 1)
 
     def test_skips_invalid_urls_and_empty_titles(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
@@ -119,7 +128,7 @@ class SearXNGSearchProviderTests(unittest.TestCase):
             mock_resp.__enter__ = MagicMock(return_value=mock_resp)
             mock_resp.__exit__ = MagicMock(return_value=False)
             with patch("education_resource_mcp.search.urlopen", return_value=mock_resp):
-                resources, _ = provider.search("测试", 10)
+                resources, _ = provider.search([_task("generic", "测试")], 10)
 
         self.assertEqual(len(resources), 1)
         self.assertEqual(resources[0]["title"], "保留")

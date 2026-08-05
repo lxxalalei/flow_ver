@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tool-catalog.schema.json",
+  "title": "Education Resource MCP tool catalog schema v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "catalog_version",
+    "contract_version",
+    "server_id",
+    "tools"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "schemas/tool-catalog.schema.json"
+    },
+    "catalog_version": {
+      "type": "string",
+      "const": "2.0.0"
+    },
+    "contract_version": {
+      "$ref": "common.schema.json#/$defs/contract_version"
+    },
+    "server_id": {
+      "type": "string",
+      "const": "learning_resources"
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description",
+          "side_effect",
+          "requires_flow_id",
+          "idempotency_required",
+          "input_schema",
+          "output_schema"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "resource_flow_start",
+              "resource_flow_status",
+              "resource_search",
+              "resource_presentation_save",
+              "resource_selection_save",
+              "resource_download_prepare",
+              "resource_download_start",
+              "resource_job_status",
+              "resource_job_cancel",
+              "resource_archive",
+              "resource_library_search"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "side_effect": {
+            "type": "string",
+            "enum": [
+              "none",
+              "state_write",
+              "job_control",
+              "archive_write"
+            ]
+          },
+          "requires_flow_id": {
+            "type": "boolean"
+          },
+          "idempotency_required": {
+            "type": "boolean"
+          },
+          "input_schema": {
+            "type": "string",
+            "pattern": "^schemas/tools/[a-z_]+\\.schema\\.json#/[/$A-Za-z0-9_-]+$"
+          },
+          "output_schema": {
+            "type": "string",
+            "pattern": "^schemas/tools/[a-z_]+\\.schema\\.json#/[/$A-Za-z0-9_-]+$"
+          }
+        }
+      },
+      "uniqueItems": true
+    }
+  }
+}

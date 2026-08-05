@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/session-manager/v1/schemas/common.schema.json",
+  "title": "Session Manager MCP common contract definitions v1",
+  "$defs": {
+    "contract_version": {
+      "const": "1.0.0"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "platform": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "auth_kind": {
+      "type": "string",
+      "enum": ["cookie", "token", "none"]
+    },
+    "capture_method": {
+      "type": "string",
+      "enum": ["browser_cookies", "browser_storage", "none"]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retriable"],
+      "properties": {
+        "code": {"$ref": "../error-codes.json#/$defs/error_code"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "retriable": {"type": "boolean"}
+      }
+    },
+    "error_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "error"],
+      "properties": {
+        "contract_version": {"$ref": "#/$defs/contract_version"},
+        "ok": {"const": false},
+        "error": {"$ref": "#/$defs/error"},
+        "platform": {"$ref": "#/$defs/platform"}
+      }
+    }
+  }
+}

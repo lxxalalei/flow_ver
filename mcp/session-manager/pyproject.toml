@@ -3,9 +3,10 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "session-manager"
-version = "0.1.0"
-description = "Standalone MCP service for capturing, storing and validating platform login cookies"
+name = "openclaw-session-manager"
+version = "0.4.0"
+description = "Standalone OpenClaw MCP for guided browser login and secure local session storage"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "mcp==2.0.0",
@@ -16,3 +17,7 @@ session-manager = "session_manager.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

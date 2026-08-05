@@ -1,0 +1,13 @@
+interface:
+  display_name: "Session Login Flow"
+  short_description: "Guide browser login and securely save minimal sessions"
+  default_prompt: "Use $session-login-flow to check the requested platform sessions, open each official login page when needed, wait for my explicit 已登录 confirmation, broadly capture browser state, and let session-manager save only the required credentials."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "session-manager"
+      description: "Session status, login guidance, server-side credential extraction, secure local save, validation, and deletion"
+
+policy:
+  allow_implicit_invocation: true

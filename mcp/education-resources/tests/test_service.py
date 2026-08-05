@@ -97,16 +97,22 @@ class ResourceServiceTests(unittest.TestCase):
 
     def _start_and_search(self):
         flow = self.service.flow_start(
-            "flow-start-key-0001", {"topic": "恐龙", "audience": "primary"}
+            "flow-start-key-0001", {"goal": {"topic": "恐龙"}, "user_role": "parent", "resource_target": "child", "constraints": []}
         )
         search = self.service.search(
             flow["flow_id"],
             "search-key-0000001",
-            "恐龙",
-            filters={"platforms": ["generic"]},
+            [{"platform": "generic", "queries": [{"query": "恐龙"}]}],
+            filters={},
             limit=10,
         )
-        return flow, search
+        presentation = self.service.presentation_save(
+            flow["flow_id"],
+            search["result_set_id"],
+            [item["resource_id"] for item in search["candidates"]],
+            "presentation-key-0001",
+        )
+        return flow, search, presentation
 
     def _wait_terminal(self, flow_id: str, job_id: str):
         deadline = time.monotonic() + 3
@@ -118,16 +124,17 @@ class ResourceServiceTests(unittest.TestCase):
         self.fail("job did not reach a terminal state")
 
     def test_full_flow_is_idempotent_and_archives_by_asset_id(self) -> None:
-        flow, search = self._start_and_search()
-        self.assertEqual(search["stage"], "selecting")
-        self.assertEqual(len(search["resources"]), 1)
-        resource_id = search["resources"][0]["resource_id"]
+        flow, search, presentation = self._start_and_search()
+        self.assertEqual(search["stage"], "reviewing")
+        self.assertEqual(len(search["candidates"]), 1)
+        resource_id = search["candidates"][0]["resource_id"]
 
         selection = self.service.selection_save(
             flow["flow_id"],
             "selection-key-0001",
-            search["presented_version"],
-            [resource_id],
+            presentation["presentation_id"],
+            presentation["presented_version"],
+            [1],
         )
         plan = self.service.download_prepare(
             flow["flow_id"],
@@ -188,36 +195,46 @@ class ResourceServiceTests(unittest.TestCase):
 
     def test_idempotency_conflict_and_presented_set_guard(self) -> None:
         flow = self.service.flow_start(
-            "flow-start-key-0002", {"topic": "恐龙", "audience": "primary"}
+            "flow-start-key-0002", {"goal": {"topic": "恐龙"}, "user_role": "parent", "resource_target": "child", "constraints": []}
         )
         self.assertEqual(
             flow,
             self.service.flow_start(
-                "flow-start-key-0002", {"topic": "恐龙", "audience": "primary"}
+                "flow-start-key-0002", {"goal": {"topic": "恐龙"}, "user_role": "parent", "resource_target": "child", "constraints": []}
             ),
         )
         with self.assertRaisesRegex(DomainError, "幂等键"):
             self.service.flow_start(
-                "flow-start-key-0002", {"topic": "数学", "audience": "primary"}
+                "flow-start-key-0002", {"goal": {"topic": "数学"}, "user_role": "parent", "resource_target": "child", "constraints": []}
             )
         search = self.service.search(
-            flow["flow_id"], "search-key-0000002", "恐龙", limit=10
+            flow["flow_id"], "search-key-0000002",
+            [{"platform": "generic", "queries": [{"query": "恐龙"}]}],
+            limit=10,
+        )
+        presentation = self.service.presentation_save(
+            flow["flow_id"],
+            search["result_set_id"],
+            [search["candidates"][0]["resource_id"]],
+            "presentation-key-0002",
         )
         with self.assertRaises(DomainError) as captured:
             self.service.selection_save(
                 flow["flow_id"],
                 "selection-key-0002",
-                search["presented_version"],
-                ["res_0000000000000000"],
+                presentation["presentation_id"],
+                presentation["presented_version"],
+                [2],
             )
-        self.assertEqual(captured.exception.code, "RESOURCE_NOT_PRESENTED")
+        self.assertEqual(captured.exception.code, "POSITION_NOT_PRESENTED")
 
     def test_cancelled_selection_cannot_prepare(self) -> None:
-        flow, search = self._start_and_search()
+        flow, search, presentation = self._start_and_search()
         selection = self.service.selection_save(
             flow["flow_id"],
             "selection-key-0003",
-            search["presented_version"],
+            presentation["presentation_id"],
+            presentation["presented_version"],
             [],
         )
         self.assertTrue(selection["cancelled"])
@@ -247,13 +264,14 @@ class ResourceServiceTests(unittest.TestCase):
             ),
             download_provider=FakeDownloader(self.settings.jobs_dir, wait_for_cancel=True),
         )
-        flow, search = self._start_and_search()
-        resource_id = search["resources"][0]["resource_id"]
+        flow, search, presentation = self._start_and_search()
+        resource_id = search["candidates"][0]["resource_id"]
         selection = self.service.selection_save(
             flow["flow_id"],
             "selection-key-0004",
-            search["presented_version"],
-            [resource_id],
+            presentation["presentation_id"],
+            presentation["presented_version"],
+            [1],
         )
         plan = self.service.download_prepare(
             flow["flow_id"], "prepare-key-000004", selection["selection_version"]
@@ -274,6 +292,8 @@ class ResourceServiceTests(unittest.TestCase):
         status = self._wait_terminal(flow["flow_id"], started["job_id"])
         self.assertEqual(status["status"], "cancelled")
         self.assertEqual(status["assets"], [])
+        flow_status = self.service.flow_status(flow["flow_id"])
+        self.assertEqual(flow_status["current_job"]["asset_ids"], [])
 
 
 if __name__ == "__main__":

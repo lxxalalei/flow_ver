@@ -133,23 +133,36 @@ def _detail_page_from_item(item: dict[str, Any]) -> str:
         "id", "resource_id", "resourceId", "content_id", "contentId",
         "course_id", "courseId",
     ]))
+    content_type = _norm(_first_value(item, [
+        "content_type", "contentType", "resource_type", "resourceType",
+        "resource_type_code", "resourceTypeCode",
+    ])) or "resource"
+    tab_code = _norm(_first_value(item, [
+        "tab_code", "tabCode", "catalog", "catalog_type", "catalogType",
+        "channel_code", "channelCode",
+    ]))
+    if content_type == "elite_lesson":
+        return f"https://basic.smartedu.cn/qualityCourse?courseId={urllib.parse.quote(resource_id)}"
+    if content_type == "national_lesson":
+        return f"https://basic.smartedu.cn/syncClassroom/classActivity?activityId={urllib.parse.quote(resource_id)}"
+    if content_type in ("prepare_lesson", "experiment_elite_lesson"):
+        return f"https://basic.smartedu.cn/syncClassroom/prepare/detail?resourceId={urllib.parse.quote(resource_id)}"
+    if tab_code == "tchMaterial":
+        return (
+            "https://basic.smartedu.cn/tchMaterial/detail?"
+            f"contentType={urllib.parse.quote(content_type or 'teaching_material')}"
+            f"&contentId={urllib.parse.quote(resource_id)}"
+            "&catalogType=tchMaterial&subCatalog=tchMaterial"
+        )
+    if tab_code == "qualityCourse":
+        return f"https://basic.smartedu.cn/qualityCourse?courseId={urllib.parse.quote(resource_id)}"
     catalog = _norm(_first_value(item, [
-        "catalog", "catalog_type", "catalogType", "tab_code", "tabCode",
+        "tab_code", "tabCode", "catalog", "catalog_type", "catalogType",
         "channel_code", "channelCode",
     ])) or "syncClassroom"
     sub_catalog = _norm(_first_value(item, [
         "sub_catalog", "subCatalog", "sub_catalog_code", "subCatalogCode",
     ]))
-    content_type = _norm(_first_value(item, [
-        "content_type", "contentType", "resource_type", "resourceType",
-        "resource_type_code", "resourceTypeCode",
-    ])) or "resource"
-    if content_type == "national_lesson":
-        return f"https://basic.smartedu.cn/syncClassroom/classActivity?activityId={urllib.parse.quote(resource_id)}"
-    if content_type == "elite_lesson":
-        return f"https://basic.smartedu.cn/qualityCourse?courseId={urllib.parse.quote(resource_id)}"
-    if content_type == "prepare_lesson":
-        return f"https://basic.smartedu.cn/syncClassroom/prepare/detail?resourceId={urllib.parse.quote(resource_id)}"
     return DETAIL_PAGE.format(
         catalog=urllib.parse.quote(catalog),
         content_type=urllib.parse.quote(content_type),
@@ -383,6 +396,9 @@ class SmartEduSearchAdapter:
         return headers
 
     def _build_payload(self, query: str, limit: int) -> dict[str, Any]:
+        # Request more than the caller's limit because the post-filter
+        # (elite_lesson only) discards the majority of raw results.
+        fetch_limit = max(limit * 5, 50)
         return {
             "identity": "家长",
             "identity_code": "GUARDIAN",
@@ -392,7 +408,7 @@ class SmartEduSearchAdapter:
             "duplicate_filter": True,
             "search_order": {"field": "_score", "direction": "desc"},
             "offset": 0,
-            "limit": min(limit, 100),
+            "limit": min(fetch_limit, 100),
             "combine_intentions": [],
             "combine_resources": [],
         }
@@ -430,8 +446,10 @@ class SmartEduSearchAdapter:
         if data is None:
             return [], adapter_error("PARTIAL_FAILURE", "SmartEdu 搜索所有端点均失败", True)
 
-        search_limit = min(limit, 100)
-        items = _extract_search_items(data, search_limit)
+        # Extract as many items as the API returned (not just the caller's
+        # limit) because the post-filter discards the majority of results.
+        fetch_limit = max(limit * 5, 50)
+        items = _extract_search_items(data, min(fetch_limit, 100))
         if not items:
             # Retry without tag filters (wide search).
             wide_payload = dict(payload)
@@ -444,11 +462,41 @@ class SmartEduSearchAdapter:
                         break
 
         results: list[dict[str, Any]] = []
-        for item in items[:limit]:
+        for item in items:
+            # Only return student-facing items with standalone pages:
+            # courses (elite_lesson, national_lesson) and teaching materials.
+            # Skip sub-assets and teacher-facing items.
+            search_rtype = _norm(_first_value(item, ["search_resource_type", "searchResourceType"]))
+            rtype = _norm(_first_value(item, ["resource_type", "resourceType", "content_type", "contentType"]))
+            if search_rtype not in ("course", "teaching_material"):
+                continue
+            if rtype in {
+                "prepare_lesson", "experiment_elite_lesson",
+                "thematic_course", "assets_url",
+            }:
+                continue
             resource = _item_to_resource(item, query)
             if resource:
                 results.append(resource)
+            if len(results) >= limit:
+                break
 
+        # Textbook materials (tchMaterial) don't appear in combined search;
+        # do a dedicated search and merge.
+        if len(results) < limit:
+            tch_payload = dict(payload)
+            tch_payload["tab_codes"] = ["tchMaterial"]
+            for url in SEARCH_URLS:
+                tch_data = self._post_search(url, tch_payload, headers)
+                if tch_data is not None:
+                    tch_items = _extract_search_items(tch_data, limit)
+                    for item in tch_items:
+                        resource = _item_to_resource(item, query)
+                        if resource:
+                            results.append(resource)
+                        if len(results) >= limit:
+                            break
+                    break
         return results, None
 
 

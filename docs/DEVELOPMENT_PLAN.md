@@ -4,10 +4,11 @@
 
 本计划指导现有教育资源 Skill 套件在不依赖远端服务器的条件下，迁移到原生 OpenClaw。首个可运行版本采用本地 Python stdio MCP、SQLite 和隔离测试目录；待教育平台后端具备部署条件后，再迁移到远程 Streamable HTTP MCP，并按需增加薄 Tool Plugin。
 
-本文同时记录未来产品路线和当前开发实现状态。截至 2026-07-30，本地 Python
-stdio MCP、contracts v1、唯一入口 Skill、OpenClaw 专用 Agent/MCP 注册和
-MCP doctor/probe 已完成；`glm-req/glm-5.2` Provider probe 和最小真实 Agent 回合
-也已通过。完整教育资源业务回合仍未完成验收。
+本文同时记录未来产品路线和当前开发实现状态。截至 2026-08-03，本地 Python
+stdio MCP、active contract `mcp/education-resources/contracts/v2/`（`2.0.0`）、
+唯一入口 Skill、OpenClaw 专用 Agent/MCP 注册和 MCP doctor/probe 已完成；v1 已冻结，
+仅保留为兼容参考。`glm-req/glm-5.2` Provider probe 和最小真实 Agent 回合也已通过。
+完整教育资源业务回合仍未完成验收。
 
 当前实现是本地开发 MVP，不代表高风险平台、多租户安全隔离或教育平台生产部署
 已经完成。
@@ -32,7 +33,7 @@ MCP doctor/probe 已完成；`glm-req/glm-5.2` Provider probe 和最小真实 Ag
 
 OpenClaw 默认 Agent `main`（名称 `education-resources`）绑定本工作区，Skill
 allowlist 只包含 `learning-resource-flow`，因此只有一个用户入口。MCP 注册名为
-`education-resources`，通过 `resource_*` 过滤暴露 9 个领域工具。
+`education-resources`，通过 `resource_*` 过滤严格暴露 11 个领域工具。
 
 Legacy 中的 7 个 Skill 组成六阶段业务流程：
 
@@ -117,33 +118,41 @@ File SecretRef 从 `~/.claude/settings.json` 的 `/env/ANTHROPIC_AUTH_TOKEN` 读
 - 当前确认令牌用于约束 `prepare -> start` 顺序，但令牌会经过模型上下文，不能单独
   证明真实用户审批。生产版应由平台 approval record 或薄 Plugin 的工具调用审批
   注入不可伪造的授权结论。
-- v1 的资料库检索为了本地审计仍要求有效 `flow_id`；生产版应改为可信身份注入的
-  tenant-scoped 查询，不能让模型提交 `tenant_id` 或 `user_id`。
+- active v2 的资料库检索为了本地审计仍要求有效 `flow_id`；生产版应改为可信身份
+  注入的 tenant-scoped 查询，不能让模型提交 `tenant_id` 或 `user_id`。
 
-### 3.6 语义重建后的契约缺口
+### 3.6 active v2 控制面与后续契约能力
 
-2026-07-30 已从最终用户资源任务重新设计唯一入口 Skill。审计旧 Intent、Search 和
-Selector 后确认，当前 MCP v1 虽能完成最小工具闭环，但不能完整承载新的教育语义：
+`mcp/education-resources/contracts/v2/` 是当前 active contract，版本为 `2.0.0`；
+`contracts/v1/` 已冻结，不再增加字段或工具。v2 已完成以下控制面边界：
 
-1. `FlowIntent.audience` 同时承载学段、对话者身份和资源对象，语义不稳定。下一版应以
-   独立的 `user_role`、`resource_target` 和开放式结构化 `constraints` 取代该混合字段。
-2. `resource_search` 一次只接受一个查询，每次调用都会替换当前展示集合。互补搜索
-   不能通过连续调用安全合并，否则用户只能选择最后一批结果。
-3. Search Schema 声明了类型、语言、时间和时长过滤，但当前 Provider 调用只强制执行
-   平台过滤。Skill 不得把未执行的过滤器描述成服务端保证。
-4. `resource_summary` 缺少可追溯证据、内容定位、使用门槛、安全提示和重要未知。模型只能按现有
-   元数据降低结论强度，不能自行补写确定事实。
+- `FlowTask` 使用目标导向结构：必填 `goal.topic`，可选 `goal.outcome`；`user_role` 与
+  `resource_target` 独立且均可未知；其他用户明示条件进入 `constraints` 数组。
+- `resource_search` 返回并持久化不可变 `ResultSet`；搜索结果不再直接等同于模型已向
+  用户展示的候选。
+- `resource_presentation_save` 以 `result_set_id + displayed_resource_ids` 保存实际
+  `Presentation`；`resource_selection_save` 以
+  `presentation_id + presented_version + selected_positions` 保存 `Selection`，确保用户
+  只能按真实展示顺序选择候选。
+- 下载准备、启动和状态恢复绑定 `presentation_id + presented_version` 与
+  `selection_version + selection_digest`，避免展示或选择变化后复用旧计划。
+- `resource_flow_status` 提供可恢复的权威状态快照，但不返回确认令牌等敏感能力。
 
-下一版 MCP 应从这些业务缺口出发设计，而不是恢复旧 `search-plan/v1`：
+当前权威状态链严格为：
 
-- 扩展 Flow 任务契约，独立保存 `user_role`、`resource_target` 和开放式结构化约束。
-  年龄或年级只在用户主动提供时保存，不作为必填画像。
-- 让一次搜索请求承载多个语义化发现方向，由 MCP 聚合、确定性去重后一次产生展示集合。
-- 在服务端真正执行已声明的硬过滤，并返回每项过滤的执行状态。
-- 为候选增加来源可追溯的证据与未知字段；如需模型先审查再展示，应增加服务端校验的
-  “搜索结果集 -> 实际展示集”状态转换，使用户只能选择真正展示过的资源。
+```text
+FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive
+```
 
-以上属于目标架构的下一轮契约工作，不要求兼容旧 Stage 文件、平台任务或脚本参数。
+以下内容尚未进入 active v2，仍属于后续能力，文档、Skill 和运行时不得把它们描述成
+已经由服务端保证：
+
+- `direction_runs` 及多方向搜索的执行记录、聚合和确定性去重。
+- `filter_execution` 及每项硬过滤的完整执行状态、失败原因和保证级别。
+- 候选证据模型，包括来源可追溯证据、内容定位、使用门槛、安全提示和重要未知。
+
+这些能力应在运行时需求、迁移和测试方案明确后，通过后续显式契约版本引入，不回填或
+继续扩展冻结的 v1，也不能破坏 v2 已建立的展示、选择与下载绑定边界。
 
 ## 4. 目标目录
 
@@ -152,7 +161,8 @@ mcp/
 └── education-resources/
     ├── README.md
     ├── pyproject.toml
-    ├── contracts/v1/
+    ├── contracts/v1/                  # 冻结的 1.0.0 契约
+    ├── contracts/v2/                  # active 2.0.0 契约
     ├── src/education_resource_mcp/
     │   ├── adapters/
     │   ├── config.py
@@ -180,29 +190,48 @@ legacy/
 
 ## 5. 领域工具契约
 
-首版只暴露少量领域级工具，不为每个平台暴露单独工具。
+active contract 为 `mcp/education-resources/contracts/v2/`，契约版本 `2.0.0`。对
+OpenClaw 公开的领域工具严格为以下 11 个，不为各平台 Adapter 额外暴露工具：
 
 | 工具 | 副作用 | 主要返回 |
 |---|---:|---|
-| `resource_flow_start` | 写状态 | `flow_id`、当前阶段 |
-| `resource_search` | 写候选缓存 | 标准候选、游标、错误摘要 |
-| `resource_selection_save` | 写选择状态 | 选择版本、已选 ID |
-| `resource_download_prepare` | 写下载计划，不下载 | `plan_id`、大小/格式/风险摘要、确认要求 |
-| `resource_download_start` | 启动任务 | `job_id`、任务状态 |
-| `resource_job_status` | 无或更新时间戳 | 进度、产物、结构化错误 |
-| `resource_job_cancel` | 请求取消 | 最终/过渡状态 |
-| `resource_archive` | 写资料库 | `asset_id`、归档元数据 |
+| `resource_flow_start` | 写状态 | `FlowTask`、`flow_id`、当前阶段 |
+| `resource_flow_status` | 无或更新时间戳 | 可恢复状态快照，不含确认令牌 |
+| `resource_search` | 写结果集 | 不可变 `ResultSet`、候选、游标、错误摘要 |
+| `resource_presentation_save` | 写展示状态 | `Presentation`、展示版本和展示资源顺序 |
+| `resource_selection_save` | 写选择状态 | `Selection`、选择版本和选择摘要 |
+| `resource_download_prepare` | 写下载计划，不下载 | `DownloadPlan`、大小/格式/风险摘要、确认要求 |
+| `resource_download_start` | 启动任务 | `Job`、`job_id`、任务状态 |
+| `resource_job_status` | 无或更新时间戳 | 进度、`Asset`、结构化错误 |
+| `resource_job_cancel` | 请求取消 | 最终或过渡任务状态 |
+| `resource_archive` | 写资料库 | `Archive`、`asset_id`、归档元数据 |
 | `resource_library_search` | 无 | 已归档资产列表 |
+
+权威状态链为：
+
+```text
+FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive
+```
 
 核心约束：
 
-- 除 `resource_flow_start` 外，每次调用携带有效 `flow_id`；资源、计划、任务和资产
-  使用服务端生成的 ID。
-- `resource_download_start` 只接受未过期的 `plan_id`、确认令牌和幂等键。
-- 服务端验证 `resource_id` 属于当前 Flow 的已展示集合且已被明确选择。
+- 除 `resource_flow_start` 外，每次调用携带有效 `flow_id`；结果集、展示、选择、资源、
+  计划、任务、资产和归档使用服务端生成的稳定 ID。
+- `resource_search` 产生不可变 `ResultSet`；`resource_presentation_save` 只接受
+  `result_set_id + displayed_resource_ids`，并保存实际展示顺序。
+- `resource_selection_save` 只接受
+  `presentation_id + presented_version + selected_positions`，不得直接提交任意资源 ID
+  绕过展示边界。
+- `resource_download_prepare`、`resource_download_start` 和任务状态恢复共同绑定
+  `presentation_id + presented_version + selection_version + selection_digest`；任何展示或
+  选择变化都使旧绑定失效。
+- `resource_download_start` 只接受未过期的 `plan_id`、确认令牌和幂等键；确认令牌不得由
+  `resource_flow_status` 返回。
 - Job 状态机至少包含 `queued`、`running`、`cancelling`、`succeeded`、`failed`、`cancelled`。
 - `cancelled` 不得被计为成功；临时文件必须清理或明确隔离为不可归档状态。
 - `resource_archive` 只接受已完成 Job 产生的 `asset_id`，不接受本地路径。
+- `direction_runs`、多方向聚合、`filter_execution`、完整硬过滤执行报告和候选证据模型
+  不属于当前 11 个工具的 v2 保证，留待后续显式契约版本。
 
 ## 6. 数据与状态
 
@@ -210,9 +239,10 @@ legacy/
 
 建议首版至少建立：
 
-- `flows`
+- `flow_tasks`
 - `resources`
-- `presented_sets`
+- `result_sets`
+- `presentations`
 - `selections`
 - `download_plans`
 - `jobs`
@@ -314,8 +344,10 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 
 当前结果：
 
-- `mcp/education-resources/contracts/v1/` 已提供领域不变量、31 个稳定错误码、9 个工具目录和 Draft
-  2020-12 输入/输出 Schema。
+- active `mcp/education-resources/contracts/v2/` 已提供领域不变量、41 个稳定错误码、
+  严格 11 个工具目录和 Draft 2020-12 输入/输出 Schema；契约版本为 `2.0.0`。
+  `contracts/v1/` 冻结为 `1.0.0`，其中 31 个既有错误码在 v2 中继续保留，v2 追加
+  10 个控制面与任务终态错误码。
 - Python stdio MCP、SQLite repository、配置、结构化业务错误和协议 smoke test
   已实现。
 - MCP initialize、tools/list 和 tools/call 测试通过；运行数据写入独立 data 目录，
@@ -328,13 +360,15 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 工作：
 
 - 包装现有搜索规划与低风险 Adapter。
-- 归一化候选并持久化本轮展示集合。
-- 实现 `resource_search` 与 `resource_selection_save`。
+- 归一化候选并持久化不可变 `ResultSet`。
+- 实现 `resource_search`、`resource_presentation_save` 与 `resource_selection_save`。
 - 支持分页、部分失败、重试上限和 Flow 恢复。
 
-当前结果：已包装 Generic 搜索兼容层，实现候选归一化、展示版本、选择版本、分页
-字段、部分失败结构和重启后 SQLite 恢复。CCTV、NLC 及其他平台仍按后续 Adapter
-迁移计划逐个接入；Bilibili 仅在公开接口和真实验收通过后开启。
+当前结果：已包装 Generic 搜索兼容层，并以
+`resource_search -> ResultSet -> resource_presentation_save -> Presentation -> resource_selection_save -> Selection`
+建立搜索、实际展示和位置选择的权威边界；同时保留分页、部分失败结构和重启后 SQLite
+恢复。CCTV、NLC 及其他平台仍按后续 Adapter 迁移计划逐个接入；Bilibili 仅在公开接口
+和真实验收通过后开启。
 
 验收：搜索结果可重放；用户只能选择本轮展示集合；重启 MCP 后选择状态不丢失；单个平台失败不破坏整个 Flow。
 
@@ -388,7 +422,7 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
   与 `mcp probe education-resources --json` 已成功，证明 MCP 进程、工具发现和协议
   调用可用。
 - 已配置 `glm-req/glm-5.2` 为默认模型。模型 Provider probe 返回成功，最小
-  `openclaw agent --local` 回合能够加载工作区、唯一入口 Skill 和 9 个 MCP 工具，
+  `openclaw agent --local` 回合能够加载工作区、唯一入口 Skill 和 11 个 MCP 工具，
   由目标模型返回预期最终文本，未使用 fallback。
 - 唯一入口 Skill 已从用户结果重新构建需求理解、澄清、发现策略、候选判断和响应
   references；没有恢复旧 Intent/Search/Selector Skill、Stage JSON 或模型评分文件。
@@ -483,8 +517,9 @@ openclaw agent --agent main --local \
 目录中的 OpenClaw，`mcp status/doctor/probe` 曾出现无输出挂起。升级 Node 本身没有
 解决问题。改为 WSL 原生安装后，`agents list`、`mcp status --verbose`、
 `mcp doctor education-resources --probe` 和 `mcp probe education-resources --json`
-均成功，probe 返回 9 个工具且 `diagnostics=[]`。因此该 MCP CLI 挂起已解决，主要
-原因是跨 Windows/WSL 混用安装，而不是 Python stdio MCP 协议回归。
+均成功；active v2 的工具发现口径已更新为严格 11 个工具，验收要求
+`diagnostics=[]`。因此该 MCP CLI 挂起已解决，主要原因是跨 Windows/WSL 混用安装，
+而不是 Python stdio MCP 协议回归。
 
 ## 10. 回滚策略
 
@@ -507,13 +542,17 @@ openclaw agent --agent main --local \
 
 ## 12. 下一项建议任务
 
-优先完成目标导向的 MCP 契约重构，再完成阶段 6 的完整业务回合验收：
+优先完成 active v2 控制面的运行时收敛和阶段 6 完整业务回合验收：
 
-1. 设计新的 Flow 任务结构、多方向搜索聚合、硬过滤执行状态和候选证据模型；评估采用
-   v2 契约还是在 v1 上做向后兼容扩展。
-2. 增加“搜索结果集 -> 实际展示集”权威状态，使用户只能选择模型真正展示过的候选。
-3. 通过默认 Agent `main` 和 `glm-req/glm-5.2` 跑通
-   “澄清 -> 搜索 -> 展示 -> 选择 -> 确认 -> 下载 -> 归档 -> 检索”。
-4. 增加真实模型 Tool 调用断言和会话恢复用例，确保失败可解释且不会绕过确认。
+1. 让 Python 实现、SQLite 状态、唯一入口 Skill 和契约测试完整采用
+   `mcp/education-resources/contracts/v2/`，并冻结 `contracts/v1/`。
+2. 通过默认 Agent `main` 跑通
+   “澄清 -> 搜索 -> ResultSet -> 实际展示 -> 选择 -> 确认 -> 下载 -> 归档 -> 检索”，
+   验证完整状态链
+   `FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive`。
+3. 增加真实模型 Tool 调用断言、11 个公开工具的发现断言、绑定字段失配测试和会话恢复
+   用例，确保失败可解释且不会绕过展示、选择或确认边界。
+4. 在后续独立契约设计中再引入 `direction_runs`、多方向搜索聚合、`filter_execution`、
+   完整硬过滤执行状态和候选证据模型；这些能力当前不属于 active v2。
 5. 如需常驻 Gateway，再在不记录凭据的前提下完成客户端认证和设备配对。
 6. 随后完成回滚演练和进程中断恢复，再扩大 Adapter 范围。

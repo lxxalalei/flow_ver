@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v2/error-codes.json",
+  "title": "Education Resource MCP stable error codes v2",
+  "$ref": "#/$defs/error_code",
+  "$defs": {
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "INVALID_ARGUMENT",
+        "CONTRACT_VERSION_UNSUPPORTED",
+        "FLOW_NOT_FOUND",
+        "FLOW_STATE_CONFLICT",
+        "RESOURCE_NOT_FOUND",
+        "RESOURCE_NOT_PRESENTED",
+        "RESOURCE_NOT_SELECTED",
+        "SELECTION_VERSION_CONFLICT",
+        "PLAN_NOT_FOUND",
+        "PLAN_EXPIRED",
+        "PLAN_ALREADY_USED",
+        "CONFIRMATION_REQUIRED",
+        "CONFIRMATION_INVALID",
+        "IDEMPOTENCY_CONFLICT",
+        "JOB_NOT_FOUND",
+        "JOB_NOT_CANCELLABLE",
+        "ASSET_NOT_FOUND",
+        "ASSET_NOT_ARCHIVABLE",
+        "ARCHIVE_CONFLICT",
+        "PLATFORM_UNAVAILABLE",
+        "PARTIAL_FAILURE",
+        "AUTH_REQUIRED",
+        "POLICY_DENIED",
+        "RATE_LIMITED",
+        "NETWORK_BLOCKED",
+        "REDIRECT_BLOCKED",
+        "DOWNLOAD_TOO_LARGE",
+        "CONTENT_TYPE_REJECTED",
+        "CONTENT_VALIDATION_FAILED",
+        "STORAGE_UNAVAILABLE",
+        "INTERNAL_ERROR",
+        "TASK_VERSION_CONFLICT",
+        "RESULT_SET_NOT_FOUND",
+        "RESULT_SET_STATE_CONFLICT",
+        "PRESENTATION_NOT_FOUND",
+        "PRESENTATION_VERSION_CONFLICT",
+        "POSITION_NOT_PRESENTED",
+        "SELECTION_DIGEST_CONFLICT",
+        "PLAN_BINDING_CONFLICT",
+        "DOWNLOAD_FAILED",
+        "JOB_CANCELLED"
+      ]
+    }
+  },
+  "x-contract-version": "2.0.0",
+  "x-stability": "Codes are append-only within v2 and existing v1 code meanings remain unchanged.",
+  "x-error-codes": [
+    {
+      "code": "INVALID_ARGUMENT",
+      "category": "request",
+      "retriable": false,
+      "meaning": "The request fails schema-independent semantic validation."
+    },
+    {
+      "code": "CONTRACT_VERSION_UNSUPPORTED",
+      "category": "request",
+      "retriable": false,
+      "meaning": "The requested contract major or version is unsupported."
+    },
+    {
+      "code": "FLOW_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The flow_id is unknown or inaccessible in the trusted context."
+    },
+    {
+      "code": "FLOW_STATE_CONFLICT",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The operation is not valid in the current Flow stage."
+    },
+    {
+      "code": "RESOURCE_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The resource_id is unknown or inaccessible."
+    },
+    {
+      "code": "RESOURCE_NOT_PRESENTED",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The resource was not in the referenced presented set."
+    },
+    {
+      "code": "RESOURCE_NOT_SELECTED",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The resource is not in the saved Selection."
+    },
+    {
+      "code": "SELECTION_VERSION_CONFLICT",
+      "category": "state",
+      "retriable": true,
+      "meaning": "The presented or selection version is stale."
+    },
+    {
+      "code": "PLAN_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The plan_id is unknown or inaccessible."
+    },
+    {
+      "code": "PLAN_EXPIRED",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The download Plan expired and must be prepared again."
+    },
+    {
+      "code": "PLAN_ALREADY_USED",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The download Plan has already been consumed or cancelled."
+    },
+    {
+      "code": "CONFIRMATION_REQUIRED",
+      "category": "approval",
+      "retriable": true,
+      "meaning": "Explicit user confirmation is required before the action."
+    },
+    {
+      "code": "CONFIRMATION_INVALID",
+      "category": "approval",
+      "retriable": false,
+      "meaning": "The confirmation token is invalid, expired, or belongs to another Plan."
+    },
+    {
+      "code": "IDEMPOTENCY_CONFLICT",
+      "category": "request",
+      "retriable": false,
+      "meaning": "An idempotency key was reused with a different canonical request."
+    },
+    {
+      "code": "JOB_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The job_id is unknown or inaccessible."
+    },
+    {
+      "code": "JOB_NOT_CANCELLABLE",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The Job is already terminal or cannot be cancelled."
+    },
+    {
+      "code": "ASSET_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The asset_id is unknown or inaccessible."
+    },
+    {
+      "code": "ASSET_NOT_ARCHIVABLE",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The Asset is not validated or its Job did not succeed."
+    },
+    {
+      "code": "ARCHIVE_CONFLICT",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The requested archive metadata conflicts with an existing committed record."
+    },
+    {
+      "code": "PLATFORM_UNAVAILABLE",
+      "category": "upstream",
+      "retriable": true,
+      "meaning": "A configured source platform is temporarily unavailable."
+    },
+    {
+      "code": "PARTIAL_FAILURE",
+      "category": "upstream",
+      "retriable": true,
+      "meaning": "The operation completed partially and includes per-item failures."
+    },
+    {
+      "code": "AUTH_REQUIRED",
+      "category": "policy",
+      "retriable": false,
+      "meaning": "Legitimate user or platform authorization is required."
+    },
+    {
+      "code": "POLICY_DENIED",
+      "category": "policy",
+      "retriable": false,
+      "meaning": "A source, action, format, quota, or access policy denied the operation."
+    },
+    {
+      "code": "RATE_LIMITED",
+      "category": "upstream",
+      "retriable": true,
+      "meaning": "The service or source platform rate-limited the operation."
+    },
+    {
+      "code": "NETWORK_BLOCKED",
+      "category": "security",
+      "retriable": false,
+      "meaning": "The target protocol, host, address, or network class is blocked."
+    },
+    {
+      "code": "REDIRECT_BLOCKED",
+      "category": "security",
+      "retriable": false,
+      "meaning": "A redirect target failed protocol, host, or address policy."
+    },
+    {
+      "code": "DOWNLOAD_TOO_LARGE",
+      "category": "security",
+      "retriable": false,
+      "meaning": "Declared or streamed bytes exceeded the effective limit."
+    },
+    {
+      "code": "CONTENT_TYPE_REJECTED",
+      "category": "security",
+      "retriable": false,
+      "meaning": "The declared content type is not allowed for the Plan."
+    },
+    {
+      "code": "CONTENT_VALIDATION_FAILED",
+      "category": "security",
+      "retriable": false,
+      "meaning": "The downloaded bytes failed real-format or integrity validation."
+    },
+    {
+      "code": "STORAGE_UNAVAILABLE",
+      "category": "storage",
+      "retriable": true,
+      "meaning": "The controlled temporary, asset, database, or archive storage is unavailable."
+    },
+    {
+      "code": "INTERNAL_ERROR",
+      "category": "internal",
+      "retriable": true,
+      "meaning": "An unexpected internal failure occurred without exposing sensitive details."
+    },
+    {
+      "code": "TASK_VERSION_CONFLICT",
+      "category": "state",
+      "retriable": true,
+      "meaning": "The referenced Flow task version is stale."
+    },
+    {
+      "code": "RESULT_SET_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The result_set_id is unknown, inaccessible, or belongs to another Flow."
+    },
+    {
+      "code": "RESULT_SET_STATE_CONFLICT",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The ResultSet cannot be used in its current state."
+    },
+    {
+      "code": "PRESENTATION_NOT_FOUND",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The presentation_id is unknown, inaccessible, or belongs to another Flow."
+    },
+    {
+      "code": "PRESENTATION_VERSION_CONFLICT",
+      "category": "state",
+      "retriable": true,
+      "meaning": "The presented_version is stale or does not belong to the Presentation."
+    },
+    {
+      "code": "POSITION_NOT_PRESENTED",
+      "category": "state",
+      "retriable": false,
+      "meaning": "A selected position is outside the authoritative ordered Presentation."
+    },
+    {
+      "code": "SELECTION_DIGEST_CONFLICT",
+      "category": "state",
+      "retriable": true,
+      "meaning": "The supplied selection_digest does not match the current Selection."
+    },
+    {
+      "code": "PLAN_BINDING_CONFLICT",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The Plan binding tuple does not match the current Presentation and Selection."
+    },
+    {
+      "code": "DOWNLOAD_FAILED",
+      "category": "upstream",
+      "retriable": true,
+      "meaning": "The download failed because of an upstream transport or source error."
+    },
+    {
+      "code": "JOB_CANCELLED",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The download Job stopped because cancellation was requested."
+    }
+  ]
+}

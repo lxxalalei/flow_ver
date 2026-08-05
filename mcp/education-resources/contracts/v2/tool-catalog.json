@@ -1,0 +1,107 @@
+{
+  "$schema": "schemas/tool-catalog.schema.json",
+  "catalog_version": "2.0.0",
+  "contract_version": "2.0.0",
+  "server_id": "learning_resources",
+  "tools": [
+    {
+      "name": "resource_flow_start",
+      "description": "Create a server-owned Flow from a goal-oriented task.",
+      "side_effect": "state_write",
+      "requires_flow_id": false,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_flow_start.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_flow_start.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_flow_status",
+      "description": "Read the recoverable authoritative Flow control-plane snapshot without confirmation secrets.",
+      "side_effect": "none",
+      "requires_flow_id": true,
+      "idempotency_required": false,
+      "input_schema": "schemas/tools/resource_flow_status.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_flow_status.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_search",
+      "description": "Search across multiple platforms in parallel, then persist an immutable ResultSet that is not yet a Presentation.",
+      "side_effect": "state_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_search.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_search.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_presentation_save",
+      "description": "Persist the exact ordered subset actually displayed from one ResultSet, including an intentionally empty Presentation.",
+      "side_effect": "state_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_presentation_save.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_presentation_save.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_selection_save",
+      "description": "Save explicit user choices by positions from the current authoritative Presentation.",
+      "side_effect": "state_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_selection_save.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_selection_save.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_download_prepare",
+      "description": "Create an expiring Plan bound to the exact Presentation and Selection tuple and return its plan_digest.",
+      "side_effect": "state_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_download_prepare.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_download_prepare.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_download_start",
+      "description": "Consume a confirmed Plan only when the complete Presentation, Selection, and Plan binding matches.",
+      "side_effect": "job_control",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_download_start.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_download_start.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_job_status",
+      "description": "Read Job progress, assets, failures, plan_id, and the complete immutable binding.",
+      "side_effect": "none",
+      "requires_flow_id": true,
+      "idempotency_required": false,
+      "input_schema": "schemas/tools/resource_job_status.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_job_status.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_job_cancel",
+      "description": "Request cancellation of a queued or running Job.",
+      "side_effect": "job_control",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_job_cancel.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_job_cancel.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_archive",
+      "description": "Archive a validated Asset from a succeeded Job without accepting a local path.",
+      "side_effect": "archive_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_archive.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_archive.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_library_search",
+      "description": "Search archived Assets through bounded metadata filters and an opaque cursor.",
+      "side_effect": "none",
+      "requires_flow_id": true,
+      "idempotency_required": false,
+      "input_schema": "schemas/tools/resource_library_search.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_library_search.schema.json#/$defs/output"
+    }
+  ]
+}

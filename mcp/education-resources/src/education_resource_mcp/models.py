@@ -1,4 +1,4 @@
-"""Strict MCP input models matching contracts/v1."""
+"""Strict MCP input models matching contracts/v2."""
 
 from __future__ import annotations
 
@@ -16,24 +16,33 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class FlowIntent(StrictModel):
+class FlowGoal(StrictModel):
     topic: str = Field(min_length=1, max_length=1000)
-    learning_goal: str | None = Field(default=None, max_length=2000)
-    audience: Literal[
-        "preschool",
-        "primary",
-        "middle_school",
-        "high_school",
-        "parent",
-        "general",
-    ] | None = None
-    resource_types: list[ResourceType] | None = Field(default=None, max_length=8)
-    language_preferences: list[str] | None = Field(default=None, max_length=8)
-    platform_preferences: list[str] | None = Field(default=None, max_length=16)
+    outcome: str | None = Field(default=None, max_length=2000)
+
+
+class TaskConstraint(StrictModel):
+    kind: str = Field(min_length=1, max_length=64)
+    value: str = Field(min_length=1, max_length=1000)
+
+
+class FlowTask(StrictModel):
+    goal: FlowGoal
+    user_role: Literal["child", "parent"] | None = None
+    resource_target: Literal["child", "parent"] | None = None
+    constraints: list[TaskConstraint] = Field(default_factory=list, max_length=32)
+
+
+class SearchTaskQuery(StrictModel):
+    query: str = Field(min_length=1, max_length=1000)
+
+
+class SearchTask(StrictModel):
+    platform: str = Field(min_length=1, max_length=64)
+    queries: list[SearchTaskQuery] = Field(min_length=1, max_length=8)
 
 
 class SearchFilters(StrictModel):
-    platforms: list[str] | None = Field(default=None, max_length=16)
     resource_types: list[ResourceType] | None = Field(default=None, max_length=8)
     languages: list[str] | None = Field(default=None, max_length=8)
     published_after: str | None = None
@@ -52,6 +61,9 @@ class DownloadOptions(StrictModel):
 
 class ArchiveMetadata(StrictModel):
     title: str | None = Field(default=None, min_length=1, max_length=512)
+    primary_domain: str | None = Field(default=None, min_length=1, max_length=64)
+    topics: list[str] | None = Field(default=None, max_length=8)
+    source_name: str | None = Field(default=None, min_length=1, max_length=128)
     collection: str | None = Field(default=None, min_length=1, max_length=128)
     tags: list[str] | None = Field(default=None, max_length=32)
     notes: str | None = Field(default=None, max_length=2000)
@@ -59,6 +71,8 @@ class ArchiveMetadata(StrictModel):
 
 class LibraryFilters(StrictModel):
     query: str | None = Field(default=None, min_length=1, max_length=1000)
+    primary_domain: str | None = Field(default=None, min_length=1, max_length=64)
+    topics: list[str] | None = Field(default=None, max_length=8)
     platforms: list[str] | None = Field(default=None, max_length=16)
     resource_types: list[ResourceType] | None = Field(default=None, max_length=8)
     collections: list[str] | None = Field(default=None, max_length=16)

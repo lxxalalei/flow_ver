@@ -155,11 +155,10 @@ class BilibiliSearchAdapter:
     def search(
         self, query: str, limit: int
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        # Cookie is optional — B站 search works without login, but having
+        # a session may improve personalization and avoid rate limits.
         session_data = self.session_store.get_session_data("bilibili")
-        if session_data is None:
-            return [], adapter_error("AUTH_REQUIRED", "B站 session 未配置或已过期", False)
-
-        cookie = SessionStore._cookie_header(session_data)
+        cookie = SessionStore._cookie_header(session_data) if session_data else ""
 
         try:
             img_key, sub_key = self._wbi_keys(cookie)

@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tools/resource_search.schema.json",
+  "title": "resource_search contract v2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/input"
+    },
+    {
+      "$ref": "#/$defs/output"
+    }
+  ],
+  "$defs": {
+    "SearchFilters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resource_types": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "../common.schema.json#/$defs/resource_type"
+          }
+        },
+        "languages": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 35
+          }
+        },
+        "published_after": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        },
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      }
+    },
+    "SearchTaskQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "SearchTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "queries"
+      ],
+      "properties": {
+        "platform": {
+          "$ref": "../common.schema.json#/$defs/platform_id"
+        },
+        "queries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/SearchTaskQuery"
+          }
+        }
+      }
+    },
+    "query_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query",
+        "candidate_count",
+        "failure_count"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "failure_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "platform_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "status",
+        "query_runs"
+      ],
+      "properties": {
+        "platform": {
+          "$ref": "../common.schema.json#/$defs/platform_id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "partial",
+            "failed",
+            "skipped"
+          ]
+        },
+        "query_runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/query_run"
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "flow_id",
+        "task_version",
+        "idempotency_key",
+        "search_tasks"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "task_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "idempotency_key": {
+          "$ref": "../common.schema.json#/$defs/idempotency_key"
+        },
+        "search_tasks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/SearchTask"
+          }
+        },
+        "filters": {
+          "$ref": "#/$defs/SearchFilters"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "ok",
+        "flow_id",
+        "task_version",
+        "search_run_id",
+        "result_set_id",
+        "result_version",
+        "stage",
+        "status",
+        "platform_runs",
+        "candidates",
+        "failures",
+        "has_more",
+        "created_at"
+      ],
+      "properties": {
+        "contract_version": {
+          "$ref": "../common.schema.json#/$defs/contract_version"
+        },
+        "ok": {
+          "const": true
+        },
+        "flow_id": {
+          "$ref": "../common.schema.json#/$defs/flow_id"
+        },
+        "task_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "search_run_id": {
+          "$ref": "../common.schema.json#/$defs/search_run_id"
+        },
+        "result_set_id": {
+          "$ref": "../common.schema.json#/$defs/result_set_id"
+        },
+        "result_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stage": {
+          "type": "string",
+          "const": "reviewing"
+        },
+        "status": {
+          "$ref": "../common.schema.json#/$defs/result_set_status"
+        },
+        "platform_runs": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/platform_run"
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "../common.schema.json#/$defs/resource_candidate"
+          }
+        },
+        "failures": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "../common.schema.json#/$defs/item_failure"
+          }
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        }
+      }
+    },
+    "output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/success"
+        },
+        {
+          "$ref": "../common.schema.json#/$defs/error_result"
+        }
+      ]
+    }
+  }
+}
