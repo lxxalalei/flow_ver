@@ -120,6 +120,17 @@ resource_flow_start
 
 只有用户看过当前有效计划并明确确认后，才原样使用 MCP 返回的 `plan_id`、`plan_digest`、完整 Presentation/Selection 绑定元组和 `confirmation_token` 调用 `resource_download_start`。用户拒绝、修改选择、Presentation 变化或 Plan 过期后必须重新 prepare 和确认。
 
+## 归档与资料库检索
+
+调用 `resource_archive` 或解释 `resource_library_search` 结果前，必须读取
+`references/library-structure.md`。归档对象是学习资料，不是儿童成长档案。
+
+- 根据资源实际内容、服务端权威元数据和当前学习目标提出分类；只填写有证据支持的学段、难度、教材版本、专题和标签。
+- 从注册表选择唯一主领域和零到多个次领域，不创建一级领域，不把亲子、家长辅导、自主学习、教材同步、学段、媒介或资料用途当作一级领域。
+- 分类证据不足时提交 `needs_review` 或 `unclassified`，不为补齐内部字段追问用户，也不伪造来源、标题或归档状态。
+- 不拼接本地路径，不决定物理格式目录，不直接写 SQLite；文件格式、命名、落盘、去重、事务、恢复和索引由 MCP 负责。
+- 用自然中文解释主领域、主题、分类状态、归档或内容去重结果；位置只使用 MCP 返回的资料库内安全相对路径。
+
 ## 恢复规则
 
 `resource_flow_status` 是恢复权威来源：
@@ -150,5 +161,6 @@ resource_flow_start
 - `references/site-whitelist.md`：可信站点定向搜索参考。
 - `references/candidate-judgment.md`：ResultSet 审查、展示子集和证据护栏。
 - `references/mcp-workflow.md`：v2 工具顺序、幂等、Presentation、恢复、独立登录和错误处理。
+- `references/library-structure.md`：归档前必读；学习领域、分类元数据、物理目录和资料库检索规则。
 - `references/response-guidelines.md`：实际展示、选择、确认、进度和失败表达。
 - `examples/semantic-regression-cases.json`：修改 Skill 或执行回归时读取，不作为正常对话输入。

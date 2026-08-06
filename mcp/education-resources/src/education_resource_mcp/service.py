@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
 import json
 from pathlib import Path
 import re
 import secrets
-import shutil
 import threading
 from typing import Any
 
+from .archive import (
+    ArchiveFileError,
+    ArchiveFileManager,
+    build_relative_path,
+    resource_format,
+)
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
@@ -20,6 +28,11 @@ from .policy import PolicyError, ensure_within_root
 from .search import SearchProvider, canonical_http_url, default_search_provider
 from .session_bridge import create_session_store
 from .storage import Store, new_id, utc_now
+from .taxonomy import (
+    domain_display_name,
+    normalize_archive_metadata,
+    normalize_legacy_domain,
+)
 
 
 TERMINAL_JOB_STATES = {"succeeded", "failed", "cancelled"}
@@ -35,6 +48,7 @@ class ResourceService:
         search_provider: SearchProvider | None = None,
         download_provider: DownloadProvider | None = None,
         job_runner: JobRunner | None = None,
+        archive_file_manager: ArchiveFileManager | None = None,
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.settings.ensure_directories()
@@ -49,6 +63,13 @@ class ResourceService:
         self.job_runner = job_runner or JobRunner(self.settings.max_workers)
         self._mutation_lock = threading.RLock()
         self.store.mark_incomplete_jobs_failed()
+        self.archive_files = archive_file_manager or ArchiveFileManager(
+            self.settings.library_dir
+        )
+        self._library_cursor_key = bytes.fromhex(
+            self.store.get_or_create_metadata_secret("library_cursor_hmac")
+        )
+        self._reconcile_archives()
 
     def flow_start(
         self,
@@ -779,33 +800,28 @@ class ResourceService:
             raise DomainError("ASSET_NOT_FOUND", "资产不属于当前 Flow")
         if job["status"] != "succeeded" or asset["status"] != "ready":
             raise DomainError("ASSET_NOT_ARCHIVABLE", "只有成功且校验通过的资产可以归档")
+        raw_archive_metadata = dict(metadata or {})
+        try:
+            archive_metadata = normalize_archive_metadata(raw_archive_metadata)
+        except (TypeError, ValueError) as exc:
+            raise DomainError("INVALID_ARGUMENT", f"归档分类无效：{exc}") from exc
         request_hash = self._request_hash(
             {
                 "flow_id": flow_id,
                 "job_id": job_id,
                 "asset_id": asset_id,
-                "metadata": metadata or {},
+                "metadata": archive_metadata,
             }
         )
-        scope = f"resource_archive:{flow_id}"
-        replay = self._idempotency_replay(scope, idempotency_key, request_hash)
-        if replay is not None:
-            return replay
-        existing = self.store.get_archive_for_asset(asset_id)
-        if existing is not None:
-            result = {
+        legacy_request_hash = self._request_hash(
+            {
                 "flow_id": flow_id,
                 "job_id": job_id,
                 "asset_id": asset_id,
-                "resource_id": asset["resource_id"],
-                "archived_at": existing["created_at"],
-                "deduplicated": True,
+                "metadata": raw_archive_metadata,
             }
-            self.store.put_idempotency(
-                scope, idempotency_key, request_hash, existing["archive_id"], result
-            )
-            return result
-
+        )
+        scope = f"resource_archive:{flow_id}"
         source = Path(asset["local_path"]).resolve()
         try:
             ensure_within_root(source, self.settings.jobs_dir)
@@ -813,87 +829,231 @@ class ResourceService:
             raise DomainError("POLICY_DENIED", str(exc)) from exc
         if not source.is_file():
             raise DomainError("ASSET_NOT_FOUND", "资产文件不存在")
-        suffix = source.suffix.lower()[:16]
-        # Build directory tree: primary_domain / topic / resource_type
-        archive_metadata = dict(metadata or {})
-        domain = str(archive_metadata.get("primary_domain") or "").strip() or "待确认"
-        topics = archive_metadata.get("topics") or []
-        topic = str(topics[0]).strip() if topics and str(topics[0]).strip() else "其他"
-        source_name = str(archive_metadata.get("source_name") or "").strip()
-        title = str(archive_metadata.get("title") or asset.get("resource_id") or "资源").strip()
-
-        def _safe_component(value: str, max_len: int = 64) -> str:
-            cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).strip(". ")
-            return (cleaned or "其他")[:max_len]
-
-        domain = _safe_component(domain)
-        topic = _safe_component(topic)
-
-        # Auto-classify by file extension into 视频/图文/音频.
-        video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
-        audio_exts = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
-        text_exts = {
-            ".html", ".htm", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
-            ".txt", ".epub", ".mobi", ".jpg", ".jpeg", ".png", ".gif",
-            ".webp", ".xls", ".xlsx", ".rtf",
-        }
-        if suffix in video_exts:
-            type_dir = "视频"
-        elif suffix in audio_exts:
-            type_dir = "音频"
-        elif suffix in text_exts:
-            type_dir = "图文"
-        else:
-            type_dir = "图文"
-
-        name_parts = []
-        if source_name:
-            name_parts.append(_safe_component(source_name))
-        name_parts.append(_safe_component(title, 120))
-        readable_name = "-".join(name_parts) + suffix
-        sha_short = asset['sha256'][:16]
-
-        target_dir = (self.settings.library_dir / domain / topic / type_dir).resolve()
-        try:
-            ensure_within_root(target_dir, self.settings.library_dir)
-        except PolicyError as exc:
-            raise DomainError("POLICY_DENIED", str(exc)) from exc
-        target_dir.mkdir(parents=True, exist_ok=True)
-        destination = (target_dir / readable_name).resolve()
-        try:
-            ensure_within_root(destination, self.settings.library_dir)
-        except PolicyError as exc:
-            raise DomainError("POLICY_DENIED", str(exc)) from exc
-
-        # If same name exists but different content, append short hash.
-        if destination.exists():
-            existing_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
-            if existing_hash != asset['sha256']:
-                stem, ext = readable_name.rsplit(".", 1) if "." in readable_name else (readable_name, "")
-                destination = target_dir / f"{stem}-{sha_short}.{ext}" if ext else target_dir / f"{stem}-{sha_short}"
-        try:
-            ensure_within_root(destination, self.settings.library_dir)
-        except PolicyError as exc:
-            raise DomainError("POLICY_DENIED", str(exc)) from exc
-        if not destination.exists():
-            temporary = target_dir / f".{readable_name}.{new_id('tmp')}"
-            shutil.copy2(source, temporary)
-            temporary.replace(destination)
-        archive_metadata["tags"] = sorted(set(archive_metadata.get("tags") or []))
-        archive = self.store.create_archive(asset_id, destination, archive_metadata)
-        self.store.audit(flow_id, "asset.archive", archive["archive_id"], {"asset_id": asset_id})
-        result = {
-            "flow_id": flow_id,
-            "job_id": job_id,
-            "asset_id": asset_id,
-            "resource_id": asset["resource_id"],
-            "archived_at": archive["created_at"],
-            "deduplicated": False,
-        }
-        self.store.put_idempotency(
-            scope, idempotency_key, request_hash, archive["archive_id"], result
+        resources = self.store.get_resources(flow_id, [asset["resource_id"]])
+        if not resources:
+            raise DomainError("ASSET_NOT_FOUND", "资产对应的 Resource 不存在")
+        resource = resources[0]
+        intended_relative_path = build_relative_path(
+            archive_metadata["classification"],
+            source_name=str(resource.get("platform") or ""),
+            title=str(resource.get("title") or "学习资料"),
+            filename=str(asset.get("filename") or source.name),
+            media_type=str(asset["media_type"]),
         )
-        return result
+
+        with self._mutation_lock:
+            idempotency = self.store.get_idempotency(scope, idempotency_key)
+            if idempotency is not None:
+                if idempotency["request_hash"] not in {
+                    request_hash,
+                    legacy_request_hash,
+                }:
+                    previous_result = idempotency.get("result")
+                    same_asset = (
+                        isinstance(previous_result, dict)
+                        and previous_result.get("asset_id") == asset_id
+                        and previous_result.get("job_id") == job_id
+                    )
+                    previous_archive = self.store.get_archive_for_asset(asset_id)
+                    try:
+                        same_metadata = (
+                            previous_archive is not None
+                            and normalize_archive_metadata(
+                                previous_archive.get("metadata")
+                            )
+                            == archive_metadata
+                        )
+                    except (TypeError, ValueError):
+                        same_metadata = False
+                    if not (same_asset and same_metadata):
+                        raise DomainError("IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求")
+                replay = idempotency.get("result")
+                if isinstance(replay, dict) and replay.get("archive_status") == "ready":
+                    return dict(replay)
+
+            retry_reservation: dict[str, Any] | None = None
+            existing = self.store.get_archive_for_asset(asset_id)
+            if existing is not None:
+                try:
+                    existing_metadata = normalize_archive_metadata(existing.get("metadata"))
+                except (TypeError, ValueError):
+                    existing_metadata = existing.get("metadata") or {}
+                if existing_metadata != archive_metadata:
+                    raise DomainError("ARCHIVE_CONFLICT", "该 Asset 已使用不同分类元数据归档")
+                if existing.get("status") == "pending":
+                    self._reconcile_archive_item(existing)
+                    existing = self.store.get_archive_for_asset(asset_id) or existing
+                if existing.get("status") == "failed":
+                    try:
+                        retry_reservation = self.store.retry_archive_reservation(
+                            existing["archive_id"]
+                        )
+                    except (KeyError, ValueError) as exc:
+                        raise DomainError(
+                            "STORAGE_UNAVAILABLE",
+                            "失败归档当前不能安全重试",
+                            retryable=True,
+                        ) from exc
+                    existing = None
+                if existing is not None and (
+                    existing.get("status") != "ready"
+                    or not self._archive_file_is_ready(existing)
+                ):
+                    raise DomainError(
+                        "STORAGE_UNAVAILABLE",
+                        "既有归档记录尚未恢复为可用状态",
+                        retryable=True,
+                    )
+                if existing is not None:
+                    result = self._archive_result(
+                        flow_id, job_id, asset, existing, deduplicated=True
+                    )
+                    if idempotency is None:
+                        self.store.put_idempotency(
+                            scope,
+                            idempotency_key,
+                            request_hash,
+                            existing["archive_id"],
+                            result,
+                        )
+                    elif existing.get("relative_path"):
+                        self.store.mark_archive_ready(
+                            existing["archive_id"],
+                            relative_path=existing["relative_path"],
+                            resource_format=existing.get("resource_format"),
+                            flow_id=flow_id,
+                            result=result,
+                        )
+                    return result
+
+            if retry_reservation is not None:
+                reservation = retry_reservation
+            else:
+                try:
+                    reservation = self.store.reserve_archive(
+                        asset_id,
+                        archive_metadata,
+                        intended_relative_path,
+                        idempotency_scope=scope,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                    )
+                except ValueError as exc:
+                    if str(exc) == "idempotency_conflict":
+                        raise DomainError("IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求") from exc
+                    if str(exc) == "archive_metadata_conflict":
+                        raise DomainError("ARCHIVE_CONFLICT", "该 Asset 已使用不同分类元数据归档") from exc
+                    raise DomainError("INVALID_ARGUMENT", f"归档预留失败：{exc}") from exc
+                except Exception as exc:
+                    raise DomainError("STORAGE_UNAVAILABLE", "归档索引预留失败", retryable=True) from exc
+
+            archive_id = reservation["archive_id"]
+            try:
+                if reservation.get("content_status") == "ready":
+                    content = self.store.get_ready_content(
+                        reservation["sha256"],
+                        reservation["byte_size"],
+                        reservation.get("media_type"),
+                    )
+                    if content is None or not content.get("relative_path"):
+                        raise ArchiveFileError("deduplicated_content_missing", "去重内容缺少安全相对路径")
+                    verified = self.archive_files.verify_ready(
+                        content["relative_path"],
+                        reservation["sha256"],
+                        reservation["byte_size"],
+                    )
+                    if verified != "ready":
+                        if verified == "corrupt":
+                            self.store.mark_archive_corrupt(archive_id, {"code": "CONTENT_CORRUPT"})
+                        else:
+                            self.store.mark_archive_missing(archive_id, {"code": "CONTENT_MISSING"})
+                        raise ArchiveFileError("deduplicated_content_unavailable", "既有去重内容不可用")
+                    relative_path = str(content["relative_path"])
+                    deduplicated = True
+                else:
+                    staged_relative = f".archive-staging/{archive_id}.pending"
+                    staged_path = self.archive_files.absolute_for_internal_read(staged_relative)
+                    if not staged_path.exists():
+                        staged = self.archive_files.stage_and_verify(
+                            source,
+                            expected_sha256=asset["sha256"],
+                            expected_size=int(asset["byte_size"]),
+                            media_type=str(asset["media_type"]),
+                            operation_id=archive_id,
+                        )
+                        staged_relative = staged.relative_path
+                    published = self.archive_files.publish_no_replace(
+                        staged_relative,
+                        intended_relative_path,
+                        sha256=asset["sha256"],
+                        byte_size=int(asset["byte_size"]),
+                    )
+                    relative_path = published.relative_path
+                    deduplicated = published.deduplicated
+
+                pending = self.store.get_archive_for_asset(asset_id)
+                if pending is None:
+                    raise ArchiveFileError("archive_reservation_lost", "归档预留记录丢失")
+                result = self._archive_result(
+                    flow_id,
+                    job_id,
+                    asset,
+                    {**pending, "relative_path": relative_path, "status": "ready"},
+                    deduplicated=deduplicated,
+                )
+                ready = self.store.mark_archive_ready(
+                    archive_id,
+                    relative_path=relative_path,
+                    resource_format=resource_format(
+                        str(asset["media_type"]), str(asset.get("filename") or source.name)
+                    ),
+                    flow_id=flow_id,
+                    result=result,
+                )
+                result["archived_at"] = ready.get("archived_at") or result["archived_at"]
+                return result
+            except ArchiveFileError as exc:
+                try:
+                    self.archive_files.remove_staging(
+                        f".archive-staging/{archive_id}.pending"
+                    )
+                except (ArchiveFileError, OSError):
+                    pass
+                try:
+                    self.store.mark_archive_failed(
+                        archive_id, {"code": exc.code, "message": str(exc)}
+                    )
+                except (KeyError, ValueError):
+                    pass
+                if exc.code in {
+                    "path_escape",
+                    "symlink_escape",
+                    "unsafe_destination",
+                    "unsafe_library_root",
+                }:
+                    raise DomainError("POLICY_DENIED", str(exc)) from exc
+                if exc.code in {"asset_integrity_mismatch", "asset_format_mismatch"}:
+                    raise DomainError("ASSET_NOT_ARCHIVABLE", str(exc)) from exc
+                raise DomainError("STORAGE_UNAVAILABLE", str(exc), retryable=True) from exc
+            except OSError as exc:
+                try:
+                    self.archive_files.remove_staging(
+                        f".archive-staging/{archive_id}.pending"
+                    )
+                except (ArchiveFileError, OSError):
+                    pass
+                try:
+                    self.store.mark_archive_failed(
+                        archive_id,
+                        {"code": "FILESYSTEM_ERROR", "message": type(exc).__name__},
+                    )
+                except (KeyError, ValueError):
+                    pass
+                raise DomainError("STORAGE_UNAVAILABLE", "归档文件提交失败", retryable=True) from exc
+            except Exception as exc:
+                # The published file remains tied to a pending row.  Startup
+                # reconciliation can safely finish the commit after SQLite recovers.
+                raise DomainError("STORAGE_UNAVAILABLE", "归档索引提交失败", retryable=True) from exc
 
     def library_search(
         self,
@@ -906,39 +1066,294 @@ class ResourceService:
         self._require_flow(flow_id)
         if not 1 <= limit <= 50:
             raise DomainError("INVALID_ARGUMENT", "limit 必须在 1 到 50 之间")
-        if cursor is not None:
-            raise DomainError("INVALID_ARGUMENT", "首版资料库检索尚不支持 cursor")
-        library_filters = filters or {}
-        entries = self.store.search_library(
-            library_filters.get("query"), limit, filters=library_filters
+        library_filters = self._normalize_library_filters(filters or {})
+        keyset = self._decode_library_cursor(cursor, library_filters) if cursor else None
+        page = self.store.search_library(
+            library_filters.get("query"),
+            limit,
+            filters=library_filters,
+            cursor=keyset,
         )
-        assets = [
-            {
+        assets: list[dict[str, Any]] = []
+        for item in page["items"]:
+            if not self._archive_file_is_ready(item):
+                status = self._archive_file_status(item)
+                if status == "corrupt":
+                    self.store.mark_archive_corrupt(item["archive_id"], {"code": "CONTENT_CORRUPT"})
+                else:
+                    self.store.mark_archive_missing(item["archive_id"], {"code": "CONTENT_MISSING"})
+                continue
+            classification = dict(item["classification"])
+            primary_domain = classification.get("primary_domain")
+            public_item: dict[str, Any] = {
+                "archive_id": item["archive_id"],
                 "asset_id": item["asset_id"],
                 "resource_id": item["resource_id"],
                 "platform": item["platform"],
                 "title": item["title"],
                 "resource_type": item["resource_type"],
+                "resource_format": item["resource_format"],
                 "media_type": item["media_type"],
                 "size_bytes": item["byte_size"],
                 "sha256": item["sha256"],
-                **(
-                    {"collection": item["metadata"].get("collection")}
-                    if item["metadata"].get("collection")
-                    else {}
-                ),
-                **(
-                    {"primary_domain": item["metadata"].get("primary_domain")}
-                    if item["metadata"].get("primary_domain")
-                    else {}
-                ),
-                "tags": item["metadata"].get("tags") or [],
-                "library_path": item.get("library_path"),
-                "archived_at": item["created_at"],
+                "classification": classification,
+                "tags": item.get("tags") or [],
+                "archived_at": item["archived_at"],
             }
-            for item in entries
-        ]
-        return {"flow_id": flow_id, "assets": assets, "has_more": False}
+            if primary_domain:
+                public_item["primary_domain"] = primary_domain
+                public_item["primary_domain_display_name"] = domain_display_name(
+                    primary_domain
+                )
+            else:
+                public_item["primary_domain_display_name"] = "待分类"
+            if item.get("collection"):
+                public_item["collection"] = item["collection"]
+            relative_path = item.get("relative_path")
+            if relative_path:
+                public_item["relative_path"] = relative_path
+                public_item["library_path"] = relative_path
+            assets.append(public_item)
+        result: dict[str, Any] = {
+            "flow_id": flow_id,
+            "assets": assets,
+            "has_more": bool(page["has_more"]),
+        }
+        if page.get("next_keyset"):
+            result["next_cursor"] = self._encode_library_cursor(
+                page["next_keyset"], library_filters
+            )
+        return result
+
+    def _archive_result(
+        self,
+        flow_id: str,
+        job_id: str,
+        asset: dict[str, Any],
+        archive: dict[str, Any],
+        *,
+        deduplicated: bool,
+    ) -> dict[str, Any]:
+        classification = dict(archive.get("classification") or {})
+        result: dict[str, Any] = {
+            "flow_id": flow_id,
+            "job_id": job_id,
+            "asset_id": asset["asset_id"],
+            "resource_id": asset["resource_id"],
+            "archive_id": archive["archive_id"],
+            "archive_status": "ready",
+            "archived_at": archive.get("archived_at") or archive.get("created_at") or utc_now(),
+            "deduplicated": bool(deduplicated),
+            "classification": classification,
+        }
+        primary_domain = classification.get("primary_domain")
+        if primary_domain:
+            result["primary_domain_display_name"] = domain_display_name(primary_domain)
+        else:
+            result["primary_domain_display_name"] = "待分类"
+        if archive.get("relative_path"):
+            result["relative_path"] = archive["relative_path"]
+        return result
+
+    def _normalize_library_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
+        normalized = {
+            key: value
+            for key, value in filters.items()
+            if value is not None and value != [] and value != ""
+        }
+        legacy_primary = normalized.pop("primary_domain", None)
+        if legacy_primary is not None:
+            mapped = normalize_legacy_domain(legacy_primary)
+            if mapped is None:
+                raise DomainError("INVALID_ARGUMENT", "primary_domain 不是已知学习领域")
+            existing = list(normalized.get("primary_domains") or [])
+            if mapped not in existing:
+                existing.append(mapped)
+            normalized["primary_domains"] = existing
+        return normalized
+
+    @staticmethod
+    def _library_filter_digest(filters: dict[str, Any]) -> str:
+        payload = json.dumps(filters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _base64url_encode(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _base64url_decode(value: str) -> bytes:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+    def _encode_library_cursor(
+        self, keyset: tuple[str, str], filters: dict[str, Any]
+    ) -> str:
+        payload = json.dumps(
+            {
+                "v": 1,
+                "archived_at": keyset[0],
+                "archive_id": keyset[1],
+                "filter_digest": self._library_filter_digest(filters),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        body = self._base64url_encode(payload)
+        signature = self._base64url_encode(
+            hmac.new(self._library_cursor_key, body.encode("ascii"), hashlib.sha256).digest()
+        )
+        return f"{body}.{signature}"
+
+    def _decode_library_cursor(
+        self, cursor: str, filters: dict[str, Any]
+    ) -> tuple[str, str]:
+        try:
+            body, encoded_signature = cursor.split(".", 1)
+            expected = hmac.new(
+                self._library_cursor_key, body.encode("ascii"), hashlib.sha256
+            ).digest()
+            signature = self._base64url_decode(encoded_signature)
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError("invalid signature")
+            payload = json.loads(self._base64url_decode(body))
+            if (
+                payload.get("v") != 1
+                or payload.get("filter_digest") != self._library_filter_digest(filters)
+            ):
+                raise ValueError("cursor does not match filters")
+            archived_at = str(payload["archived_at"])
+            archive_id = str(payload["archive_id"])
+            if not archive_id.startswith("archive_") or not archived_at:
+                raise ValueError("invalid cursor keyset")
+            return archived_at, archive_id
+        except (
+            binascii.Error,
+            KeyError,
+            TypeError,
+            UnicodeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise DomainError("INVALID_ARGUMENT", "cursor 无效、已损坏或与过滤条件不匹配") from exc
+
+    def _archive_file_status(self, archive: dict[str, Any]) -> str:
+        relative_path = archive.get("relative_path")
+        if relative_path:
+            return self.archive_files.verify_ready(
+                str(relative_path),
+                str(archive.get("content_sha256") or archive.get("sha256")),
+                int(archive.get("content_byte_size") or archive.get("byte_size") or 0),
+            )
+        return self._legacy_archive_file_status(archive)
+
+    def _archive_file_is_ready(self, archive: dict[str, Any]) -> bool:
+        return self._archive_file_status(archive) == "ready"
+
+    def _legacy_archive_file_status(self, archive: dict[str, Any]) -> str:
+        raw_path = archive.get("library_path")
+        if not raw_path:
+            return "missing"
+        candidate = Path(str(raw_path))
+        if not candidate.is_absolute() or candidate.is_symlink():
+            return "missing"
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return "missing"
+        allowed_roots = (self.settings.library_dir, *self.settings.legacy_library_dirs)
+        if not any(self._path_is_within(resolved, Path(root).resolve()) for root in allowed_roots):
+            return "missing"
+        if not resolved.is_file():
+            return "missing"
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with resolved.open("rb") as stream:
+                while True:
+                    chunk = stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    size += len(chunk)
+        except OSError:
+            return "missing"
+        expected_size = int(archive.get("content_byte_size") or archive.get("byte_size") or 0)
+        expected_sha = str(archive.get("content_sha256") or archive.get("sha256") or "")
+        return "ready" if size == expected_size and digest.hexdigest() == expected_sha else "corrupt"
+
+    @staticmethod
+    def _path_is_within(path: Path, root: Path) -> bool:
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False
+
+    def _reconcile_archives(self) -> None:
+        for item in self.store.list_archive_reconciliation_items():
+            self._reconcile_archive_item(item)
+
+    def _reconcile_archive_item(self, item: dict[str, Any]) -> None:
+        archive_id = str(item["archive_id"])
+        status = str(item.get("status") or "")
+        relative_path = item.get("relative_path")
+        expected_sha256 = str(item.get("sha256") or item.get("content_sha256") or "")
+        expected_size = int(
+            item.get("byte_size") or item.get("content_byte_size") or 0
+        )
+        try:
+            if status == "ready":
+                file_status = self._archive_file_status(item)
+                if file_status == "missing":
+                    self.store.mark_archive_missing(archive_id, {"code": "CONTENT_MISSING"})
+                elif file_status == "corrupt":
+                    self.store.mark_archive_corrupt(archive_id, {"code": "CONTENT_CORRUPT"})
+                return
+            if status != "pending":
+                return
+            if item.get("content_status") == "ready" and relative_path:
+                if self.archive_files.verify_ready(
+                    str(relative_path), expected_sha256, expected_size
+                ) == "ready":
+                    self.store.mark_archive_ready(
+                        archive_id,
+                        relative_path=str(relative_path),
+                        resource_format=item.get("resource_format"),
+                    )
+                    return
+            if relative_path and self.archive_files.verify_ready(
+                str(relative_path), expected_sha256, expected_size
+            ) == "ready":
+                self.store.mark_archive_ready(
+                    archive_id,
+                    relative_path=str(relative_path),
+                    resource_format=item.get("resource_format"),
+                )
+                return
+            temporary = item.get("temporary_path") or f".archive-staging/{archive_id}.pending"
+            temporary_path = self.archive_files.absolute_for_internal_read(str(temporary))
+            if temporary_path.exists() and relative_path:
+                published = self.archive_files.publish_no_replace(
+                    str(temporary),
+                    str(relative_path),
+                    sha256=expected_sha256,
+                    byte_size=expected_size,
+                )
+                self.store.mark_archive_ready(
+                    archive_id,
+                    relative_path=published.relative_path,
+                    resource_format=item.get("resource_format"),
+                )
+                return
+            self.store.mark_archive_failed(archive_id, {"code": "PENDING_CONTENT_LOST"})
+        except (ArchiveFileError, OSError, KeyError, ValueError) as exc:
+            try:
+                self.store.mark_archive_failed(
+                    archive_id,
+                    {"code": "ARCHIVE_RECONCILIATION_FAILED", "message": type(exc).__name__},
+                )
+            except (KeyError, ValueError):
+                pass
 
     # ------------------------------------------------------------------
     # Session management

@@ -35,6 +35,10 @@
       "type": "string",
       "pattern": "^asset_[A-Za-z0-9_-]{16,64}$"
     },
+    "archive_id": {
+      "type": "string",
+      "pattern": "^archive_[A-Za-z0-9_-]{16,64}$"
+    },
     "idempotency_key": {
       "type": "string",
       "minLength": 16,
@@ -536,14 +540,184 @@
         }
       }
     },
+    "taxonomy_version": {
+      "type": "string",
+      "const": "learning-v1"
+    },
+    "learning_domain_id": {
+      "type": "string",
+      "enum": [
+        "chinese_language",
+        "mathematics_reasoning",
+        "english_foreign_languages",
+        "natural_science",
+        "humanities_social_studies",
+        "information_technology",
+        "arts_aesthetics",
+        "physical_health",
+        "learning_skills",
+        "interdisciplinary_practice"
+      ]
+    },
+    "learning_domain_display_name": {
+      "type": "string",
+      "enum": [
+        "语文与中文",
+        "数学与思维",
+        "英语与外语",
+        "自然科学",
+        "人文与社会",
+        "信息科技",
+        "艺术与审美",
+        "体育与健康",
+        "学习方法与通用能力",
+        "综合实践与跨学科",
+        "待分类"
+      ]
+    },
+    "classification_status": {
+      "type": "string",
+      "enum": ["classified", "needs_review", "unclassified"]
+    },
+    "material_purpose": {
+      "type": "string",
+      "enum": [
+        "explanation",
+        "practice",
+        "assessment",
+        "reading",
+        "reference",
+        "experiment",
+        "project",
+        "lesson_material"
+      ]
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["introductory", "intermediate", "advanced", "competition"]
+    },
+    "resource_format": {
+      "type": "string",
+      "enum": ["video", "document", "audio", "other"]
+    },
+    "safe_topic": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^<>:\"/\\\\|?*\\u0000-\\u001F\\u007F]+$"
+    },
+    "grade_level": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[^<>:\"/\\\\|?*\\u0000-\\u001F\\u007F]+$"
+    },
+    "curriculum_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^<>:\"/\\\\|?*\\u0000-\\u001F\\u007F]+$"
+    },
+    "archive_classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxonomy_version",
+        "classification_status",
+        "secondary_domains",
+        "topics",
+        "material_purposes",
+        "grade_levels",
+        "curriculum_versions"
+      ],
+      "properties": {
+        "taxonomy_version": {
+          "$ref": "#/$defs/taxonomy_version"
+        },
+        "classification_status": {
+          "$ref": "#/$defs/classification_status"
+        },
+        "primary_domain": {
+          "$ref": "#/$defs/learning_domain_id"
+        },
+        "secondary_domains": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/learning_domain_id"
+          }
+        },
+        "topics": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/safe_topic"
+          }
+        },
+        "material_purposes": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/material_purpose"
+          }
+        },
+        "grade_levels": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/grade_level"
+          }
+        },
+        "difficulty": {
+          "$ref": "#/$defs/difficulty"
+        },
+        "curriculum_versions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/curriculum_version"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "classification_status": {"const": "classified"}
+            },
+            "required": ["classification_status"]
+          },
+          "then": {
+            "required": ["primary_domain"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "classification_status": {"const": "unclassified"}
+            },
+            "required": ["classification_status"]
+          },
+          "then": {
+            "not": {"required": ["primary_domain"]}
+          }
+        }
+      ]
+    },
+    "relative_library_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?![A-Za-z]:[/\\\\])(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000-\\u001F\\u007F\\\\]+$"
+    },
     "string_tags": {
       "type": "array",
       "maxItems": 32,
-      "uniqueItems": true,
       "items": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 64
+        "maxLength": 64,
+        "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
       }
     },
     "search_run_id": {

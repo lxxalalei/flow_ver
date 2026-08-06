@@ -39,6 +39,7 @@ class Settings:
     plan_ttl_seconds: int = 15 * 60
     searxng_base_url: str = ""
     session_manager_data_dir: Path | None = None
+    legacy_library_dirs: tuple[Path, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,7 +53,12 @@ class Settings:
             data_dir=data_dir,
             database_path=data_dir / "database.sqlite",
             jobs_dir=data_dir / "jobs",
-            library_dir=data_dir / "library",
+            library_dir=Path(
+                os.environ.get(
+                    "EDUCATION_RESOURCE_MCP_LIBRARY_DIR",
+                    str(data_dir / "学习资料库"),
+                )
+            ).expanduser().resolve(),
             max_download_bytes=_positive_int(
                 "EDUCATION_RESOURCE_MCP_MAX_BYTES", 25 * 1024 * 1024
             ),
@@ -78,6 +84,7 @@ class Settings:
                 if os.environ.get("EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR")
                 else None
             ),
+            legacy_library_dirs=(data_dir / "library",),
         )
 
     def ensure_directories(self) -> None:

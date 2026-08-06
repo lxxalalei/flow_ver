@@ -21,6 +21,32 @@
           "minLength": 1,
           "maxLength": 512
         },
+        "classification": {
+          "$ref": "../common.schema.json#/$defs/archive_classification"
+        },
+        "primary_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "deprecated": true,
+          "description": "Compatibility-only flat field; new callers use classification.primary_domain."
+        },
+        "topics": {
+          "type": "array",
+          "maxItems": 8,
+          "deprecated": true,
+          "description": "Compatibility-only flat field; new callers use classification.topics.",
+          "items": {
+            "$ref": "../common.schema.json#/$defs/safe_topic"
+          }
+        },
+        "source_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "deprecated": true,
+          "description": "Untrusted compatibility hint; the server-owned Resource remains authoritative."
+        },
         "collection": {
           "type": "string",
           "minLength": 1,
@@ -76,8 +102,12 @@
         "job_id",
         "asset_id",
         "resource_id",
+        "archive_id",
+        "archive_status",
         "archived_at",
-        "deduplicated"
+        "deduplicated",
+        "classification",
+        "primary_domain_display_name"
       ],
       "properties": {
         "contract_version": {
@@ -98,11 +128,26 @@
         "resource_id": {
           "$ref": "../common.schema.json#/$defs/resource_id"
         },
+        "archive_id": {
+          "$ref": "../common.schema.json#/$defs/archive_id"
+        },
+        "archive_status": {
+          "const": "ready"
+        },
         "archived_at": {
           "$ref": "../common.schema.json#/$defs/timestamp"
         },
         "deduplicated": {
           "type": "boolean"
+        },
+        "classification": {
+          "$ref": "../common.schema.json#/$defs/archive_classification"
+        },
+        "primary_domain_display_name": {
+          "$ref": "../common.schema.json#/$defs/learning_domain_display_name"
+        },
+        "relative_path": {
+          "$ref": "../common.schema.json#/$defs/relative_library_path"
         }
       }
     },

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "taxonomy_version": "learning-v1",
+  "library_root": "学习资料库",
+  "unclassified_directory": "99-待分类",
+  "fallback_topic": "其他",
+  "domains": [
+    {
+      "id": "chinese_language",
+      "display_name": "语文与中文",
+      "directory": "01-语文与中文",
+      "suggested_topics": ["拼音", "识字与写字", "词语与语法", "阅读理解", "写作", "口语表达", "古诗词", "文言文", "文学阅读"]
+    },
+    {
+      "id": "mathematics_reasoning",
+      "display_name": "数学与思维",
+      "directory": "02-数学与思维",
+      "suggested_topics": ["数与运算", "图形与几何", "统计与概率", "应用题", "数学思维", "逻辑推理", "奥数与竞赛"]
+    },
+    {
+      "id": "english_foreign_languages",
+      "display_name": "英语与外语",
+      "directory": "03-英语与外语",
+      "suggested_topics": ["字母与自然拼读", "词汇", "语法", "听力", "口语", "阅读", "写作", "分级阅读"]
+    },
+    {
+      "id": "natural_science",
+      "display_name": "自然科学",
+      "directory": "04-自然科学",
+      "suggested_topics": ["动物与植物", "人体与生命", "物理现象", "化学与物质", "地球与环境", "天文与宇宙", "科学实验", "科普综合"]
+    },
+    {
+      "id": "humanities_social_studies",
+      "display_name": "人文与社会",
+      "directory": "05-人文与社会",
+      "suggested_topics": ["中国历史", "世界历史", "中国地理", "世界地理", "传统文化", "社会常识", "法治与公民", "哲学与思想启蒙"]
+    },
+    {
+      "id": "information_technology",
+      "display_name": "信息科技",
+      "directory": "06-信息科技",
+      "suggested_topics": ["计算机基础", "信息素养", "编程启蒙", "人工智能", "网络与安全", "数字工具使用"]
+    },
+    {
+      "id": "arts_aesthetics",
+      "display_name": "艺术与审美",
+      "directory": "07-艺术与审美",
+      "suggested_topics": ["绘画", "书法", "音乐", "舞蹈", "戏剧与表演", "手工与设计", "艺术欣赏"]
+    },
+    {
+      "id": "physical_health",
+      "display_name": "体育与健康",
+      "directory": "08-体育与健康",
+      "suggested_topics": ["体育知识", "运动技能", "身体与健康", "营养与卫生", "心理健康知识", "安全常识"]
+    },
+    {
+      "id": "learning_skills",
+      "display_name": "学习方法与通用能力",
+      "directory": "09-学习方法与通用能力",
+      "suggested_topics": ["学习方法", "记忆方法", "专注力训练", "时间管理", "信息检索", "表达与演讲", "问题解决", "阅读与笔记方法"]
+    },
+    {
+      "id": "interdisciplinary_practice",
+      "display_name": "综合实践与跨学科",
+      "directory": "10-综合实践与跨学科",
+      "suggested_topics": ["STEM", "项目式学习", "研究性学习", "综合主题学习", "劳动与实践", "社会实践"]
+    }
+  ],
+  "legacy_domain_aliases": {
+    "语文与中文": "chinese_language",
+    "数学与思维": "mathematics_reasoning",
+    "英语与外语": "english_foreign_languages",
+    "自然科学": "natural_science",
+    "自然与科学": "natural_science",
+    "人文与社会": "humanities_social_studies",
+    "信息科技": "information_technology",
+    "艺术与审美": "arts_aesthetics",
+    "艺术与创造": "arts_aesthetics",
+    "体育与健康": "physical_health",
+    "运动与健康": "physical_health",
+    "安全教育": "physical_health",
+    "学习方法与通用能力": "learning_skills",
+    "人文与社会认知": "humanities_social_studies",
+    "社会认知与价值观": "humanities_social_studies",
+    "综合实践与跨学科": "interdisciplinary_practice"
+  },
+  "material_purposes": ["explanation", "practice", "assessment", "reading", "reference", "experiment", "project", "lesson_material"],
+  "difficulties": ["introductory", "intermediate", "advanced", "competition"]
+}

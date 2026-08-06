@@ -6,11 +6,16 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import secrets
 import sqlite3
 import threading
 from typing import Any, Iterator
 import uuid
+
+
+LATEST_SCHEMA_VERSION = 2
+ARCHIVE_STATES = {"pending", "ready", "failed", "missing", "corrupt"}
 
 
 def utc_now() -> str:
@@ -63,8 +68,10 @@ class Store:
                     raise
 
     def _initialize(self) -> None:
-        with self.transaction() as connection:
+        with self._connect() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
+            connection.commit()
+        with self.transaction(immediate=True) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS flows (
@@ -200,45 +207,516 @@ class Store:
                     PRIMARY KEY(presentation_id, display_position),
                     UNIQUE(presentation_id, resource_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );
                 """
             )
-            migrations = {
-                "flows": [
-                    ("task_version", "INTEGER NOT NULL DEFAULT 1"),
-                    ("result_version", "INTEGER NOT NULL DEFAULT 0"),
-                    ("selection_version", "INTEGER NOT NULL DEFAULT 0"),
-                    ("current_result_set_id", "TEXT"),
-                    ("current_presentation_id", "TEXT"),
-                ],
-                "resources": [
-                    ("result_set_id", "TEXT"),
-                    ("result_position", "INTEGER"),
-                ],
-                "selections": [
-                    ("presentation_id", "TEXT"),
-                    ("selection_version", "INTEGER NOT NULL DEFAULT 0"),
-                    ("selection_digest", "TEXT NOT NULL DEFAULT ''"),
-                ],
-                "download_plans": [
-                    ("presentation_id", "TEXT"),
-                    ("selection_version", "INTEGER NOT NULL DEFAULT 0"),
-                    ("selection_digest", "TEXT NOT NULL DEFAULT ''"),
-                    ("plan_digest", "TEXT NOT NULL DEFAULT ''"),
-                ],
-                "search_result_sets": [
-                    ("platform_runs_json", "TEXT NOT NULL DEFAULT '[]'"),
-                ],
-            }
-            for table, columns in migrations.items():
-                existing = {
-                    row["name"]
-                    for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        self._apply_migrations()
+
+    def _apply_migrations(self) -> None:
+        migrations = (
+            (1, "v2_control_plane_columns", self._migration_control_plane_columns),
+            (2, "learning_archive_foundation", self._migration_archive_foundation),
+        )
+        for version, name, migration in migrations:
+            with self.transaction(immediate=True) as connection:
+                applied = connection.execute(
+                    "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+                ).fetchone()
+                if applied is not None:
+                    continue
+                migration(connection)
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                    (version, name, utc_now()),
+                )
+                connection.execute(f"PRAGMA user_version = {version}")
+
+    @staticmethod
+    def _add_columns(
+        connection: sqlite3.Connection,
+        table: str,
+        columns: list[tuple[str, str]],
+    ) -> None:
+        existing = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, declaration in columns:
+            if name not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+    @staticmethod
+    def _execute_statements(connection: sqlite3.Connection, script: str) -> None:
+        for statement in script.split(";"):
+            sql = statement.strip()
+            if sql:
+                connection.execute(sql)
+
+    def _migration_control_plane_columns(self, connection: sqlite3.Connection) -> None:
+        migrations = {
+            "flows": [
+                ("task_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("result_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("selection_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("current_result_set_id", "TEXT"),
+                ("current_presentation_id", "TEXT"),
+            ],
+            "resources": [
+                ("result_set_id", "TEXT"),
+                ("result_position", "INTEGER"),
+            ],
+            "selections": [
+                ("presentation_id", "TEXT"),
+                ("selection_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("selection_digest", "TEXT NOT NULL DEFAULT ''"),
+            ],
+            "download_plans": [
+                ("presentation_id", "TEXT"),
+                ("selection_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("selection_digest", "TEXT NOT NULL DEFAULT ''"),
+                ("plan_digest", "TEXT NOT NULL DEFAULT ''"),
+            ],
+            "search_result_sets": [
+                ("platform_runs_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ],
+        }
+        for table, columns in migrations.items():
+            self._add_columns(connection, table, columns)
+
+    def _migration_archive_foundation(self, connection: sqlite3.Connection) -> None:
+        self._execute_statements(
+            connection,
+            """
+            CREATE TABLE IF NOT EXISTS archive_contents (
+                content_id TEXT PRIMARY KEY,
+                sha256 TEXT NOT NULL,
+                byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                media_type TEXT NOT NULL,
+                resource_format TEXT NOT NULL DEFAULT 'other',
+                relative_path TEXT,
+                temporary_path TEXT,
+                status TEXT NOT NULL CHECK(status IN ('pending','ready','failed','missing','corrupt')),
+                owner_archive_id TEXT,
+                error_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(sha256, byte_size)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_contents_status
+                ON archive_contents(status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_archive_contents_format
+                ON archive_contents(resource_format, status, content_id);
+
+            CREATE TABLE IF NOT EXISTS store_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS archive_secondary_domains (
+                archive_id TEXT NOT NULL REFERENCES archive_entries(archive_id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(archive_id, value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_secondary_domains_value
+                ON archive_secondary_domains(value, archive_id);
+
+            CREATE TABLE IF NOT EXISTS archive_topics (
+                archive_id TEXT NOT NULL REFERENCES archive_entries(archive_id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(archive_id, value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_topics_value
+                ON archive_topics(value, archive_id);
+
+            CREATE TABLE IF NOT EXISTS archive_purposes (
+                archive_id TEXT NOT NULL REFERENCES archive_entries(archive_id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(archive_id, value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_purposes_value
+                ON archive_purposes(value, archive_id);
+
+            CREATE TABLE IF NOT EXISTS archive_grade_levels (
+                archive_id TEXT NOT NULL REFERENCES archive_entries(archive_id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(archive_id, value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_grade_levels_value
+                ON archive_grade_levels(value, archive_id);
+
+            CREATE TABLE IF NOT EXISTS archive_curriculum_versions (
+                archive_id TEXT NOT NULL REFERENCES archive_entries(archive_id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(archive_id, value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_curriculum_versions_value
+                ON archive_curriculum_versions(value, archive_id);
+
+            CREATE TABLE IF NOT EXISTS archive_tags (
+                archive_id TEXT NOT NULL REFERENCES archive_entries(archive_id) ON DELETE CASCADE,
+                value TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(archive_id, value)
+            );
+            CREATE INDEX IF NOT EXISTS idx_archive_tags_value
+                ON archive_tags(value, archive_id);
+            """
+        )
+        self._add_columns(
+            connection,
+            "archive_entries",
+            [
+                ("content_id", "TEXT REFERENCES archive_contents(content_id)"),
+                ("status", "TEXT NOT NULL DEFAULT 'ready'"),
+                ("taxonomy_version", "TEXT NOT NULL DEFAULT 'learning-v1'"),
+                ("classification_status", "TEXT NOT NULL DEFAULT 'needs_review'"),
+                ("primary_domain", "TEXT"),
+                ("primary_topic", "TEXT NOT NULL DEFAULT '其他'"),
+                ("collection", "TEXT"),
+                ("difficulty", "TEXT"),
+                ("notes", "TEXT"),
+                ("legacy_metadata_json", "TEXT"),
+                ("archived_at", "TEXT"),
+                ("updated_at", "TEXT"),
+                ("error_json", "TEXT"),
+            ],
+        )
+        self._execute_statements(
+            connection,
+            """
+            CREATE INDEX IF NOT EXISTS idx_archive_entries_ready_order
+                ON archive_entries(status, archived_at DESC, archive_id DESC);
+            CREATE INDEX IF NOT EXISTS idx_archive_entries_primary_domain
+                ON archive_entries(primary_domain, status, archived_at DESC, archive_id DESC);
+            CREATE INDEX IF NOT EXISTS idx_archive_entries_classification_status
+                ON archive_entries(classification_status, status, archived_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_archive_entries_taxonomy_version
+                ON archive_entries(taxonomy_version, status, archived_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_archive_entries_collection
+                ON archive_entries(collection, status, archived_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_archive_entries_difficulty
+                ON archive_entries(difficulty, status, archived_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_resources_library_filters
+                ON resources(platform, resource_type, resource_id);
+            """
+        )
+        rows = connection.execute(
+            """
+            SELECT ae.*, s.sha256, s.byte_size, s.media_type, s.filename
+            FROM archive_entries ae
+            JOIN assets s ON s.asset_id = ae.asset_id
+            WHERE ae.content_id IS NULL
+            ORDER BY ae.created_at, ae.archive_id
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                metadata = _load(row["metadata_json"], {})
+                if not isinstance(metadata, dict):
+                    raise ValueError("legacy archive metadata is not an object")
+                legacy_metadata = metadata
+            except (json.JSONDecodeError, TypeError, ValueError):
+                metadata = {}
+                legacy_metadata = {"unparseable_metadata_json": row["metadata_json"]}
+            try:
+                normalized = self._normalize_archive_metadata(metadata)
+            except (TypeError, ValueError):
+                normalized = {
+                    "classification": {
+                        "taxonomy_version": "learning-v1",
+                        "classification_status": "needs_review",
+                        "secondary_domains": [],
+                        "topics": [],
+                        "material_purposes": [],
+                        "grade_levels": [],
+                        "curriculum_versions": [],
+                    },
+                    "legacy_classification_raw": metadata,
+                    "tags": [],
                 }
-                for name, declaration in columns:
-                    if name not in existing:
-                        connection.execute(
-                            f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
-                        )
+            content = connection.execute(
+                "SELECT content_id FROM archive_contents WHERE sha256 = ? AND byte_size = ?",
+                (row["sha256"], row["byte_size"]),
+            ).fetchone()
+            content_id = content["content_id"] if content is not None else new_id("content")
+            if content is None:
+                legacy_path = str(row["library_path"] or "")
+                relative_path = None
+                if legacy_path and not Path(legacy_path).is_absolute():
+                    try:
+                        relative_path = self._safe_relative_path(legacy_path)
+                    except ValueError:
+                        relative_path = None
+                now = str(row["created_at"] or utc_now())
+                connection.execute(
+                    """
+                    INSERT INTO archive_contents(
+                        content_id, sha256, byte_size, media_type, resource_format,
+                        relative_path, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+                    """,
+                    (
+                        content_id,
+                        row["sha256"],
+                        int(row["byte_size"]),
+                        row["media_type"],
+                        self._infer_resource_format(row["media_type"], row["filename"]),
+                        relative_path,
+                        now,
+                        now,
+                    ),
+                )
+            self._update_archive_classification(
+                connection,
+                row["archive_id"],
+                normalized,
+                content_id=content_id,
+                status="ready",
+                archived_at=str(row["created_at"]),
+                legacy_metadata=legacy_metadata,
+            )
+
+    @staticmethod
+    def _normalize_archive_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+        try:
+            from .taxonomy import normalize_archive_metadata
+
+            return normalize_archive_metadata(metadata)
+        except ImportError:
+            pass
+
+        normalized = dict(metadata)
+        raw_classification = metadata.get("classification")
+        classification = (
+            dict(raw_classification) if isinstance(raw_classification, dict) else {}
+        )
+        for field in (
+            "taxonomy_version",
+            "classification_status",
+            "primary_domain",
+            "secondary_domains",
+            "topics",
+            "material_purposes",
+            "grade_levels",
+            "difficulty",
+            "curriculum_versions",
+        ):
+            if field not in classification and field in metadata:
+                classification[field] = metadata[field]
+        classification.setdefault("taxonomy_version", "learning-v1")
+        primary_domain = classification.get("primary_domain")
+        if primary_domain is not None and not isinstance(primary_domain, str):
+            primary_domain = str(primary_domain)
+            classification["primary_domain"] = primary_domain
+        domain_aliases = {
+            "语文": "chinese_language",
+            "语文与中文": "chinese_language",
+            "01-语文与中文": "chinese_language",
+            "数学": "mathematics_reasoning",
+            "数学与思维": "mathematics_reasoning",
+            "02-数学与思维": "mathematics_reasoning",
+            "英语": "english_foreign_languages",
+            "英语与外语": "english_foreign_languages",
+            "03-英语与外语": "english_foreign_languages",
+            "自然科学": "natural_science",
+            "04-自然科学": "natural_science",
+            "人文与社会": "humanities_social_studies",
+            "05-人文与社会": "humanities_social_studies",
+            "信息科技": "information_technology",
+            "06-信息科技": "information_technology",
+            "艺术与审美": "arts_aesthetics",
+            "07-艺术与审美": "arts_aesthetics",
+            "体育与健康": "physical_health",
+            "08-体育与健康": "physical_health",
+            "学习方法与通用能力": "learning_skills",
+            "09-学习方法与通用能力": "learning_skills",
+            "综合实践与跨学科": "interdisciplinary_practice",
+            "10-综合实践与跨学科": "interdisciplinary_practice",
+        }
+        domain_ids = {
+            "chinese_language",
+            "mathematics_reasoning",
+            "english_foreign_languages",
+            "natural_science",
+            "humanities_social_studies",
+            "information_technology",
+            "arts_aesthetics",
+            "physical_health",
+            "learning_skills",
+            "interdisciplinary_practice",
+        }
+        if primary_domain in domain_aliases:
+            classification["primary_domain"] = domain_aliases[str(primary_domain)]
+            primary_domain = classification["primary_domain"]
+        elif primary_domain and primary_domain not in domain_ids:
+            normalized["legacy_classification_raw"] = {
+                "primary_domain": primary_domain,
+                "classification": raw_classification,
+            }
+            classification["primary_domain"] = None
+            classification["classification_status"] = "needs_review"
+            primary_domain = None
+        classification.setdefault(
+            "classification_status", "classified" if primary_domain else "needs_review"
+        )
+        classification.setdefault("secondary_domains", [])
+        classification.setdefault("topics", [])
+        classification.setdefault("material_purposes", [])
+        classification.setdefault("grade_levels", [])
+        classification.setdefault("curriculum_versions", [])
+        normalized["classification"] = classification
+        return normalized
+
+    @staticmethod
+    def _normalized_values(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        output: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = str(item).strip()
+            if text and text not in seen:
+                seen.add(text)
+                output.append(text)
+        return output
+
+    @staticmethod
+    def _infer_resource_format(media_type: str, filename: str = "") -> str:
+        normalized_media = str(media_type or "").split(";", 1)[0].strip().lower()
+        suffix = Path(str(filename or "")).suffix.lower()
+        if normalized_media.startswith("video/"):
+            return "video"
+        if normalized_media.startswith("audio/"):
+            return "audio"
+        document_media = {
+            "application/pdf",
+            "application/epub+zip",
+            "application/msword",
+            "application/rtf",
+            "application/vnd.ms-excel",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }
+        document_suffixes = {
+            ".html", ".htm", ".pdf", ".doc", ".docx", ".ppt", ".pptx",
+            ".txt", ".epub", ".mobi", ".jpg", ".jpeg", ".png", ".gif",
+            ".webp", ".xls", ".xlsx", ".rtf",
+        }
+        if (
+            normalized_media.startswith("text/")
+            or normalized_media.startswith("image/")
+            or normalized_media in document_media
+            or suffix in document_suffixes
+        ):
+            return "document"
+        return "other"
+
+    @staticmethod
+    def _replace_archive_values(
+        connection: sqlite3.Connection,
+        table: str,
+        archive_id: str,
+        values: list[str],
+    ) -> None:
+        connection.execute(f"DELETE FROM {table} WHERE archive_id = ?", (archive_id,))
+        connection.executemany(
+            f"INSERT INTO {table}(archive_id, value, position) VALUES (?, ?, ?)",
+            ((archive_id, value, position) for position, value in enumerate(values)),
+        )
+
+    def _update_archive_classification(
+        self,
+        connection: sqlite3.Connection,
+        archive_id: str,
+        normalized: dict[str, Any],
+        *,
+        content_id: str,
+        status: str,
+        archived_at: str,
+        legacy_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        classification = normalized.get("classification")
+        classification = classification if isinstance(classification, dict) else {}
+        topics = self._normalized_values(classification.get("topics"))
+        tags = self._normalized_values(normalized.get("tags"))
+        now = utc_now()
+        connection.execute(
+            """
+            UPDATE archive_entries SET
+                content_id = ?, status = ?, taxonomy_version = ?,
+                classification_status = ?, primary_domain = ?, primary_topic = ?,
+                collection = ?, difficulty = ?, notes = ?, legacy_metadata_json = ?,
+                archived_at = ?, updated_at = ?, error_json = NULL
+            WHERE archive_id = ?
+            """,
+            (
+                content_id,
+                status,
+                str(classification.get("taxonomy_version") or "learning-v1"),
+                str(classification.get("classification_status") or "needs_review"),
+                classification.get("primary_domain"),
+                topics[0] if topics else "其他",
+                normalized.get("collection"),
+                classification.get("difficulty"),
+                normalized.get("notes"),
+                _json(legacy_metadata) if legacy_metadata is not None else None,
+                archived_at,
+                now,
+                archive_id,
+            ),
+        )
+        values_by_table = {
+            "archive_secondary_domains": self._normalized_values(
+                classification.get("secondary_domains")
+            ),
+            "archive_topics": topics,
+            "archive_purposes": self._normalized_values(
+                classification.get("material_purposes")
+            ),
+            "archive_grade_levels": self._normalized_values(
+                classification.get("grade_levels")
+            ),
+            "archive_curriculum_versions": self._normalized_values(
+                classification.get("curriculum_versions")
+            ),
+            "archive_tags": tags,
+        }
+        for table, values in values_by_table.items():
+            self._replace_archive_values(connection, table, archive_id, values)
+
+    def schema_version(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("PRAGMA user_version").fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def get_or_create_metadata_secret(self, key: str) -> str:
+        if not key or len(key) > 128:
+            raise ValueError("invalid_metadata_key")
+        with self.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT value FROM store_metadata WHERE key = ?", (key,)
+            ).fetchone()
+            if row is not None:
+                return str(row["value"])
+            value = secrets.token_hex(32)
+            connection.execute(
+                "INSERT INTO store_metadata(key, value, updated_at) VALUES (?, ?, ?)",
+                (key, value, utc_now()),
+            )
+            return value
 
     def get_idempotency(self, scope: str, key: str) -> dict[str, Any] | None:
         with self._connect() as connection:
@@ -1361,12 +1839,102 @@ class Store:
     def get_archive_for_asset(self, asset_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM archive_entries WHERE asset_id = ?", (asset_id,)
+                """
+                SELECT ae.*, c.sha256 AS content_sha256, c.byte_size AS content_byte_size,
+                       c.media_type AS content_media_type, c.resource_format,
+                       c.relative_path, c.temporary_path, c.status AS content_status
+                FROM archive_entries ae
+                LEFT JOIN archive_contents c ON c.content_id = ae.content_id
+                WHERE ae.asset_id = ?
+                """,
+                (asset_id,),
             ).fetchone()
-        if row is None:
+            return self._decode_archive_row(connection, row) if row is not None else None
+
+    def get_ready_content(
+        self, sha256: str, byte_size: int, media_type: str | None = None
+    ) -> dict[str, Any] | None:
+        sql = """
+            SELECT * FROM archive_contents
+            WHERE sha256 = ? AND byte_size = ? AND status = 'ready'
+        """
+        values: list[Any] = [sha256, byte_size]
+        if media_type:
+            sql += " AND media_type = ?"
+            values.append(media_type)
+        with self._connect() as connection:
+            row = connection.execute(sql, values).fetchone()
+        return self._decode_content(row) if row is not None else None
+
+    @staticmethod
+    def _safe_relative_path(value: str | None) -> str | None:
+        if value is None:
             return None
+        text = str(value).replace("\\", "/").strip()
+        path = PurePosixPath(text)
+        if (
+            not text
+            or path.is_absolute()
+            or ":" in path.parts[0]
+            or any(ord(character) < 32 or ord(character) == 127 for character in text)
+            or any(part in {"", ".", ".."} for part in path.parts)
+        ):
+            raise ValueError("archive_path_must_be_relative")
+        return path.as_posix()
+
+    @staticmethod
+    def _decode_content(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
-        result["metadata"] = _load(result.pop("metadata_json"), {})
+        result["error"] = _load(result.pop("error_json"), None)
+        return result
+
+    def _archive_values(
+        self, connection: sqlite3.Connection, archive_id: str
+    ) -> dict[str, list[str]]:
+        output: dict[str, list[str]] = {}
+        for key, table in (
+            ("secondary_domains", "archive_secondary_domains"),
+            ("topics", "archive_topics"),
+            ("material_purposes", "archive_purposes"),
+            ("grade_levels", "archive_grade_levels"),
+            ("curriculum_versions", "archive_curriculum_versions"),
+            ("tags", "archive_tags"),
+        ):
+            rows = connection.execute(
+                f"SELECT value FROM {table} WHERE archive_id = ? ORDER BY position, value",
+                (archive_id,),
+            ).fetchall()
+            output[key] = [str(row["value"]) for row in rows]
+        return output
+
+    def _decode_archive_row(
+        self, connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> dict[str, Any]:
+        result = dict(row)
+        raw_metadata = result.pop("metadata_json")
+        try:
+            metadata = _load(raw_metadata, {})
+        except (json.JSONDecodeError, TypeError, ValueError):
+            metadata = {}
+        result["metadata"] = metadata
+        result["legacy_metadata"] = _load(result.pop("legacy_metadata_json", None), None)
+        result["error"] = _load(result.pop("error_json", None), None)
+        values = self._archive_values(connection, result["archive_id"])
+        classification: dict[str, Any] = {
+            "taxonomy_version": result.get("taxonomy_version") or "learning-v1",
+            "classification_status": result.get("classification_status") or "needs_review",
+            "secondary_domains": values["secondary_domains"],
+            "topics": values["topics"],
+            "material_purposes": values["material_purposes"],
+            "grade_levels": values["grade_levels"],
+            "curriculum_versions": values["curriculum_versions"],
+        }
+        if result.get("primary_domain") is not None:
+            classification["primary_domain"] = result["primary_domain"]
+        if result.get("difficulty") is not None:
+            classification["difficulty"] = result["difficulty"]
+        result["classification"] = classification
+        result["tags"] = values["tags"]
         return result
 
     def create_archive(
@@ -1374,67 +1942,681 @@ class Store:
     ) -> dict[str, Any]:
         archive_id = new_id("archive")
         now = utc_now()
+        normalized = self._normalize_archive_metadata(metadata)
         with self.transaction(immediate=True) as connection:
             existing = connection.execute(
                 "SELECT * FROM archive_entries WHERE asset_id = ?", (asset_id,)
             ).fetchone()
             if existing is not None:
-                result = dict(existing)
-                result["metadata"] = _load(result.pop("metadata_json"), {})
-                return result
+                return self._decode_archive_row(connection, existing)
+            asset = connection.execute(
+                "SELECT sha256, byte_size, media_type, filename FROM assets WHERE asset_id = ?",
+                (asset_id,),
+            ).fetchone()
+            if asset is None:
+                raise KeyError(asset_id)
+            content = connection.execute(
+                "SELECT * FROM archive_contents WHERE sha256 = ? AND byte_size = ?",
+                (asset["sha256"], asset["byte_size"]),
+            ).fetchone()
+            relative_path = None
+            raw_path = str(library_path)
+            if raw_path and not Path(raw_path).is_absolute():
+                relative_path = self._safe_relative_path(raw_path)
+            if content is None:
+                content_id = new_id("content")
+                connection.execute(
+                    """
+                    INSERT INTO archive_contents(
+                        content_id, sha256, byte_size, media_type, resource_format,
+                        relative_path, status, owner_archive_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)
+                    """,
+                    (
+                        content_id,
+                        asset["sha256"],
+                        asset["byte_size"],
+                        asset["media_type"],
+                        self._infer_resource_format(asset["media_type"], asset["filename"]),
+                        relative_path,
+                        archive_id,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                content_id = str(content["content_id"])
             connection.execute(
-                "INSERT INTO archive_entries VALUES (?, ?, ?, ?, ?)",
-                (archive_id, asset_id, str(library_path), _json(metadata), now),
+                """
+                INSERT INTO archive_entries(
+                    archive_id, asset_id, library_path, metadata_json, created_at,
+                    content_id, status, archived_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+                """,
+                (
+                    archive_id,
+                    asset_id,
+                    raw_path,
+                    _json(normalized),
+                    now,
+                    content_id,
+                    now,
+                    now,
+                ),
+            )
+            self._update_archive_classification(
+                connection,
+                archive_id,
+                normalized,
+                content_id=content_id,
+                status="ready",
+                archived_at=now,
             )
         return self.get_archive_for_asset(asset_id) or {}
 
-    def search_library(self, query: str | None, limit: int, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def reserve_archive(
+        self,
+        asset_id: str,
+        metadata: dict[str, Any],
+        intended_relative_path: str,
+        *,
+        temporary_path: str | None = None,
+        idempotency_scope: str | None = None,
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
+    ) -> dict[str, Any]:
+        intended = self._safe_relative_path(intended_relative_path)
+        temporary = self._safe_relative_path(temporary_path)
+        normalized = self._normalize_archive_metadata(metadata)
+        idem_values = (idempotency_scope, idempotency_key, request_hash)
+        if any(idem_values) and not all(idem_values):
+            raise ValueError("incomplete_idempotency_reservation")
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            if all(idem_values):
+                replay = self._replay_in_transaction(
+                    connection,
+                    str(idempotency_scope),
+                    str(idempotency_key),
+                    str(request_hash),
+                )
+                if replay is not None:
+                    replay["replayed"] = True
+                    return replay
+            existing = connection.execute(
+                "SELECT * FROM archive_entries WHERE asset_id = ?", (asset_id,)
+            ).fetchone()
+            if existing is not None:
+                existing_metadata = self._normalize_archive_metadata(
+                    _load(existing["metadata_json"], {})
+                )
+                if _json(existing_metadata) != _json(normalized):
+                    raise ValueError("archive_metadata_conflict")
+                existing_content = connection.execute(
+                    "SELECT * FROM archive_contents WHERE content_id = ?",
+                    (existing["content_id"],),
+                ).fetchone()
+                content_status = (
+                    str(existing_content["status"]) if existing_content is not None else "missing"
+                )
+                result = {
+                    "archive_id": str(existing["archive_id"]),
+                    "content_id": existing["content_id"],
+                    "asset_id": asset_id,
+                    "status": str(existing["status"]),
+                    "content_status": content_status,
+                    "intended_relative_path": (
+                        existing_content["relative_path"] if existing_content is not None else None
+                    ),
+                    "temporary_path": (
+                        existing_content["temporary_path"] if existing_content is not None else None
+                    ),
+                    "deduplicated_candidate": content_status == "ready",
+                    "owns_content": bool(
+                        existing_content is not None
+                        and existing_content["owner_archive_id"] == existing["archive_id"]
+                    ),
+                    "replayed": False,
+                }
+                if all(idem_values):
+                    self._put_idempotency_in_transaction(
+                        connection,
+                        str(idempotency_scope),
+                        str(idempotency_key),
+                        str(request_hash),
+                        result["archive_id"],
+                        result,
+                        now,
+                    )
+                return result
+            asset = connection.execute(
+                """
+                SELECT s.*, r.platform, r.resource_type, r.title
+                FROM assets s JOIN resources r ON r.resource_id = s.resource_id
+                WHERE s.asset_id = ?
+                """,
+                (asset_id,),
+            ).fetchone()
+            if asset is None:
+                raise KeyError(asset_id)
+            if asset["status"] != "ready":
+                raise ValueError("asset_not_ready")
+            archive_id = new_id("archive")
+            content = connection.execute(
+                "SELECT * FROM archive_contents WHERE sha256 = ? AND byte_size = ?",
+                (asset["sha256"], asset["byte_size"]),
+            ).fetchone()
+            if content is not None and content["media_type"] != asset["media_type"]:
+                raise ValueError("content_media_type_conflict")
+            if content is None:
+                content_id = new_id("content")
+                owns_content = True
+                content_status = "pending"
+                connection.execute(
+                    """
+                    INSERT INTO archive_contents(
+                        content_id, sha256, byte_size, media_type, resource_format, relative_path,
+                        temporary_path, status, owner_archive_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                    """,
+                    (
+                        content_id,
+                        asset["sha256"],
+                        int(asset["byte_size"]),
+                        asset["media_type"],
+                        self._infer_resource_format(asset["media_type"], asset["filename"]),
+                        intended,
+                        temporary,
+                        archive_id,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                content_id = str(content["content_id"])
+                owns_content = str(content["owner_archive_id"] or "") == archive_id
+                content_status = str(content["status"])
+            connection.execute(
+                """
+                INSERT INTO archive_entries(
+                    archive_id, asset_id, library_path, metadata_json, created_at,
+                    content_id, status, archived_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    archive_id,
+                    asset_id,
+                    intended,
+                    _json(normalized),
+                    now,
+                    content_id,
+                    now,
+                    now,
+                ),
+            )
+            self._update_archive_classification(
+                connection,
+                archive_id,
+                normalized,
+                content_id=content_id,
+                status="pending",
+                archived_at=now,
+            )
+            result = {
+                "archive_id": archive_id,
+                "content_id": content_id,
+                "asset_id": asset_id,
+                "status": "pending",
+                "content_status": content_status,
+                "intended_relative_path": intended,
+                "temporary_path": temporary,
+                "sha256": str(asset["sha256"]),
+                "byte_size": int(asset["byte_size"]),
+                "media_type": str(asset["media_type"]),
+                "deduplicated_candidate": content_status == "ready",
+                "owns_content": owns_content,
+                "replayed": False,
+            }
+            if all(idem_values):
+                self._put_idempotency_in_transaction(
+                    connection,
+                    str(idempotency_scope),
+                    str(idempotency_key),
+                    str(request_hash),
+                    archive_id,
+                    result,
+                    now,
+                )
+            return result
+
+    def mark_archive_ready(
+        self,
+        archive_id: str,
+        *,
+        relative_path: str | None = None,
+        resource_format: str | None = None,
+        flow_id: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        safe_path = self._safe_relative_path(relative_path)
+        if resource_format is not None and resource_format not in {
+            "video",
+            "document",
+            "audio",
+            "other",
+        }:
+            raise ValueError("invalid_resource_format")
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM archive_entries WHERE archive_id = ?", (archive_id,)
+            ).fetchone()
+            if row is None or not row["content_id"]:
+                raise KeyError(archive_id)
+            content = connection.execute(
+                "SELECT * FROM archive_contents WHERE content_id = ?", (row["content_id"],)
+            ).fetchone()
+            if content is None:
+                raise KeyError(str(row["content_id"]))
+            final_path = safe_path or content["relative_path"]
+            if not final_path:
+                raise ValueError("ready_archive_requires_relative_path")
+            connection.execute(
+                """
+                UPDATE archive_contents SET status = 'ready', relative_path = ?,
+                    temporary_path = NULL, resource_format = COALESCE(?, resource_format),
+                    error_json = NULL, updated_at = ? WHERE content_id = ?
+                """,
+                (final_path, resource_format, now, row["content_id"]),
+            )
+            connection.execute(
+                """
+                UPDATE archive_entries SET status = 'ready', error_json = NULL,
+                    updated_at = ? WHERE archive_id = ?
+                """,
+                (now, archive_id),
+            )
+            if row["status"] != "ready":
+                self._audit_in_transaction(
+                    connection,
+                    flow_id,
+                    "asset.archive",
+                    archive_id,
+                    {"asset_id": row["asset_id"], "content_id": row["content_id"]},
+                    now,
+                )
+            if result is not None:
+                connection.execute(
+                    "UPDATE idempotency_keys SET result_json = ? WHERE result_id = ?",
+                    (_json(result), archive_id),
+                )
+            output = connection.execute(
+                """
+                SELECT ae.*, c.relative_path, c.temporary_path,
+                       c.status AS content_status, c.resource_format
+                FROM archive_entries ae JOIN archive_contents c ON c.content_id = ae.content_id
+                WHERE ae.archive_id = ?
+                """,
+                (archive_id,),
+            ).fetchone()
+            return self._decode_archive_row(connection, output)
+
+    def _mark_archive_problem(
+        self, archive_id: str, status: str, error: dict[str, Any] | None
+    ) -> None:
+        if status not in {"failed", "missing", "corrupt"}:
+            raise ValueError("invalid_archive_problem_status")
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT content_id FROM archive_entries WHERE archive_id = ?", (archive_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(archive_id)
+            error_json = _json(error) if error is not None else None
+            if status in {"missing", "corrupt"}:
+                content = connection.execute(
+                    "SELECT relative_path FROM archive_contents WHERE content_id = ?",
+                    (row["content_id"],),
+                ).fetchone()
+                if content is not None and content["relative_path"] is None:
+                    # Migrated legacy entries can point at separate old files even
+                    # when their hashes deduplicate to one content row.  Degrade
+                    # only the broken legacy relation while another copy is ready.
+                    connection.execute(
+                        """
+                        UPDATE archive_entries SET status = ?, error_json = ?, updated_at = ?
+                        WHERE archive_id = ?
+                        """,
+                        (status, error_json, now, archive_id),
+                    )
+                    remaining = connection.execute(
+                        """
+                        SELECT 1 FROM archive_entries
+                        WHERE content_id = ? AND status = 'ready' LIMIT 1
+                        """,
+                        (row["content_id"],),
+                    ).fetchone()
+                    if remaining is None:
+                        connection.execute(
+                            """
+                            UPDATE archive_contents SET status = ?, error_json = ?, updated_at = ?
+                            WHERE content_id = ?
+                            """,
+                            (status, error_json, now, row["content_id"]),
+                        )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE archive_contents SET status = ?, error_json = ?, updated_at = ?
+                        WHERE content_id = ?
+                        """,
+                        (status, error_json, now, row["content_id"]),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE archive_entries SET status = ?, error_json = ?, updated_at = ?
+                        WHERE content_id = ?
+                        """,
+                        (status, error_json, now, row["content_id"]),
+                    )
+            else:
+                content = connection.execute(
+                    "SELECT owner_archive_id FROM archive_contents WHERE content_id = ?",
+                    (row["content_id"],),
+                ).fetchone()
+                if content is not None and content["owner_archive_id"] == archive_id:
+                    connection.execute(
+                        """
+                        UPDATE archive_contents SET status = 'failed', error_json = ?, updated_at = ?
+                        WHERE content_id = ? AND status = 'pending'
+                        """,
+                        (error_json, now, row["content_id"]),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE archive_entries SET status = 'failed', error_json = ?, updated_at = ?
+                        WHERE content_id = ? AND status = 'pending'
+                        """,
+                        (error_json, now, row["content_id"]),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE archive_entries SET status = 'failed', error_json = ?, updated_at = ?
+                        WHERE archive_id = ?
+                        """,
+                        (error_json, now, archive_id),
+                    )
+
+    def mark_archive_failed(
+        self, archive_id: str, error: dict[str, Any] | None = None
+    ) -> None:
+        self._mark_archive_problem(archive_id, "failed", error)
+
+    def retry_archive_reservation(self, archive_id: str) -> dict[str, Any]:
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            row = connection.execute(
+                """
+                SELECT ae.archive_id, ae.asset_id, ae.content_id, ae.status,
+                       c.status AS content_status, c.owner_archive_id,
+                       c.relative_path, c.temporary_path, c.sha256, c.byte_size,
+                       c.media_type
+                FROM archive_entries ae
+                JOIN archive_contents c ON c.content_id = ae.content_id
+                WHERE ae.archive_id = ?
+                """,
+                (archive_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(archive_id)
+            if (
+                row["status"] != "failed"
+                or row["content_status"] != "failed"
+                or row["owner_archive_id"] != archive_id
+            ):
+                raise ValueError("archive_retry_not_allowed")
+            connection.execute(
+                """
+                UPDATE archive_contents SET status = 'pending', error_json = NULL,
+                    updated_at = ? WHERE content_id = ?
+                """,
+                (now, row["content_id"]),
+            )
+            connection.execute(
+                """
+                UPDATE archive_entries SET status = 'pending', error_json = NULL,
+                    updated_at = ? WHERE archive_id = ?
+                """,
+                (now, archive_id),
+            )
+            result = {
+                "archive_id": archive_id,
+                "content_id": str(row["content_id"]),
+                "asset_id": str(row["asset_id"]),
+                "status": "pending",
+                "content_status": "pending",
+                "intended_relative_path": row["relative_path"],
+                "temporary_path": row["temporary_path"],
+                "sha256": str(row["sha256"]),
+                "byte_size": int(row["byte_size"]),
+                "media_type": str(row["media_type"]),
+                "deduplicated_candidate": False,
+                "owns_content": True,
+                "replayed": False,
+                "retried": True,
+            }
+            connection.execute(
+                "UPDATE idempotency_keys SET result_json = ? WHERE result_id = ?",
+                (_json(result), archive_id),
+            )
+            return result
+
+    def mark_archive_missing(
+        self, archive_id: str, error: dict[str, Any] | None = None
+    ) -> None:
+        self._mark_archive_problem(archive_id, "missing", error)
+
+    def mark_archive_corrupt(
+        self, archive_id: str, error: dict[str, Any] | None = None
+    ) -> None:
+        self._mark_archive_problem(archive_id, "corrupt", error)
+
+    def list_archive_reconciliation_items(
+        self,
+        statuses: tuple[str, ...] = ("pending", "ready"),
+        *,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        invalid = set(statuses) - ARCHIVE_STATES
+        if invalid or not statuses or not 1 <= limit <= 5000:
+            raise ValueError("invalid_reconciliation_query")
+        placeholders = ",".join("?" for _ in statuses)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT ae.archive_id, ae.asset_id, ae.status, ae.updated_at,
+                       ae.library_path,
+                       c.content_id, c.status AS content_status, c.sha256, c.byte_size,
+                       c.media_type, c.resource_format, c.relative_path, c.temporary_path,
+                       c.owner_archive_id
+                FROM archive_entries ae
+                JOIN archive_contents c ON c.content_id = ae.content_id
+                WHERE ae.status IN ({placeholders})
+                ORDER BY ae.updated_at, ae.archive_id LIMIT ?
+                """,
+                (*statuses, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _filter_values(filters: dict[str, Any], *names: str) -> list[str]:
+        for name in names:
+            raw = filters.get(name)
+            if raw is None:
+                continue
+            if isinstance(raw, list):
+                return list(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
+            text = str(raw).strip()
+            return [text] if text else []
+        return []
+
+    @staticmethod
+    def _append_in_filter(
+        conditions: list[str], values: list[Any], expression: str, choices: list[str]
+    ) -> None:
+        if not choices:
+            return
+        placeholders = ",".join("?" for _ in choices)
+        conditions.append(f"{expression} IN ({placeholders})")
+        values.extend(choices)
+
+    @staticmethod
+    def _append_relation_filter(
+        conditions: list[str],
+        values: list[Any],
+        table: str,
+        choices: list[str],
+    ) -> None:
+        if not choices:
+            return
+        placeholders = ",".join("?" for _ in choices)
+        conditions.append(
+            f"EXISTS (SELECT 1 FROM {table} mv WHERE mv.archive_id = ae.archive_id "
+            f"AND mv.value IN ({placeholders}))"
+        )
+        values.extend(choices)
+
+    def search_library(
+        self,
+        query: str | None,
+        limit: int,
+        filters: dict[str, Any] | None = None,
+        *,
+        cursor: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 50:
+            raise ValueError("library_limit_out_of_range")
+        f = filters or {}
         sql = """
-            SELECT a.archive_id, a.asset_id, a.library_path, a.metadata_json, a.created_at,
+            SELECT ae.archive_id, ae.asset_id, ae.metadata_json, ae.created_at,
+                   ae.library_path,
+                   ae.archived_at, ae.taxonomy_version, ae.classification_status,
+                   ae.primary_domain, ae.primary_topic, ae.collection, ae.difficulty,
+                   ae.notes, ae.status, ae.content_id,
+                   c.relative_path, c.resource_format, c.status AS content_status,
                    s.filename, s.byte_size, s.media_type, s.sha256, r.resource_id,
                    r.title, r.platform, r.resource_type, r.source_url
-            FROM archive_entries a
-            JOIN assets s ON s.asset_id = a.asset_id
+            FROM archive_entries ae
+            JOIN archive_contents c ON c.content_id = ae.content_id
+            JOIN assets s ON s.asset_id = ae.asset_id
             JOIN resources r ON r.resource_id = s.resource_id
         """
-        params: tuple[Any, ...]
-        conditions: list[str] = []
+        conditions = ["ae.status = 'ready'", "c.status = 'ready'", "s.status = 'ready'"]
         values: list[Any] = []
 
-        if query:
-            needle = f"%{query.lower()}%"
-            conditions.append("(lower(r.title) LIKE ? OR lower(a.metadata_json) LIKE ?)")
-            values.extend([needle, needle])
+        text_query = str(query or f.get("query") or "").strip()
+        if text_query:
+            escaped = (
+                text_query.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            needle = f"%{escaped}%"
+            conditions.append(
+                """
+                (lower(r.title) LIKE ? ESCAPE '\\'
+                 OR lower(COALESCE(ae.notes, '')) LIKE ? ESCAPE '\\'
+                 OR EXISTS (SELECT 1 FROM archive_topics qt
+                            WHERE qt.archive_id = ae.archive_id
+                              AND lower(qt.value) LIKE ? ESCAPE '\\')
+                 OR EXISTS (SELECT 1 FROM archive_tags qg
+                            WHERE qg.archive_id = ae.archive_id
+                              AND lower(qg.value) LIKE ? ESCAPE '\\'))
+                """
+            )
+            values.extend([needle, needle, needle, needle])
 
-        if filters:
-            f = filters
-            if f.get("primary_domain"):
-                conditions.append("lower(a.metadata_json) LIKE ?")
-                values.append(f'%"{f["primary_domain"].lower()}"%')
-            for topic in (f.get("topics") or [])[:3]:
-                conditions.append("lower(a.metadata_json) LIKE ?")
-                values.append(f'%"{topic.lower()}"%')
-            for tag in (f.get("tags") or [])[:5]:
-                conditions.append("lower(a.metadata_json) LIKE ?")
-                values.append(f'%"{tag.lower()}"%')
-            for col in (f.get("collections") or [])[:3]:
-                conditions.append("lower(a.metadata_json) LIKE ?")
-                values.append(f'%"{col.lower()}"%')
+        self._append_in_filter(
+            conditions,
+            values,
+            "ae.taxonomy_version",
+            self._filter_values(f, "taxonomy_versions", "taxonomy_version"),
+        )
+        self._append_in_filter(
+            conditions,
+            values,
+            "ae.classification_status",
+            self._filter_values(f, "classification_statuses", "classification_status"),
+        )
+        self._append_in_filter(
+            conditions,
+            values,
+            "ae.primary_domain",
+            self._filter_values(f, "primary_domains", "primary_domain"),
+        )
+        self._append_in_filter(
+            conditions,
+            values,
+            "ae.difficulty",
+            self._filter_values(f, "difficulties", "difficulty"),
+        )
+        self._append_in_filter(
+            conditions,
+            values,
+            "ae.collection",
+            self._filter_values(f, "collections", "collection"),
+        )
+        self._append_in_filter(
+            conditions, values, "r.platform", self._filter_values(f, "platforms", "platform")
+        )
+        self._append_in_filter(
+            conditions,
+            values,
+            "r.resource_type",
+            self._filter_values(f, "resource_types", "resource_type"),
+        )
+        self._append_in_filter(
+            conditions,
+            values,
+            "c.resource_format",
+            self._filter_values(f, "resource_formats", "resource_format"),
+        )
+        for names, table in (
+            (("secondary_domains", "secondary_domain"), "archive_secondary_domains"),
+            (("topics", "topic"), "archive_topics"),
+            (("material_purposes", "purposes", "purpose"), "archive_purposes"),
+            (("grade_levels", "grade_level"), "archive_grade_levels"),
+            (("curriculum_versions", "curriculum_version"), "archive_curriculum_versions"),
+            (("tags", "tag"), "archive_tags"),
+        ):
+            self._append_relation_filter(
+                conditions, values, table, self._filter_values(f, *names)
+            )
+        if f.get("archived_after"):
+            conditions.append("julianday(ae.archived_at) >= julianday(?)")
+            values.append(str(f["archived_after"]))
+        if f.get("archived_before"):
+            conditions.append("julianday(ae.archived_at) <= julianday(?)")
+            values.append(str(f["archived_before"]))
+        if cursor is not None:
+            archived_at, archive_id = cursor
+            conditions.append(
+                "(ae.archived_at < ? OR (ae.archived_at = ? AND ae.archive_id < ?))"
+            )
+            values.extend([archived_at, archived_at, archive_id])
 
-        if conditions:
-            sql += " WHERE " + " AND ".join(conditions)
-            params = tuple(values) + (limit,)
-        else:
-            params = (limit,)
-        sql += " ORDER BY a.created_at DESC LIMIT ?"
+        sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY ae.archived_at DESC, ae.archive_id DESC LIMIT ?"
+        values.append(limit + 1)
         with self._connect() as connection:
-            rows = connection.execute(sql, params).fetchall()
-        output = []
-        for row in rows:
-            item = dict(row)
-            item["metadata"] = _load(item.pop("metadata_json"), {})
-            output.append(item)
-        return output
+            rows = connection.execute(sql, values).fetchall()
+            has_more = len(rows) > limit
+            page = rows[:limit]
+            items = [self._decode_archive_row(connection, row) for row in page]
+        next_keyset = None
+        if has_more and items:
+            next_keyset = (str(items[-1]["archived_at"]), str(items[-1]["archive_id"]))
+        return {"items": items, "has_more": has_more, "next_keyset": next_keyset}
 
     def audit(
         self,

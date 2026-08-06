@@ -77,7 +77,17 @@
 
 ## 归档
 
-说明已归档或去重的资源数量、collection、tags，以及后续可用什么主题或标题查询。不要返回数据库文件、临时目录或绝对路径。
+只有 `resource_archive` 返回成功后，才说明已归档或内容去重。用自然中文概括主领域、
+次领域、主题和 `classified`、`needs_review` 或 `unclassified` 状态；辅助说明有证据的
+collection、用途、学段、难度和 tags，并告诉用户以后可用哪些标题、主题或分类条件查找。
+
+`needs_review` 或 `unclassified` 要明确说“已安全归档，分类待整理”，不能说成分类完成。
+`deduplicated=true` 表示复用了已有物理内容并保留了当前 Asset 的关联，不表示忽略了本次
+归档。需要说明位置时只使用 MCP 返回的 `学习资料库/` 内安全相对路径。
+
+资料库检索结果按 MCP 的稳定顺序解释；存在 `has_more=true` 时可以继续使用返回的
+`next_cursor` 翻页。不要返回数据库文件、任务目录、临时目录、绝对路径、原始 cursor
+内容或内部 SQL，也不要把缺失文件、pending 或非 ready 记录描述为可用资料。
 
 ## 失败
 

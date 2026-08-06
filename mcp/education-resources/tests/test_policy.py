@@ -290,7 +290,7 @@ class ClientPathPolicyTests(unittest.TestCase):
 
             result = resolve_client_path(root, "courses/math.pdf")
 
-            self.assertEqual(result, root / "courses" / "math.pdf")
+            self.assertEqual(result, (root / "courses" / "math.pdf").resolve())
 
     def test_rejects_symlink_escape_from_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -316,7 +316,7 @@ class ClientPathPolicyTests(unittest.TestCase):
 
             self.assertEqual(
                 ensure_within_root(root / "job" / "asset.bin", root),
-                root / "job" / "asset.bin",
+                (root / "job" / "asset.bin").resolve(),
             )
             with self.assertRaises(PolicyViolation) as caught:
                 ensure_within_root(root.parent / "outside.bin", root)

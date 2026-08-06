@@ -251,9 +251,22 @@ FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Ass
 - `download_plans`
 - `jobs`
 - `assets`
+- `schema_migrations`
+- `archive_contents`
 - `archive_entries`
+- `archive_secondary_domains`
+- `archive_topics`
+- `archive_purposes`
+- `archive_grade_levels`
+- `archive_curriculum_versions`
+- `archive_tags`
 - `idempotency_keys`
 - `audit_events`
+
+`archive_contents` 表示按 SHA-256 和文件大小去重的物理内容；`archive_entries` 表示 Asset
+到归档内容的可追溯关系。分类标量保存在 Archive 主记录，多值分类进入关联表，不能依赖
+`metadata_json LIKE` 完成结构化过滤。SQLite 迁移只做幂等前向升级，不移动或批量重命名
+用户已有资料文件。
 
 旧 Stage 1–6 JSON 在兼容期可以作为导入导出格式，但不能继续承担安全边界。模型不得直接写数据库或权威 JSON。
 
@@ -394,19 +407,30 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 
 验收：未确认不能下载；重复 start 不产生重复任务；取消后没有可归档资产；进程重启后可恢复或明确终结任务；所有网络安全测试通过。
 
-### 阶段 5：资料库归档 — 已完成（本地 MVP）
+### 阶段 5：学习资料库归档 — 已完成（0016 foundation）
 
 工作：
 
-- 实现资产校验、内容指纹、去重、归档事务和检索。
-- 实现 `resource_archive` 与 `resource_library_search`。
-- 将旧 Library Manager 行为映射到资产 ID 和数据库事务。
+- 建立唯一 `learning-v1` 分类注册表、十个稳定机器领域 ID 和固定中文目录映射。
+- 用版本化嵌套分类统一 Skill、JSON Schema、Python 模型、SQLite 索引和工具文档；兼容读取
+  旧平铺字段与旧中文领域，无法可靠映射时进入 `needs_review` 并保留原始元数据。
+- 建立 schema version 2 的幂等前向迁移、内容实体、归档状态和多值关联索引。
+- 实现 Asset 校验、权威命名、路径与符号链接安全、跨 Asset 内容去重、
+  `pending -> ready` 文件提交和内部对账恢复。
+- 实现 `resource_archive` 与 `resource_library_search`；结构化字段精确过滤，关键词受控模糊
+  查询，并使用稳定 keyset 排序和签名不透明 cursor 分页。
 
-当前结果：归档只接受 `job_id` 和 `asset_id`，已实现内容指纹、幂等归档、受控
-资料库检索和 cancelled/failed 资产不可归档校验。更强的崩溃注入、文件/索引对账
-和长期维护工具仍需补充。
+此前本地 MVP 已做到只接受 `job_id` 和 `asset_id`、同 Asset 幂等归档及
+cancelled/failed Asset 不可归档，但审计发现它仍使用旧成长领域、按 Asset 而非内容去重、
+先落正式文件后写索引、用 `metadata_json LIKE` 过滤、拒绝已声明 cursor，并会返回绝对路径。
+计划 `0016-learning-resource-archive-foundation.md` 已替换这些行为，并完成迁移、故障注入、
+精确检索、分页、路径安全、Schema 一致性和完整 MCP 回归。本次 macOS 环境没有
+`openclaw` 命令，阶段 6 的进程级复验仍按其独立边界处理，不影响本阶段本地 foundation
+完成状态。
 
-验收：重复归档幂等；索引和文件提交一致；崩溃模拟不会留下半提交记录；任意路径输入被拒绝。
+验收：十个领域及中文目录跨层一致；新旧数据库均可幂等打开；不同 Asset 的相同内容不重复
+复制；索引和文件提交可对账恢复；结构化过滤没有子串误匹配；分页无重复或遗漏；只返回
+ready 且文件存在的记录和安全相对路径；任意路径输入被拒绝；完整教育资源 MCP 测试无回归。
 
 ### 阶段 6：OpenClaw 原生联调 — 部分完成
 

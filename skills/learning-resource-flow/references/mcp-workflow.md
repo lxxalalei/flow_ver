@@ -179,7 +179,18 @@ weibo 必须登录才能搜索。
 - `failed`：解释结构化原因；只在可重试且外部条件变化时重试。
 - `cancelled`：停止，不归档该 Job 的文件。
 
-`resource_archive` 只接受成功 Job 返回的 `job_id` 和 `asset_id`，不接受本地路径。`resource_library_search` 按 v2 Flow/身份边界调用。
+归档或检索前读取 `library-structure.md`。`resource_archive` 只接受成功 Job 返回的
+`job_id`、ready `asset_id`、幂等键和经过证据判断的归档元数据，不接受本地路径。
+
+- 新归档提交 `learning-v1` 嵌套分类，只从固定领域注册表选择主领域和次领域；证据不足时使用 `needs_review` 或 `unclassified`。
+- 不提交格式目录、文件名或来源事实。标题、来源、媒体类型、扩展名、大小和 SHA-256 以服务端 Resource/Asset 为准。
+- MCP 决定安全相对目录、内容去重和 `pending -> ready` 提交；只有工具返回成功后才能向用户说明已归档或已去重。
+- 同一幂等键只重放完全相同的请求；分类或辅助元数据变化时使用新键，不用旧键覆盖请求。
+
+`resource_library_search` 按 v2 Flow/身份边界调用。结构化字段精确过滤，同字段多值为 OR、
+跨字段为 AND；自由关键词只对标题、主题、标签和备注做受控模糊匹配。继续翻页时原样提交
+MCP 返回的不透明 `next_cursor`，不猜测游标或排序。只解释 ready 结果；不得展示数据库路径、
+任务目录或绝对路径，只能使用 MCP 返回的资料库内安全相对路径。
 
 ## 错误恢复
 

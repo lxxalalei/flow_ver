@@ -56,3 +56,29 @@ current_job
 ```
 
 不得返回 `latest_*`、`active_*`、确认 token/hash 或本地路径。
+
+## learning-v1 归档形状扩展
+
+学习资料归档在 v2 major 内继续使用 `contract_version: "2.0.0"`，但 Archive 与 Library Search 的
+Tool Schema 增加了机器可校验的 `learning-v1` 分类形状。这是经明确记录的 additive v2 shape 扩展，
+不是 v1 兼容层，也不改变已有字段的合法含义。
+
+输入兼容规则：
+
+- `resource_archive.metadata` 继续接受 `title`、`collection`、`tags`、`notes`。
+- tools/list 曾经暴露的平铺 `primary_domain`、`topics`、`source_name` 继续接受，但标记为兼容字段。
+- 新调用应提交 `metadata.classification`；服务端对所有新归档持久化规范化后的嵌套分类。
+- 平铺值与嵌套值同时出现时必须一致，否则返回参数错误。
+- 已知旧中文领域按 `taxonomy/learning-v1.json` 显式映射；不能可靠映射的原值保留在旧元数据或
+  `legacy_classification_raw` 中，并转为 `needs_review`。
+- `primary_domain: "待分类"` 和 `primary_domain: "亲子陪伴"` 不会被当作新的合法领域。
+
+Library Search 保留已暴露的单值 `primary_domain` 过滤，并增加规范数组过滤。旧 Archive 记录在前向迁移后
+仍可查询；无法分类的旧记录以 `needs_review` 返回，不会删除原 `metadata_json`。
+
+输出的 `classification`、`primary_domain_display_name`、`resource_format` 和 `relative_path` 是新增字段。
+`library_path` 作为兼容别名可以继续返回，但其含义被收紧为安全相对路径，不再允许绝对路径。
+
+由于旧输出 Schema 使用 `additionalProperties: false`，固定缓存旧 Schema 并对输出做严格校验的消费者
+会将新字段视为不兼容。本地 MCP 消费者必须在 initialize/tools/list 时刷新当前 Schema；不得将此风险
+描述为对任意离线 v2 客户端的完全无感兼容。

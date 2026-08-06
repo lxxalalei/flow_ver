@@ -199,3 +199,86 @@ v2 错误码目录在同一 major 内 append-only。runtime 产生的 item failu
 - 不绕过登录、验证码、付费墙、DRM 或明确访问控制。
 - `resource_archive` 只接受 `asset_id` 与所属 `job_id`，不接受本地路径、任意 URL 或文件字节。
 - 大文件和二进制不得进入 Tool JSON 或模型上下文。
+
+## 12. 学习资料分类与 Archive 元数据
+
+归档对象是学习资料，不是完整儿童成长档案。`learning-v1` 的权威机器可读注册表为
+`taxonomy/learning-v1.json`；机器 ID 是内部稳定值，中文名称仅用于展示和物理目录。客户端不得创建新的一级领域。
+
+`resource_archive.metadata.classification` 的规范形状为：
+
+```json
+{
+  "taxonomy_version": "learning-v1",
+  "classification_status": "classified",
+  "primary_domain": "natural_science",
+  "secondary_domains": [],
+  "topics": ["天文与宇宙", "太阳系"],
+  "material_purposes": ["explanation"],
+  "grade_levels": ["小学"],
+  "difficulty": "introductory",
+  "curriculum_versions": []
+}
+```
+
+约束如下：
+
+- `classification_status` 为 `classified` 时必须有唯一 `primary_domain`；`unclassified` 时不得填写主领域。
+- `secondary_domains` 最多 4 个，不得与主领域重复。
+- `topics` 最多 8 个，单项最长 64 字符；服务端去除首尾空白、合并连续空白并按首次出现去重。
+- 主题、学段和教材版本不得包含控制字符或路径保留字符。
+- `material_purposes` 仅使用 `explanation`、`practice`、`assessment`、`reading`、
+  `reference`、`experiment`、`project`、`lesson_material`。
+- `difficulty` 仅使用 `introductory`、`intermediate`、`advanced`、`competition`。
+- `grade_levels` 和 `curriculum_versions` 各最多 8 项，只在有证据时填写。
+- `collection` 是用户专题集合；`tags` 是辅助检索字段，两者都不替代分类。
+
+已部署的平铺 `primary_domain`、`topics` 和 `source_name` 仍作为兼容输入接受。已知旧中文领域映射到
+机器 ID；无法可靠映射的值转为 `needs_review` 并保存原始值。平铺字段与新 `classification`
+同时提交但语义不一致时，服务端必须拒绝，不得静默选边。`source_name` 不是可信来源事实。
+
+Archive 成功输出包含服务端 `archive_id`、`archive_status = ready`、规范化 `classification`、主领域中文展示名、
+`deduplicated`；可确认位置时还返回资料库根目录下的 `relative_path`。旧记录无法安全推导相对路径时
+省略该字段，不得伪造位置，也不得返回绝对路径。
+
+## 13. Library Search 过滤与分页
+
+`resource_library_search.filters` 支持：
+
+```text
+query
+taxonomy_versions
+classification_statuses
+primary_domains
+secondary_domains
+topics
+material_purposes
+grade_levels
+difficulties
+curriculum_versions
+platforms
+resource_types
+resource_formats
+collections
+tags
+archived_after
+archived_before
+```
+
+`primary_domain` 仅作为已部署单值过滤的兼容别名。同一数组字段中的多个值使用 **OR**；不同字段之间使用
+**AND**。结构化字段必须精确匹配，不得使用 `metadata_json LIKE`。`query` 可对标题、主题、标签和备注使用
+受控模糊匹配。`resource_formats` 只使用 `video`、`document`、`audio`、`other`，分别对应
+`视频`、`图文`、`音频`、`其他` 物理目录。
+
+只返回归档状态为 `ready` 且物理内容存在的记录。排序固定为：
+
+```text
+archived_at DESC, archive_id DESC
+```
+
+Cursor 是服务端签名或等价完整性校验的不透明 keyset cursor，至少绑定上一页的
+`archived_at`、`archive_id` 和当前过滤条件摘要。有后续页时返回 `next_cursor` 且 `has_more=true`；
+最后一页可省略 `next_cursor` 并返回 `has_more=false`。
+
+Library Asset 返回 `classification`、`primary_domain_display_name` 和 `resource_format`；存在可验证的安全相对位置时
+返回 `relative_path`。兼容字段 `library_path` 如仍返回，必须与 `relative_path` 一样是资料库根下的相对路径。
