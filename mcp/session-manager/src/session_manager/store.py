@@ -130,6 +130,14 @@ class PlatformConfig:
 
 _PLATFORM_LIST = [
     PlatformConfig(
+        "douyin",
+        "抖音",
+        "https://www.douyin.com/",
+        "cookie",
+        "browser_cookies",
+        cookie_domains=("douyin.com",),
+    ),
+    PlatformConfig(
         "bilibili",
         "B站",
         "https://passport.bilibili.com/login",

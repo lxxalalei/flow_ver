@@ -27,6 +27,7 @@ from .wbi import wbi_sign
 
 NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
 SEARCH_URL = "https://api.bilibili.com/x/web-interface/wbi/search/type"
+CREATOR_URL = "https://api.bilibili.com/x/space/wbi/arc/search"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137 Safari/537.36"
@@ -212,6 +213,50 @@ class BilibiliSearchAdapter:
             # If we already have partial results, return them with the error.
             return results, exc.to_dict()
 
+        return results, None
+
+
+    def search_creator(
+        self, creator_id: str, limit: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        session_data = self.session_store.get_session_data("bilibili")
+        cookie = SessionStore._cookie_header(session_data) if session_data else ""
+        try:
+            img_key, sub_key = self._wbi_keys(cookie)
+        except _AdapterError as exc:
+            return [], exc.to_dict()
+        results: list[dict[str, Any]] = []
+        pn = 1
+        try:
+            while len(results) < limit:
+                ps = min(30, limit - len(results))
+                params = wbi_sign(
+                    {"mid": creator_id, "pn": pn, "ps": ps,
+                     "order": "pubdate", "search_type": "video"},
+                    img_key, sub_key)
+                url = f"{CREATOR_URL}?{urlencode(params)}"
+                response = self._request_json(
+                    url, referer=f"https://space.bilibili.com/{creator_id}/video", cookie=cookie)
+                code = response.get("code")
+                if code not in (None, 0):
+                    return [], adapter_error(
+                        "PARTIAL_FAILURE", f"B站 creator API {code}: {response.get('message', '')}", False)
+                vlist = ((response.get("data") or {}).get("list") or {}).get("vlist") or []
+                if not vlist:
+                    break
+                for item in vlist:
+                    if "created" in item and "pubdate" not in item:
+                        item = {**item, "pubdate": item["created"]}
+                    normalized = self._normalize_item(item)
+                    if normalized:
+                        results.append(normalized)
+                        if len(results) >= limit:
+                            break
+                if len(vlist) < ps:
+                    break
+                pn += 1
+        except _AdapterError as exc:
+            return results, exc.to_dict()
         return results, None
 
 

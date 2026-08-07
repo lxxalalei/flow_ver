@@ -44,6 +44,13 @@ PLATFORM_REGISTRY: dict[str, PlatformConfig] = {
     platform.platform_id: platform
     for platform in [
         PlatformConfig(
+            "douyin",
+            "抖音",
+            "https://www.douyin.com/",
+            ["douyin.com", ".douyin.com"],
+            None,
+        ),
+        PlatformConfig(
             "bilibili",
             "B站",
             "https://passport.bilibili.com/login",

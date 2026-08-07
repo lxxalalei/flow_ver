@@ -6,13 +6,20 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import threading
+from urllib.error import URLError
 from unittest.mock import MagicMock, patch
 
 from education_resource_mcp.adapters.base import make_resource, adapter_error
 from education_resource_mcp.adapters.wbi import wbi_sign, _get_mixin_key
 from education_resource_mcp.adapters.bilibili import BilibiliSearchAdapter
+from education_resource_mcp.adapters.douyin import DouyinSearchAdapter
 from education_resource_mcp.adapters.zhihu import ZhihuSearchAdapter
 from education_resource_mcp.adapters.smartedu import SmartEduSearchAdapter
+from education_resource_mcp.adapters.annas_archive import AnnasArchiveSearchAdapter
+from education_resource_mcp.adapters.annas_archive_download import AnnasArchiveDownloader
+from education_resource_mcp.adapters.libgen_client import LibgenDownloadResult, LibgenError
+from education_resource_mcp.errors import DomainError
 from education_resource_mcp.config import Settings
 from education_resource_mcp.search import (
     MultiPlatformSearchProvider,
@@ -192,6 +199,110 @@ class BilibiliAdapterTests(unittest.TestCase):
 
         self.assertEqual(results, [])
         self.assertEqual(error["code"], "AUTH_REQUIRED")
+
+
+# ---------------------------------------------------------------------------
+# Douyin adapter
+# ---------------------------------------------------------------------------
+
+class DouyinAdapterTests(unittest.TestCase):
+    def _adapter(self, data_dir: Path) -> DouyinSearchAdapter:
+        return DouyinSearchAdapter(SessionStore(data_dir), _settings(data_dir))
+
+    def test_no_session_returns_auth_required(self) -> None:
+        """Without a stored session the adapter must return AUTH_REQUIRED."""
+        with tempfile.TemporaryDirectory() as d:
+            adapter = self._adapter(Path(d))
+            results, error = adapter.search("test", 10)
+        self.assertEqual(results, [])
+        self.assertEqual(error["code"], "AUTH_REQUIRED")
+        self.assertFalse(error["retryable"])
+
+    def test_search_returns_normalized_results(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            data_dir = Path(d)
+            store = SessionStore(data_dir)
+            store.save("douyin", {"cookies": [{"name": "sessionid", "value": "abc"}]})
+            adapter = self._adapter(data_dir)
+
+            search_response = {
+                "status_code": 0,
+                "has_more": False,
+                "data": [
+                    {
+                        "aweme_info": {
+                            "aweme_id": "7300000000000000001",
+                            "desc": "幼儿英语启蒙动画",
+                            "statistics": {
+                                "digg_count": 5200,
+                                "comment_count": 88,
+                                "play_count": 120000,
+                            },
+                            "author": {"nickname": "教育小课堂"},
+                            "create_time": 1700000000,
+                        }
+                    }
+                ],
+            }
+
+            with patch(
+                "education_resource_mcp.adapters.douyin.urlopen_with_fallback",
+                return_value=_mock_response(search_response),
+            ):
+                results, error = adapter.search("英语启蒙", 10)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(results), 1)
+        r = results[0]
+        self.assertEqual(r["platform"], "douyin")
+        self.assertEqual(r["title"], "幼儿英语启蒙动画")
+        self.assertEqual(r["source_url"], "https://www.douyin.com/video/7300000000000000001")
+        self.assertEqual(r["resource_type"], "视频")
+        self.assertEqual(r["metadata"]["platform_signals"]["likes"], 5200)
+        self.assertEqual(r["metadata"]["platform_signals"]["plays"], 120000)
+        self.assertEqual(r["metadata"]["author"], "教育小课堂")
+
+    def test_api_error_status_code(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            data_dir = Path(d)
+            store = SessionStore(data_dir)
+            store.save("douyin", {"cookies": [{"name": "sessionid", "value": "abc"}]})
+            adapter = self._adapter(data_dir)
+
+            # Non-zero status_code with no data → PARTIAL_FAILURE
+            search_response = {
+                "status_code": 8,
+                "status_msg": "访问过于频繁",
+                "has_more": False,
+                "data": [],
+            }
+
+            with patch(
+                "education_resource_mcp.adapters.douyin.urlopen_with_fallback",
+                return_value=_mock_response(search_response),
+            ):
+                results, error = adapter.search("test", 10)
+
+        self.assertEqual(results, [])
+        self.assertEqual(error["code"], "PARTIAL_FAILURE")
+
+    def test_http_403_returns_auth_required(self) -> None:
+        from urllib.error import HTTPError
+        with tempfile.TemporaryDirectory() as d:
+            data_dir = Path(d)
+            store = SessionStore(data_dir)
+            store.save("douyin", {"cookies": [{"name": "sessionid", "value": "abc"}]})
+            adapter = self._adapter(data_dir)
+
+            with patch(
+                "education_resource_mcp.adapters.douyin.urlopen_with_fallback",
+                side_effect=HTTPError("url", 403, "Forbidden", {}, None),
+            ):
+                results, error = adapter.search("test", 10)
+
+        self.assertEqual(results, [])
+        self.assertEqual(error["code"], "AUTH_REQUIRED")
+        self.assertFalse(error["retryable"])
 
 
 # ---------------------------------------------------------------------------
@@ -421,3 +532,179 @@ class MultiPlatformSearchProviderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Anna's Archive adapter (Libgen-backed)
+# ---------------------------------------------------------------------------
+
+_LIBGEN_SEARCH_HTML = """<html><body><table>
+<tr>
+<td><a href="edition.php?id=123">Python Programming Guide<font color="green">9781234567890</font></a></td>
+<td>Guido van Rossum</td>
+<td>O'Reilly Media</td>
+<td>2023</td>
+<td>English</td>
+<td>500</td>
+<td><a href="file.php?id=456">15 MB</a></td>
+<td>pdf</td>
+<td><a href="ads.php?md5=abcdef0123456789abcdef0123456789" title="Mirror 1">1</a></td>
+</tr>
+<tr>
+<td><a href="edition.php?id=124">Machine Learning Basics</a></td>
+<td>Tom Mitchell</td>
+<td>MIT Press</td>
+<td>2022</td>
+<td>English</td>
+<td>320</td>
+<td><a href="file.php?id=457">8 MB</a></td>
+<td>epub</td>
+<td><a href="ads.php?md5=bbcddef0123456789abcdef0123456789" title="Mirror 1">1</a></td>
+</tr>
+</table></body></html>"""
+
+_LIBGEN_PATCH = "education_resource_mcp.adapters.libgen_client.urlopen_with_fallback"
+
+
+class AnnasArchiveAdapterTests(unittest.TestCase):
+    def _adapter(self, data_dir: Path) -> AnnasArchiveSearchAdapter:
+        return AnnasArchiveSearchAdapter(SessionStore(data_dir), _settings(data_dir))
+
+    def test_search_returns_normalized_results(self) -> None:
+        """Libgen HTML search → normalized make_resource with full metadata."""
+        resp = _mock_response(_LIBGEN_SEARCH_HTML, content_type="text/html")
+        with tempfile.TemporaryDirectory() as d:
+            adapter = self._adapter(Path(d))
+            with patch(_LIBGEN_PATCH, return_value=resp):
+                results, error = adapter.search("python", 10)
+        self.assertIsNone(error)
+        self.assertEqual(len(results), 2)
+        first = results[0]
+        self.assertEqual(first["platform"], "annas-archive")
+        self.assertIn("Python Programming Guide", first["title"])
+        self.assertEqual(first["resource_type"], "图书")
+        self.assertIn("abcdef0123456789abcdef0123456789", first["source_url"])
+        signals = first["metadata"]["platform_signals"]
+        self.assertEqual(signals["md5"], "abcdef0123456789abcdef0123456789")
+        self.assertEqual(signals["format"], "pdf")
+        self.assertEqual(signals["language"], "English")
+        self.assertEqual(first["metadata"].get("author"), "Guido van Rossum")
+
+    def test_search_all_mirrors_fail(self) -> None:
+        """All mirrors unreachable → PARTIAL_FAILURE."""
+        with tempfile.TemporaryDirectory() as d:
+            adapter = self._adapter(Path(d))
+            with patch(_LIBGEN_PATCH, side_effect=URLError("all mirrors down")):
+                results, error = adapter.search("python", 10)
+        self.assertEqual(results, [])
+        self.assertEqual(error["code"], "PARTIAL_FAILURE")
+        self.assertTrue(error["retryable"])
+
+    def test_search_empty_page(self) -> None:
+        """Empty HTML page (no matching rows) → empty results, no error."""
+        resp = _mock_response("<html><body>No results found</body></html>", content_type="text/html")
+        with tempfile.TemporaryDirectory() as d:
+            adapter = self._adapter(Path(d))
+            with patch(_LIBGEN_PATCH, return_value=resp):
+                results, error = adapter.search("nonexistent", 10)
+        self.assertIsNone(error)
+        self.assertEqual(results, [])
+
+    def test_mirror_failover(self) -> None:
+        """First mirror fails, second succeeds → results returned."""
+        ok_resp = _mock_response(_LIBGEN_SEARCH_HTML, content_type="text/html")
+        with tempfile.TemporaryDirectory() as d:
+            adapter = self._adapter(Path(d))
+            with patch(_LIBGEN_PATCH, side_effect=[URLError("503"), ok_resp]):
+                results, error = adapter.search("python", 10)
+        self.assertIsNone(error)
+        self.assertEqual(len(results), 2)
+
+
+class AnnasArchiveDownloaderTests(unittest.TestCase):
+    def _downloader(self, data_dir: Path) -> AnnasArchiveDownloader:
+        return AnnasArchiveDownloader(SessionStore(data_dir), _settings(data_dir))
+
+    def _resource(self, md5: str = "abcdef0123456789abcdef0123456789") -> dict:
+        return {
+            "source_url": f"https://annas-archive.gl/md5/{md5}",
+            "title": "Test Book",
+            "metadata": {"platform_signals": {"md5": md5}},
+        }
+
+    def test_download_extracts_md5_from_signals(self) -> None:
+        """Download reads md5 from platform_signals."""
+        with tempfile.TemporaryDirectory() as d:
+            dl = self._downloader(Path(d))
+            job = Path(d) / "jobs" / "job1"
+            job.mkdir(parents=True)
+            (job / "test.pdf").write_bytes(b"x" * 1024)
+            fake = LibgenDownloadResult(
+                path=job / "test.pdf", size_bytes=1024,
+                mirror="https://libgen.bz",
+                url="https://libgen.bz/get.php?md5=abc",
+                filename="test.pdf",
+            )
+            with patch.object(dl._client, "download", return_value=fake):
+                result = dl.download(
+                    self._resource(), "job1", "direct",
+                    max_bytes=10 * 1024 * 1024,
+                    cancel_event=threading.Event(),
+                )
+        self.assertEqual(result.media_type, "application/pdf")
+        self.assertEqual(result.byte_size, 1024)
+        self.assertEqual(result.filename, "test.pdf")
+        self.assertEqual(len(result.sha256), 64)
+
+    def test_download_extracts_md5_from_url(self) -> None:
+        """Download falls back to md5 from source_url when signals missing."""
+        with tempfile.TemporaryDirectory() as d:
+            dl = self._downloader(Path(d))
+            job = Path(d) / "jobs" / "job1"
+            job.mkdir(parents=True)
+            (job / "book.epub").write_bytes(b"y" * 512)
+            fake = LibgenDownloadResult(
+                path=job / "book.epub", size_bytes=512,
+                mirror="https://libgen.bz",
+                url="https://libgen.bz/get.php?md5=xyz",
+                filename="book.epub",
+            )
+            resource = {"source_url": "https://anns-archive.gl/md5/bbcd1234567890abcdef1234567890ab",
+                        "title": "Book", "metadata": {}}
+            with patch.object(dl._client, "download", return_value=fake):
+                result = dl.download(resource, "job1", "direct", 10*1024*1024, threading.Event())
+        self.assertEqual(result.media_type, "application/epub+zip")
+
+    def test_download_no_md5_raises(self) -> None:
+        """Resource without md5 anywhere → DOWNLOAD_FAILED."""
+        with tempfile.TemporaryDirectory() as d:
+            dl = self._downloader(Path(d))
+            with self.assertRaises(DomainError) as ctx:
+                dl.download(
+                    {"source_url": "https://example.com/no-md5-here",
+                     "title": "X", "metadata": {}},
+                    "job1", "direct", 10*1024*1024, threading.Event(),
+                )
+            self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+
+    def test_download_cancel(self) -> None:
+        """LibgenError(JOB_CANCELLED) → DomainError(JOB_CANCELLED)."""
+        with tempfile.TemporaryDirectory() as d:
+            dl = self._downloader(Path(d))
+            with patch.object(dl._client, "download",
+                              side_effect=LibgenError("JOB_CANCELLED")):
+                with self.assertRaises(DomainError) as ctx:
+                    dl.download(self._resource(), "job1", "direct",
+                                10*1024*1024, threading.Event())
+            self.assertEqual(ctx.exception.code, "JOB_CANCELLED")
+
+    def test_download_too_large(self) -> None:
+        """LibgenError(DOWNLOAD_TOO_LARGE) → DomainError(DOWNLOAD_TOO_LARGE)."""
+        with tempfile.TemporaryDirectory() as d:
+            dl = self._downloader(Path(d))
+            with patch.object(dl._client, "download",
+                              side_effect=LibgenError("DOWNLOAD_TOO_LARGE")):
+                with self.assertRaises(DomainError) as ctx:
+                    dl.download(self._resource(), "job1", "direct",
+                                10*1024*1024, threading.Event())
+            self.assertEqual(ctx.exception.code, "DOWNLOAD_TOO_LARGE")

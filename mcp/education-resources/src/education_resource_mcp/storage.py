@@ -824,13 +824,13 @@ class Store:
             (new_id("evt"), flow_id, action, object_id, _json(details), now),
         )
 
-    def create_flow_v2(
+    def create_flow(
         self,
         task: dict[str, Any],
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, Any]:
-        scope = "v2:resource_flow_start"
+        scope = "resource_flow_start"
         now = utc_now()
         with self.transaction(immediate=True) as connection:
             replay = self._replay_in_transaction(
@@ -865,7 +865,7 @@ class Store:
             )
         return result
 
-    def create_result_set_v2(
+    def create_result_set(
         self,
         flow_id: str,
         resources: list[dict[str, Any]],
@@ -878,7 +878,7 @@ class Store:
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, Any]:
-        scope = f"v2:resource_search:{flow_id}"
+        scope = f"resource_search:{flow_id}"
         now = utc_now()
         with self.transaction(immediate=True) as connection:
             replay = self._replay_in_transaction(
@@ -1004,7 +1004,7 @@ class Store:
             )
         return result
 
-    def create_presentation_v2(
+    def create_presentation(
         self,
         flow_id: str,
         result_set_id: str,
@@ -1013,7 +1013,7 @@ class Store:
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, Any]:
-        scope = f"v2:resource_presentation_save:{flow_id}"
+        scope = f"resource_presentation_save:{flow_id}"
         now = utc_now()
         with self.transaction(immediate=True) as connection:
             replay = self._replay_in_transaction(
@@ -1106,7 +1106,7 @@ class Store:
             )
         return result
 
-    def save_selection_v2(
+    def save_selection(
         self,
         flow_id: str,
         presentation_id: str,
@@ -1116,7 +1116,7 @@ class Store:
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, Any]:
-        scope = f"v2:resource_selection_save:{flow_id}"
+        scope = f"resource_selection_save:{flow_id}"
         now = utc_now()
         with self.transaction(immediate=True) as connection:
             replay = self._replay_in_transaction(
@@ -1237,7 +1237,7 @@ class Store:
             )
         return result
 
-    def create_plan_v2(
+    def create_plan(
         self,
         flow_id: str,
         presentation_id: str,
@@ -1252,7 +1252,7 @@ class Store:
         idempotency_key: str,
         request_hash: str,
     ) -> dict[str, Any]:
-        scope = f"v2:resource_download_prepare:{flow_id}"
+        scope = f"resource_download_prepare:{flow_id}"
         now = utc_now()
         with self.transaction(immediate=True) as connection:
             replay = self._replay_in_transaction(
@@ -1469,22 +1469,6 @@ class Store:
             ).fetchone()
         return self._decode_job(row) if row is not None else None
 
-    def create_flow(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
-        flow_id = new_id("flow")
-        now = utc_now()
-        with self.transaction() as connection:
-            connection.execute(
-                """
-                INSERT INTO flows(
-                    flow_id, query, context_json, status, presented_version,
-                    task_version, result_version, selection_version, created_at, updated_at
-                ) VALUES (?, ?, ?, 'active', 0, 1, 0, 0, ?, ?)
-                """,
-                (flow_id, query, _json(context), now, now),
-            )
-        self.audit(flow_id, "flow.start", flow_id, {"query": query})
-        return self.get_flow(flow_id)
-
     def get_flow(self, flow_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -1567,32 +1551,6 @@ class Store:
             by_id[item["resource_id"]] = item
         return [by_id[item] for item in resource_ids if item in by_id]
 
-    def save_selection(
-        self, flow_id: str, presented_version: int, resource_ids: list[str]
-    ) -> None:
-        now = utc_now()
-        status = "selected" if resource_ids else "cancelled"
-        with self.transaction() as connection:
-            connection.execute(
-                """
-                INSERT INTO selections(
-                    flow_id, presented_version, selected_ids_json, status, updated_at
-                ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(flow_id) DO UPDATE SET
-                    presented_version = excluded.presented_version,
-                    selected_ids_json = excluded.selected_ids_json,
-                    status = excluded.status,
-                    updated_at = excluded.updated_at
-                """,
-                (flow_id, presented_version, _json(resource_ids), status, now),
-            )
-        self.audit(
-            flow_id,
-            "selection.save",
-            flow_id,
-            {"presented_version": presented_version, "resource_ids": resource_ids},
-        )
-
     def get_selection(self, flow_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -1603,41 +1561,6 @@ class Store:
         result = dict(row)
         result["resource_ids"] = _load(result.pop("selected_ids_json"), [])
         return result
-
-    def create_plan(
-        self,
-        flow_id: str,
-        presented_version: int,
-        resource_ids: list[str],
-        options: dict[str, Any],
-        confirmation_token: str,
-        confirmation_hash: str,
-        expires_at: str,
-    ) -> dict[str, Any]:
-        plan_id = new_id("plan")
-        now = utc_now()
-        with self.transaction() as connection:
-            connection.execute(
-                """
-                INSERT INTO download_plans(
-                    plan_id, flow_id, presented_version, resource_ids_json,
-                    options_json, confirmation_token, confirmation_hash, expires_at, used, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-                """,
-                (
-                    plan_id,
-                    flow_id,
-                    presented_version,
-                    _json(resource_ids),
-                    _json(options),
-                    confirmation_token,
-                    confirmation_hash,
-                    expires_at,
-                    now,
-                ),
-            )
-        self.audit(flow_id, "download.prepare", plan_id, {"resource_ids": resource_ids})
-        return self.get_plan(plan_id) or {}
 
     def get_plan(self, plan_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:

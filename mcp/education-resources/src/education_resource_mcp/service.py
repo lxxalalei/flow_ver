@@ -47,6 +47,7 @@ class ResourceService:
         store: Store | None = None,
         search_provider: SearchProvider | None = None,
         download_provider: DownloadProvider | None = None,
+        rendering_downloader: DownloadProvider | None = None,
         job_runner: JobRunner | None = None,
         archive_file_manager: ArchiveFileManager | None = None,
     ) -> None:
@@ -58,6 +59,22 @@ class ResourceService:
             self.settings, self.session_store
         )
         self.download_provider = download_provider or PublicHttpDownloader(self.settings)
+        # Auto-create the rendering downloader only when the caller hasn't
+        # injected a custom download_provider — otherwise the caller owns the
+        # entire download stack and we must not intercept "webpage" strategy.
+        if rendering_downloader is not None:
+            self.rendering_downloader = rendering_downloader
+        elif download_provider is not None:
+            self.rendering_downloader = None
+        else:
+            try:
+                from .adapters.rendering_download import RenderingDownloader
+
+                self.rendering_downloader = RenderingDownloader(
+                    self.settings, session_store=self.session_store
+                )
+            except ImportError:
+                self.rendering_downloader = None
         self._platform_downloaders: dict[str, Any] = {}
         self._register_default_downloaders()
         self.job_runner = job_runner or JobRunner(self.settings.max_workers)
@@ -109,7 +126,7 @@ class ResourceService:
             )
         request_hash = self._request_hash(task)
         try:
-            return self.store.create_flow_v2(
+            return self.store.create_flow(
                 normalized_task, idempotency_key, request_hash
             )
         except ValueError as exc:
@@ -171,7 +188,7 @@ class ResourceService:
             "limit": limit,
         }
         request_hash = self._request_hash(request)
-        scope = f"v2:resource_search:{flow_id}"
+        scope = f"resource_search:{flow_id}"
         replay = self._idempotency_replay(scope, idempotency_key, request_hash)
         if replay is not None:
             return replay
@@ -223,7 +240,7 @@ class ResourceService:
         # Build a human-readable summary for audit/storage.
         query_summary = "; ".join(all_queries)[:1000]
         try:
-            return self.store.create_result_set_v2(
+            return self.store.create_result_set(
                 flow_id,
                 resources,
                 query=query_summary,
@@ -245,6 +262,121 @@ class ResourceService:
                 raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化") from exc
             raise DomainError("FLOW_STATE_CONFLICT", "搜索状态冲突") from exc
 
+    def browse_creator(
+        self,
+        flow_id: str,
+        idempotency_key: str,
+        platform: str,
+        creator_id: str,
+        *,
+        task_version: int | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Browse a creator's full content list (social-media platforms only).
+
+        Unlike ``search`` which takes keyword queries, this fetches all
+        videos/posts from a specific creator's homepage via the adapter's
+        ``search_creator`` method.  Only social-media adapters implement it;
+        education/resource platforms return FEATURE_NOT_SUPPORTED.
+        """
+        flow = self._require_flow(flow_id)
+        self._validate_idempotency_key(idempotency_key)
+        current_task_version = int(flow.get("task_version") or 1)
+        effective_task_version = (
+            current_task_version if task_version is None else int(task_version)
+        )
+        if effective_task_version != current_task_version:
+            raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化")
+        if not 1 <= limit <= self.settings.max_search_results:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"limit 必须在 1 到 {self.settings.max_search_results} 之间",
+            )
+        creator_id = str(creator_id or "").strip()
+        platform = str(platform or "").strip()
+        if not creator_id or not platform:
+            raise DomainError("INVALID_ARGUMENT", "platform 和 creator_id 不能为空")
+
+        request = {
+            "flow_id": flow_id,
+            "platform": platform,
+            "creator_id": creator_id,
+            "task_version": effective_task_version,
+            "limit": limit,
+        }
+        request_hash = self._request_hash(request)
+        scope = f"browse_creator:{flow_id}"
+        replay = self._idempotency_replay(scope, idempotency_key, request_hash)
+        if replay is not None:
+            return replay
+
+        raw_resources, platform_runs = self.search_provider.search_creator(
+            platform, creator_id, limit
+        )
+        resources: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for raw in raw_resources:
+            try:
+                source_url = canonical_http_url(str(raw.get("source_url") or ""))
+            except DomainError:
+                continue
+            if source_url in seen_urls:
+                continue
+            seen_urls.add(source_url)
+            title = str(raw.get("title") or "").strip()
+            if not title:
+                continue
+            resources.append(
+                {
+                    "resource_id": new_id("res"),
+                    "platform": str(raw.get("platform") or platform),
+                    "title": title,
+                    "source_url": source_url,
+                    "resource_type": self._normalise_resource_type(
+                        str(raw.get("resource_type") or "other")
+                    ),
+                    "summary": raw.get("summary"),
+                    "metadata": dict(raw.get("metadata") or {}),
+                }
+            )
+        failures: list[dict[str, Any]] = []
+        for run in platform_runs:
+            err = run.get("error")
+            if err:
+                failures.append(
+                    {
+                        "platform": str(run.get("platform") or platform),
+                        "code": self._normalise_failure_code(err.get("code")),
+                        "message": str(err.get("message") or "创作者浏览失败")[:1024],
+                        "retriable": bool(err.get("retryable")),
+                    }
+                )
+        failures = failures[:32]
+        query_summary = f"creator:{platform}:{creator_id}"[:1000]
+        try:
+            return self.store.create_result_set(
+                flow_id,
+                resources,
+                query=query_summary,
+                task_version=effective_task_version,
+                filters={},
+                failures=failures,
+                platform_runs=platform_runs,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+        except KeyError as exc:
+            raise DomainError("FLOW_NOT_FOUND", "Flow 不存在") from exc
+        except ValueError as exc:
+            if str(exc) == "idempotency_conflict":
+                raise DomainError("IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求") from exc
+            raise
+        except RuntimeError as exc:
+            if str(exc) == "task_version_conflict":
+                raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化") from exc
+            raise DomainError("FLOW_STATE_CONFLICT", "浏览状态冲突") from exc
+
+
     def presentation_save(
         self,
         flow_id: str,
@@ -262,7 +394,7 @@ class ResourceService:
             }
         )
         try:
-            return self.store.create_presentation_v2(
+            return self.store.create_presentation(
                 flow_id,
                 result_set_id,
                 displayed_resource_ids,
@@ -309,7 +441,7 @@ class ResourceService:
             }
         )
         try:
-            return self.store.save_selection_v2(
+            return self.store.save_selection(
                 flow_id,
                 presentation_id,
                 presented_version,
@@ -400,7 +532,7 @@ class ResourceService:
             + timedelta(seconds=self.settings.plan_ttl_seconds)
         ).isoformat()
         try:
-            return self.store.create_plan_v2(
+            return self.store.create_plan(
                 flow_id,
                 effective_presentation_id,
                 effective_presented_version,
@@ -1437,6 +1569,16 @@ class ResourceService:
             self._platform_downloaders["smartedu"] = SmartEduDownloader(self.session_store, self.settings)
         except ImportError:
             pass
+        try:
+            from .adapters.douyin_download import DouyinDownloader
+            self._platform_downloaders["douyin"] = DouyinDownloader(self.session_store, self.settings)
+        except ImportError:
+            pass
+        try:
+            from .adapters.annas_archive_download import AnnasArchiveDownloader
+            self._platform_downloaders["annas-archive"] = AnnasArchiveDownloader(self.session_store, self.settings)
+        except ImportError:
+            pass
 
     def _run_download_job(self, job_id: str, cancel_event: threading.Event) -> None:
         job = self.store.get_job(job_id)
@@ -1457,22 +1599,38 @@ class ResourceService:
             for index, resource in enumerate(resources):
                 if cancel_event.is_set():
                     raise DomainError("JOB_CANCELLED", "任务已取消")
-                # Route to platform-specific downloader if available.
                 platform = str(resource.get("platform") or "")
-                downloader = self._platform_downloaders.get(platform)
-                if downloader is not None:
-                    dl_result = downloader.download(
-                        resource, job_id, str(plan["options"]["strategy"]),
+                strategy = str(plan["options"]["strategy"])
+                # Web-page resources are rendered into visual-archive files
+                # (MHTML/PDF/PNG) rather than captured as raw HTTP bodies,
+                # because their real content is produced by JavaScript.
+                if strategy == "webpage" and self.rendering_downloader is not None:
+                    # Surface the user's container preference to the renderer so
+                    # it knows whether to also emit PDF / full-page PNG.
+                    render_resource = dict(resource)
+                    render_resource["preferred_container"] = str(
+                        plan["options"].get("preferred_container") or "html"
+                    )
+                    dl_result = self.rendering_downloader.download(
+                        render_resource, job_id, strategy,
                         int(plan["options"]["max_bytes"]), cancel_event,
                     )
                 else:
-                    dl_result = self.download_provider.download(
-                    resource,
-                    job_id,
-                    str(plan["options"]["strategy"]),
-                    int(plan["options"]["max_bytes"]),
-                    cancel_event,
-                )
+                    # Route to platform-specific downloader if available.
+                    downloader = self._platform_downloaders.get(platform)
+                    if downloader is not None:
+                        dl_result = downloader.download(
+                            resource, job_id, strategy,
+                            int(plan["options"]["max_bytes"]), cancel_event,
+                        )
+                    else:
+                        dl_result = self.download_provider.download(
+                            resource,
+                            job_id,
+                            strategy,
+                            int(plan["options"]["max_bytes"]),
+                            cancel_event,
+                        )
                 # Normalise to list — platform downloaders may return multiple files.
                 dl_results = dl_result if isinstance(dl_result, list) else [dl_result]
                 for result in dl_results:

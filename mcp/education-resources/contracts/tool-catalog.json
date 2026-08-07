@@ -1,7 +1,7 @@
 {
   "$schema": "schemas/tool-catalog.schema.json",
-  "catalog_version": "2.0.0",
-  "contract_version": "2.0.0",
+  "catalog_version": "1.0.0",
+  "contract_version": "1.0.0",
   "server_id": "learning_resources",
   "tools": [
     {
@@ -102,6 +102,15 @@
       "idempotency_required": false,
       "input_schema": "schemas/tools/resource_library_search.schema.json#/$defs/input",
       "output_schema": "schemas/tools/resource_library_search.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_browse_creator",
+      "description": "Browse a creator's full content list from social-media platforms (douyin, bilibili, zhihu, weibo). Fetches all videos/posts from a specific creator's homepage.",
+      "side_effect": "state_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_browse_creator.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_browse_creator.schema.json#/$defs/output"
     }
   ]
 }

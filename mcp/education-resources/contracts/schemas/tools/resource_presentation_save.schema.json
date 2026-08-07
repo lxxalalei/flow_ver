@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tools/resource_selection_save.schema.json",
-  "title": "resource_selection_save contract v2",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/tools/resource_presentation_save.schema.json",
+  "title": "resource_presentation_save contract",
   "oneOf": [
     {
       "$ref": "#/$defs/input"
@@ -17,10 +17,9 @@
       "required": [
         "contract_version",
         "flow_id",
-        "presentation_id",
-        "presented_version",
+        "result_set_id",
         "idempotency_key",
-        "selected_positions"
+        "displayed_resource_ids"
       ],
       "properties": {
         "contract_version": {
@@ -29,24 +28,18 @@
         "flow_id": {
           "$ref": "../common.schema.json#/$defs/flow_id"
         },
-        "presentation_id": {
-          "$ref": "../common.schema.json#/$defs/presentation_id"
-        },
-        "presented_version": {
-          "type": "integer",
-          "minimum": 1
+        "result_set_id": {
+          "$ref": "../common.schema.json#/$defs/result_set_id"
         },
         "idempotency_key": {
           "$ref": "../common.schema.json#/$defs/idempotency_key"
         },
-        "selected_positions": {
+        "displayed_resource_ids": {
           "type": "array",
           "maxItems": 50,
           "uniqueItems": true,
           "items": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 50
+            "$ref": "../common.schema.json#/$defs/resource_id"
           }
         }
       }
@@ -59,14 +52,12 @@
         "ok",
         "flow_id",
         "stage",
+        "result_set_id",
         "presentation_id",
         "presented_version",
-        "selection_version",
-        "selection_digest",
-        "selected_positions",
-        "selected_resource_ids",
-        "cancelled",
-        "updated_at"
+        "items",
+        "empty",
+        "created_at"
       ],
       "properties": {
         "contract_version": {
@@ -80,10 +71,10 @@
         },
         "stage": {
           "type": "string",
-          "enum": [
-            "selected",
-            "cancelled"
-          ]
+          "const": "presented"
+        },
+        "result_set_id": {
+          "$ref": "../common.schema.json#/$defs/result_set_id"
         },
         "presentation_id": {
           "$ref": "../common.schema.json#/$defs/presentation_id"
@@ -92,35 +83,17 @@
           "type": "integer",
           "minimum": 1
         },
-        "selection_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_digest": {
-          "$ref": "../common.schema.json#/$defs/selection_digest"
-        },
-        "selected_positions": {
+        "items": {
           "type": "array",
           "maxItems": 50,
-          "uniqueItems": true,
           "items": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 50
+            "$ref": "../common.schema.json#/$defs/displayed_item"
           }
         },
-        "selected_resource_ids": {
-          "type": "array",
-          "maxItems": 50,
-          "uniqueItems": true,
-          "items": {
-            "$ref": "../common.schema.json#/$defs/resource_id"
-          }
-        },
-        "cancelled": {
+        "empty": {
           "type": "boolean"
         },
-        "updated_at": {
+        "created_at": {
           "$ref": "../common.schema.json#/$defs/timestamp"
         }
       },
@@ -128,37 +101,25 @@
         {
           "if": {
             "properties": {
-              "stage": {
-                "const": "cancelled"
+              "empty": {
+                "const": true
               }
             },
             "required": [
-              "stage"
+              "empty"
             ]
           },
           "then": {
             "properties": {
-              "selected_positions": {
+              "items": {
                 "maxItems": 0
-              },
-              "selected_resource_ids": {
-                "maxItems": 0
-              },
-              "cancelled": {
-                "const": true
               }
             }
           },
           "else": {
             "properties": {
-              "selected_positions": {
+              "items": {
                 "minItems": 1
-              },
-              "selected_resource_ids": {
-                "minItems": 1
-              },
-              "cancelled": {
-                "const": false
               }
             }
           }

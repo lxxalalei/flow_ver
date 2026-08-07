@@ -388,6 +388,7 @@ class MultiPlatformSearchProvider:
         adapter_classes: list[tuple[str, type]] = []
         for module_name, class_name in (
             ("bilibili", "BilibiliSearchAdapter"),
+            ("douyin", "DouyinSearchAdapter"),
             ("zhihu", "ZhihuSearchAdapter"),
             ("smartedu", "SmartEduSearchAdapter"),
             ("ximalaya", "XimalayaSearchAdapter"),
@@ -416,6 +417,34 @@ class MultiPlatformSearchProvider:
     def register_adapter(self, adapter: PlatformSearchAdapter) -> None:
         """Register or replace a platform adapter."""
         self._adapters[adapter.platform_id] = adapter
+
+    def search_creator(
+        self, platform: str, creator_id: str, limit: int
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Browse a creator's content via the platform adapter.
+
+        Only adapters that implement ``search_creator`` are supported — this
+        is a social-media capability (douyin, bilibili, zhihu, weibo, …).
+        Education/resource platforms return FEATURE_NOT_SUPPORTED.
+        """
+        adapter = self._adapters.get(platform)
+        if adapter is None:
+            return [], [{"platform": platform, "candidate_count": 0,
+                "error": {"code": "UNKNOWN_PLATFORM",
+                    "message": f"平台 {platform} 无 adapter", "retryable": False}}]
+        if not hasattr(adapter, "search_creator"):
+            return [], [{"platform": platform, "candidate_count": 0,
+                "error": {"code": "FEATURE_NOT_SUPPORTED",
+                    "message": f"平台 {platform} 不支持创作者浏览", "retryable": False}}]
+        resources, error = adapter.search_creator(creator_id, limit)
+        run: dict[str, Any] = {"platform": platform,
+            "candidate_count": len(resources),
+            "queries": [{"creator_id": creator_id}]}
+        if error:
+            run["error"] = error
+            run["failure_count"] = 1
+        return resources, [run]
+
 
     # ------------------------------------------------------------------
     # Per-platform worker: runs queries serially, returns one platform_run.

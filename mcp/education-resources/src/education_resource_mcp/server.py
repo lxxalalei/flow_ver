@@ -18,7 +18,7 @@ from .models import (
 from .service import ResourceService
 
 
-CONTRACT_VERSION = "2.0.0"
+CONTRACT_VERSION = "1.0.0"
 
 
 def _invoke(
@@ -38,7 +38,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         description="Search, present, select, confirm, download, inspect, and archive education resources",
         version="0.2.0",
         instructions=(
-            "Use contract 2.0.0. Start a FlowTask, search into a ResultSet, save the exact "
+            "Use contract 1.0.0. Start a FlowTask, search into a ResultSet, save the exact "
             "resources actually shown with resource_presentation_save, then save only the "
             "user-selected display positions. Downloads require prepare, explicit user "
             "confirmation, then start. Use resource_flow_status to recover durable state. "
@@ -48,18 +48,18 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_flow_start(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         idempotency_key: str,
         task: FlowTask,
     ) -> dict[str, Any]:
-        """Start a durable v2 education-resource FlowTask."""
+        """Start a durable education-resource FlowTask."""
         return _invoke(
             lambda: resource_service.flow_start(idempotency_key, task.model_dump())
         )
 
     @server.tool(structured_output=True)
     def resource_search(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         task_version: int,
         idempotency_key: str,
@@ -85,8 +85,37 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         )
 
     @server.tool(structured_output=True)
+    def resource_browse_creator(
+        contract_version: Literal["1.0.0"],
+        flow_id: str,
+        task_version: int,
+        idempotency_key: str,
+        platform: str,
+        creator_id: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Browse a creator's full content list (social-media platforms only).
+
+        Fetches all videos/posts from a specific creator's homepage.
+        Only adapters implementing search_creator are supported (douyin,
+        bilibili, zhihu, weibo). Education/resource platforms return
+        FEATURE_NOT_SUPPORTED.
+        """
+        return _invoke(
+            lambda: resource_service.browse_creator(
+                flow_id,
+                idempotency_key,
+                platform,
+                creator_id,
+                task_version=task_version,
+                limit=limit,
+            ),
+            flow_id=flow_id,
+        )
+
+    @server.tool(structured_output=True)
     def resource_presentation_save(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         result_set_id: str,
         displayed_resource_ids: list[str],
@@ -105,7 +134,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_selection_save(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         idempotency_key: str,
         presentation_id: str,
@@ -126,7 +155,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_flow_status(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
     ) -> dict[str, Any]:
         """Recover the authoritative current Flow state and allowed next actions."""
@@ -134,7 +163,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_download_prepare(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         idempotency_key: str,
         presentation_id: str,
@@ -159,7 +188,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_download_start(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         plan_id: str,
         presentation_id: str,
@@ -189,7 +218,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_job_status(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         job_id: str,
     ) -> dict[str, Any]:
@@ -202,7 +231,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_job_cancel(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         job_id: str,
         idempotency_key: str,
@@ -219,7 +248,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_archive(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         job_id: str,
         asset_id: str,
@@ -242,7 +271,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_library_search(
-        contract_version: Literal["2.0.0"],
+        contract_version: Literal["1.0.0"],
         flow_id: str,
         filters: LibraryFilters | None = None,
         cursor: str | None = None,
@@ -264,3 +293,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
 def main() -> None:
     create_server().run("stdio")
+
+
+if __name__ == "__main__":
+    main()

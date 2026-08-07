@@ -1,12 +1,12 @@
 # Education Resources MCP
 
 本目录是教育资源工作区唯一的执行与权威状态服务。当前 Python stdio MCP 已运行
-`contracts/v2/` 的 `2.0.0` 控制面，并且公共 catalog **仅暴露 11 个工具**。
+`contracts/` 的 `1.0.0` 控制面，并且公共 catalog **暴露 12 个工具**。
 
-教育资源主链当前只保留 `contracts/v2/` 的 `2.0.0` 契约；历史 v1 已从工作区清理，迁移差异
-保留在 `contracts/v2/compatibility.md` 和 Git 历史中。
+教育资源主链当前只保留 `contracts/` 的 `1.0.0` 契约；历史 历史 v1 已从工作区清理，迁移差异
+保留在 `contracts/compatibility.md` 和 Git 历史中。
 
-v2 权威状态链为：
+权威状态链为：
 
 ```text
 FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive
@@ -21,7 +21,7 @@ education-resources 的 11 工具 catalog。education-resources 不向模型暴�
 ## 目录
 
 ```text
-contracts/v2/                  # 当前运行的 2.0.0 控制面契约
+contracts/                  # 当前运行的控制面契约
 src/education_resource_mcp/
 ├── adapters/                  # MCP 内部平台 Adapter
 ├── server.py                  # stdio MCP 入口
@@ -71,7 +71,7 @@ education-resources 会通过 `openclaw-session-manager` 包只读消费同一�
 
 ## 公共工具
 
-v2 只暴露以下 11 个工具：
+暴露以下 12 个工具：
 
 1. `resource_flow_start`
 2. `resource_flow_status`
@@ -114,8 +114,8 @@ current_job
 
 它不会返回 confirmation token/hash、Cookie、Token、数据库路径、临时目录、下载路径或归档本地路径。
 
-完整不变量见 `contracts/v2/domain-contract.md`；v1/v2 破坏性差异和冻结策略见
-`contracts/v2/compatibility.md`；精确工具集合见 `contracts/v2/tool-catalog.json`。
+完整不变量见 `contracts/domain-contract.md`；历史迁移差异见
+`contracts/compatibility.md`；精确工具集合见 `contracts/tool-catalog.json`。
 
 ## 学习资料库归档
 
@@ -132,7 +132,7 @@ ready Asset
 
 ### learning-v1 分类
 
-分类注册表以 [`contracts/v2/taxonomy/learning-v1.json`](contracts/v2/taxonomy/learning-v1.json)
+分类注册表以 [`contracts/taxonomy/learning-v1.json`](contracts/taxonomy/learning-v1.json)
 为机器单一来源。一级领域 ID 固定为：
 
 | 机器 ID | 中文目录 |
@@ -172,7 +172,7 @@ ready Asset
 分类状态为 `classified`、`needs_review` 或 `unclassified`。主领域只有一个，次领域只能从
 注册表选择且不能与主领域重复；主题是清洗、去重和限长的受控自由文本。学段、难度和
 教材版本只有存在证据时填写。旧平铺 `primary_domain`、`topics`、`source_name` 和旧中文
-领域作为 deprecated v2 输入兼容；无法可靠映射时保留原始元数据并进入 `needs_review`。
+领域作为 deprecated 输入兼容；无法可靠映射时保留原始元数据并进入 `needs_review`。
 
 ### 目录、权威字段与内容去重
 
@@ -194,7 +194,7 @@ ready Asset
 ### SQLite、迁移与恢复
 
 SQLite 通过 `schema_migrations` 使用幂等前向迁移，当前最新版本为 2：v1 记录既有控制面
-列迁移，v2 建立学习资料归档基础。旧数据库首次打开时保留现有 Flow、Resource、Job、
+列迁移，建立学习资料归档基础。旧数据库首次打开时保留现有 Flow、Resource、Job、
 Asset、Archive、幂等键和审计记录；旧归档元数据被规范化并建立结构化索引，无法映射的
 分类进入 `needs_review`，迁移不移动或批量重命名现有资料文件。
 
@@ -220,7 +220,7 @@ SHA-256、原子移动，再提交 ready 状态。失败不会产生可检索的
 结果稳定按 `archived_at DESC, archive_id DESC` 排序。`limit` 控制页大小；有下一页时
 返回 `has_more=true` 和不可解析、不可修改的签名 `next_cursor`。输出包含 `classification`、
 `primary_domain_display_name` 和 `学习资料库/` 内的安全 `relative_path`。deprecated
-`library_path` 如为 v2 兼容仍出现，也只能是同一安全相对路径；不返回数据库路径、任务目录
+`library_path` 如为 兼容仍出现，也只能是同一安全相对路径；不返回数据库路径、任务目录
 或绝对路径。
 
 ## 搜索、下载和登录边界

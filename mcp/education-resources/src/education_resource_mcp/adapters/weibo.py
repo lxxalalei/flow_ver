@@ -20,6 +20,7 @@ from .http_client import urlopen_with_fallback
 
 
 SEARCH_URL = "https://weibo.com/ajax/searchall"
+CREATOR_URL = "https://weibo.com/api/container/getIndex"
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -83,3 +84,60 @@ class WeiboSearchAdapter:
             if len(resources) >= limit:
                 break
         return resources, None
+
+    def search_creator(
+        self, creator_id: str, limit: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        session_data = self.session_store.get_session_data("weibo")
+        cookie = SessionStore._cookie_header(session_data) if session_data else ""
+        if not cookie:
+            return [], adapter_error("AUTH_REQUIRED", "微博创作者浏览需要登录 Cookie", False)
+        container_id = f"100505{creator_id}"
+        results: list[dict[str, Any]] = []
+        since_id = ""
+        while len(results) < limit:
+            params = urlencode({
+                "jumpfrom": "weibocom", "type": "uid",
+                "value": creator_id, "containerid": container_id,
+                "since_id": since_id,
+            })
+            request = Request(f"{CREATOR_URL}?{params}", headers={
+                "User-Agent": UA, "Accept": "application/json",
+                "Cookie": cookie, "Referer": f"https://weibo.com/u/{creator_id}",
+            })
+            try:
+                with urlopen_with_fallback(request, timeout=self.timeout) as resp:
+                    data = json.loads(resp.read().decode("utf-8", "replace"))
+            except Exception as exc:
+                if results:
+                    return results, adapter_error("PARTIAL_FAILURE", str(exc)[:200], True)
+                return [], adapter_error("PARTIAL_FAILURE", f"微博创作者请求失败: {type(exc).__name__}", True)
+            cards = (data.get("data") or {}).get("cards") or []
+            if not cards:
+                break
+            for card in cards:
+                mblog = card.get("mblog") if isinstance(card, dict) else None
+                if not mblog:
+                    continue
+                text = _clean(mblog.get("text"))
+                bid = str(mblog.get("id") or mblog.get("bid") or "").strip()
+                if not text or not bid:
+                    continue
+                user = mblog.get("user") if isinstance(mblog.get("user"), dict) else {}
+                results.append(make_resource(
+                    platform="weibo", title=text[:200],
+                    source_url=f"https://weibo.com/detail/{bid}",
+                    resource_type="文章",
+                    author=_clean(user.get("screen_name")) or None,
+                    platform_signals={
+                        "reposts": mblog.get("reposts_count"),
+                        "comments": mblog.get("comments_count"),
+                        "likes": mblog.get("attitudes_count"),
+                    },
+                ))
+                if len(results) >= limit:
+                    break
+            since_id = str((data.get("data") or {}).get("cardlistInfo", {}).get("since_id") or "")
+            if not since_id or since_id == "0":
+                break
+        return results, None

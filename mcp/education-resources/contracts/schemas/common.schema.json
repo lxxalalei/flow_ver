@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/common.schema.json",
-  "title": "Education Resource MCP common definitions v2",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/common.schema.json",
+  "title": "Education Resource MCP common definitions",
   "$defs": {
     "contract_version": {
       "type": "string",
-      "const": "2.0.0"
+      "const": "1.0.0"
     },
     "flow_id": {
       "type": "string",

@@ -1,4 +1,4 @@
-"""Strict MCP input models matching contracts/v2."""
+"""Strict MCP input models matching contracts."""
 
 from __future__ import annotations
 
@@ -191,7 +191,7 @@ class ArchiveClassification(StrictModel):
 class ArchiveMetadata(StrictModel):
     title: str | None = Field(default=None, min_length=1, max_length=512)
     classification: ArchiveClassification | None = None
-    # Deployed flat v2 fields remain accepted and are normalized into classification.
+    # Deployed flat fields remain accepted and are normalized into classification.
     primary_domain: str | None = Field(default=None, min_length=1, max_length=64)
     topics: list[Topic] | None = Field(default=None, max_length=MAX_TOPICS)
     source_name: str | None = Field(default=None, min_length=1, max_length=128)

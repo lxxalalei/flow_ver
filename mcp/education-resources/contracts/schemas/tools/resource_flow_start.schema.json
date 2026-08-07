@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tools/resource_flow_start.schema.json",
-  "title": "resource_flow_start contract v2",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/tools/resource_flow_start.schema.json",
+  "title": "resource_flow_start contract",
   "oneOf": [
     {
       "$ref": "#/$defs/input"

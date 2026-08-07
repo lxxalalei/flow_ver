@@ -10,7 +10,7 @@ import unittest
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS_ROOT = SERVICE_ROOT / "contracts" / "v2"
+CONTRACTS_ROOT = SERVICE_ROOT / "contracts"
 SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))

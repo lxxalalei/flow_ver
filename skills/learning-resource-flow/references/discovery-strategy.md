@@ -93,7 +93,7 @@ MCP 搜索执行层会自动从 SessionStore 读取已保存的平台登录态�
 |---|---|---|---|
 | 免登录 | smartedu, cctv, ximalaya, kepu, open163, baiduwenku, nlc, yixi, annas-archive, wechat, runoob, generic | 完全可用 | 影响不大 |
 | 登录增强 | bilibili, zhihu | 可用但结果可能更少 | 结果更全面 |
-| 登录必需 | weibo | 无法搜索 | 正常搜索 |
+| 登录必需 | douyin, weibo | 无法搜索 | 正常搜索 |
 
 ### 何时提醒
 

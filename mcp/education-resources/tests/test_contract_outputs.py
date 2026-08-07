@@ -14,7 +14,7 @@ from referencing import Registry, Resource
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS_ROOT = SERVICE_ROOT / "contracts" / "v2"
+CONTRACTS_ROOT = SERVICE_ROOT / "contracts"
 SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -219,7 +219,7 @@ class ContractOutputTests(unittest.TestCase):
             "plan": plan,
         }
 
-    def test_success_outputs_match_all_v2_contracts_except_cancel(self) -> None:
+    def test_success_outputs_match_all_contracts_except_cancel(self) -> None:
         state = self._prepare_flow("success")
         flow = state["flow"]
         search = state["search"]
@@ -308,7 +308,7 @@ class ContractOutputTests(unittest.TestCase):
             with self.subTest(contract=tool_name):
                 self.assert_contract(tool_name, ok(output))
 
-    def test_job_cancel_success_output_matches_v2_contract(self) -> None:
+    def test_job_cancel_success_output_matches_contract(self) -> None:
         self.service.close()
         self.service = ResourceService(
             self.settings,
@@ -336,7 +336,7 @@ class ContractOutputTests(unittest.TestCase):
         )
         self.assert_contract("resource_job_cancel", ok(cancelled))
 
-    def test_structured_error_output_matches_v2_schema(self) -> None:
+    def test_structured_error_output_matches_schema(self) -> None:
         error = failure(
             DomainError(
                 "FLOW_NOT_FOUND",

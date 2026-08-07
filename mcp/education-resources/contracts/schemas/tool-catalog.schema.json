@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://quanxiao.example/contracts/education-resource/v2/schemas/tool-catalog.schema.json",
-  "title": "Education Resource MCP tool catalog schema v2",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/tool-catalog.schema.json",
+  "title": "Education Resource MCP tool catalog schema",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,7 +18,7 @@
     },
     "catalog_version": {
       "type": "string",
-      "const": "2.0.0"
+      "const": "1.0.0"
     },
     "contract_version": {
       "$ref": "common.schema.json#/$defs/contract_version"

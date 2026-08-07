@@ -1,6 +1,6 @@
 {
   "version": "3.0.0",
-  "purpose": "验证唯一入口 Skill 的独立任务模型与 education-resources v2 ResultSet、Presentation、Selection 控制边界。",
+  "purpose": "验证唯一入口 Skill 的独立任务模型与 education-resources ResultSet、Presentation、Selection 控制边界。",
   "cases": [
     {
       "name": "主题明确直接搜索",

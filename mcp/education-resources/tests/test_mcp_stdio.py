@@ -12,11 +12,12 @@ import unittest
 
 MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-CONTRACTS_ROOT = SERVICE_ROOT / "contracts" / "v2"
+CONTRACTS_ROOT = SERVICE_ROOT / "contracts"
 EXPECTED_TOOLS = {
     "resource_flow_start",
     "resource_flow_status",
     "resource_search",
+    "resource_browse_creator",
     "resource_presentation_save",
     "resource_selection_save",
     "resource_download_prepare",
@@ -61,7 +62,7 @@ def stdio_parameters(data_dir: str):
 
 @unittest.skipUnless(MCP_AVAILABLE, "install the service dependencies to run MCP stdio tests")
 class McpStdioTests(unittest.TestCase):
-    def test_initialize_lists_exact_11_tools_and_v2_input_schemas(self) -> None:
+    def test_initialize_lists_exact_12_tools_and_input_schemas(self) -> None:
         import anyio
         from mcp.client.session import ClientSession
         from mcp.client.stdio import stdio_client
@@ -81,7 +82,7 @@ class McpStdioTests(unittest.TestCase):
                         tools = await session.list_tools()
                         actual_tools = {tool.name for tool in tools.tools}
                         self.assertEqual(actual_tools, EXPECTED_TOOLS)
-                        self.assertEqual(len(tools.tools), 11)
+                        self.assertEqual(len(tools.tools), len(EXPECTED_TOOLS))
                         for tool in tools.tools:
                             expected_schema = contract_input_schema(tool.name)
                             with self.subTest(tool=tool.name, part="required"):
@@ -105,7 +106,7 @@ class McpStdioTests(unittest.TestCase):
 
         anyio.run(run)
 
-    def test_deterministic_fixture_full_v2_round_trip(self) -> None:
+    def test_deterministic_fixture_full_round_trip(self) -> None:
         import anyio
         from mcp.client.session import ClientSession
         from mcp.client.stdio import stdio_client
@@ -115,7 +116,7 @@ class McpStdioTests(unittest.TestCase):
             self.assertFalse(result.is_error, name)
             self.assertIsNotNone(result.structured_content, name)
             content = result.structured_content
-            self.assertEqual(content["contract_version"], "2.0.0", name)
+            self.assertEqual(content["contract_version"], "1.0.0", name)
             self.assertTrue(content["ok"], content)
             return content
 
@@ -131,8 +132,8 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_flow_start",
                             {
-                                "contract_version": "2.0.0",
-                                "idempotency_key": "stdio-v2-flow-key-01",
+                                "contract_version": "1.0.0",
+                                "idempotency_key": "stdio-flow-key-01",
                                 "task": {
                                     "goal": {
                                         "topic": "恐龙",
@@ -148,10 +149,10 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_search",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                                 "task_version": flow["task_version"],
-                                "idempotency_key": "stdio-v2-search-key-1",
+                                "idempotency_key": "stdio-search-key-1",
                                 "search_tasks": [
                                     {
                                         "platform": "generic",
@@ -173,11 +174,11 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_presentation_save",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                                 "result_set_id": search["result_set_id"],
                                 "displayed_resource_ids": displayed,
-                                "idempotency_key": "stdio-v2-present-key-1",
+                                "idempotency_key": "stdio-present-key-1",
                             },
                         )
                         self.assertFalse(presentation["empty"])
@@ -189,9 +190,9 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_selection_save",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
-                                "idempotency_key": "stdio-v2-select-key-01",
+                                "idempotency_key": "stdio-select-key-01",
                                 "presentation_id": presentation["presentation_id"],
                                 "presented_version": presentation["presented_version"],
                                 "selected_positions": [1],
@@ -207,9 +208,9 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_download_prepare",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
-                                "idempotency_key": "stdio-v2-prepare-key-1",
+                                "idempotency_key": "stdio-prepare-key-1",
                                 **binding,
                                 "options": {"preferred_container": "html"},
                             },
@@ -223,7 +224,7 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_flow_status",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                             },
                         )
@@ -256,13 +257,13 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_download_start",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                                 "plan_id": plan["plan_id"],
                                 **binding,
                                 "plan_digest": plan["plan_digest"],
                                 "confirmation_token": plan["confirmation_token"],
-                                "idempotency_key": "stdio-v2-start-key-001",
+                                "idempotency_key": "stdio-start-key-001",
                             },
                         )
                         self.assertEqual(
@@ -276,7 +277,7 @@ class McpStdioTests(unittest.TestCase):
                                 session,
                                 "resource_job_status",
                                 {
-                                    "contract_version": "2.0.0",
+                                    "contract_version": "1.0.0",
                                     "flow_id": flow["flow_id"],
                                     "job_id": started["job_id"],
                                 },
@@ -297,7 +298,7 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_flow_status",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                             },
                         )
@@ -309,11 +310,11 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_archive",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                                 "job_id": started["job_id"],
                                 "asset_id": job["assets"][0]["asset_id"],
-                                "idempotency_key": "stdio-v2-archive-key-01",
+                                "idempotency_key": "stdio-archive-key-01",
                                 "metadata": {
                                     "title": "恐龙入门资料",
                                     "collection": "科学",
@@ -325,7 +326,7 @@ class McpStdioTests(unittest.TestCase):
                             session,
                             "resource_library_search",
                             {
-                                "contract_version": "2.0.0",
+                                "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                                 "filters": {"query": "恐龙"},
                                 "limit": 20,

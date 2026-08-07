@@ -60,7 +60,7 @@ class V2ControlPlaneTests(unittest.TestCase):
 
     def _start_search(self, suffix: str = "01") -> tuple[dict, dict]:
         flow = self.service.flow_start(
-            f"v2-flow-start-key-{suffix}",
+            f"flow-start-key-{suffix}",
             {
                 "goal": {"topic": "恐龙", "outcome": "找到入门资料"},
                 "user_role": "parent",
@@ -69,7 +69,7 @@ class V2ControlPlaneTests(unittest.TestCase):
             },
         )
         search = self.service.search(
-            flow["flow_id"], f"v2-search-key-{suffix}000",
+            flow["flow_id"], f"search-key-{suffix}000",
             [{"platform": "generic", "queries": [{"query": "恐龙"}]}],
             limit=10,
         )
@@ -80,7 +80,7 @@ class V2ControlPlaneTests(unittest.TestCase):
             flow["flow_id"],
             search["result_set_id"],
             ids,
-            f"v2-presentation-{suffix}",
+            f"presentation-{suffix}",
         )
 
     def test_hidden_candidate_and_cross_flow_result_set_are_rejected(self) -> None:
@@ -91,7 +91,7 @@ class V2ControlPlaneTests(unittest.TestCase):
         with self.assertRaises(DomainError) as hidden:
             self.service.selection_save(
                 flow_a["flow_id"],
-                "v2-selection-key-001",
+                "selection-key-001",
                 presentation["presentation_id"],
                 presentation["presented_version"],
                 [2],
@@ -102,7 +102,7 @@ class V2ControlPlaneTests(unittest.TestCase):
                 flow_b["flow_id"],
                 search_a["result_set_id"],
                 [visible],
-                "v2-presentation-cross-1",
+                "presentation-cross-1",
             )
         self.assertEqual(crossed.exception.code, "RESULT_SET_NOT_FOUND")
 
@@ -134,13 +134,13 @@ class V2ControlPlaneTests(unittest.TestCase):
         first = self._present(flow, search, ids, "key-00000003")
         selection = self.service.selection_save(
             flow["flow_id"],
-            "v2-selection-key-002",
+            "selection-key-002",
             first["presentation_id"],
             first["presented_version"],
             [1],
         )
         plan = self.service.download_prepare(
-            flow["flow_id"], "v2-prepare-key-0001", selection["selection_version"]
+            flow["flow_id"], "prepare-key-0001", selection["selection_version"]
         )
         second = self._present(
             flow, search, list(reversed(ids)), "key-00000004"
@@ -149,7 +149,7 @@ class V2ControlPlaneTests(unittest.TestCase):
         with self.assertRaises(DomainError) as old_selection:
             self.service.selection_save(
                 flow["flow_id"],
-                "v2-selection-key-003",
+                "selection-key-003",
                 first["presentation_id"],
                 first["presented_version"],
                 [1],
@@ -160,7 +160,7 @@ class V2ControlPlaneTests(unittest.TestCase):
                 flow["flow_id"],
                 plan["plan_id"],
                 plan["confirmation_token"],
-                "v2-start-key-000001",
+                "start-key-000001",
             )
         self.assertEqual(old_plan.exception.code, "SELECTION_VERSION_CONFLICT")
 
@@ -178,12 +178,12 @@ class V2ControlPlaneTests(unittest.TestCase):
                 [position],
             )
 
-        first_a = select(1, "v2-selection-key-004")
+        first_a = select(1, "selection-key-004")
         old_plan = self.service.download_prepare(
-            flow["flow_id"], "v2-prepare-key-0002", first_a["selection_version"]
+            flow["flow_id"], "prepare-key-0002", first_a["selection_version"]
         )
-        selected_b = select(2, "v2-selection-key-005")
-        second_a = select(1, "v2-selection-key-006")
+        selected_b = select(2, "selection-key-005")
+        second_a = select(1, "selection-key-006")
         self.assertEqual(
             [
                 first_a["selection_version"],
@@ -198,7 +198,7 @@ class V2ControlPlaneTests(unittest.TestCase):
                 flow["flow_id"],
                 old_plan["plan_id"],
                 old_plan["confirmation_token"],
-                "v2-start-key-000002",
+                "start-key-000002",
             )
         self.assertEqual(old_plan_error.exception.code, "SELECTION_VERSION_CONFLICT")
 
@@ -208,14 +208,14 @@ class V2ControlPlaneTests(unittest.TestCase):
         presentation = self._present(flow, search, ids, "key-00000006")
         selected = self.service.selection_save(
             flow["flow_id"],
-            "v2-selection-key-007",
+            "selection-key-007",
             presentation["presentation_id"],
             presentation["presented_version"],
             [1],
         )
         replay = self.service.selection_save(
             flow["flow_id"],
-            "v2-selection-key-007",
+            "selection-key-007",
             presentation["presentation_id"],
             presentation["presented_version"],
             [1],
@@ -224,7 +224,7 @@ class V2ControlPlaneTests(unittest.TestCase):
         with self.assertRaises(DomainError) as conflict:
             self.service.selection_save(
                 flow["flow_id"],
-                "v2-selection-key-007",
+                "selection-key-007",
                 presentation["presentation_id"],
                 presentation["presented_version"],
                 [2],
@@ -237,13 +237,13 @@ class V2ControlPlaneTests(unittest.TestCase):
         presentation = self._present(flow, search, [resource_id], "key-00000007")
         selection = self.service.selection_save(
             flow["flow_id"],
-            "v2-selection-key-008",
+            "selection-key-008",
             presentation["presentation_id"],
             presentation["presented_version"],
             [1],
         )
         plan = self.service.download_prepare(
-            flow["flow_id"], "v2-prepare-key-0003", selection["selection_version"]
+            flow["flow_id"], "prepare-key-0003", selection["selection_version"]
         )
         status = self.service.flow_status(flow["flow_id"])
         self.assertEqual(status["task"]["user_role"], "parent")

@@ -1,6 +1,6 @@
 ---
 name: learning-resource-flow
-description: 面向孩子和家长的教育资源唯一对话入口。用户想寻找、推荐、比较、筛选、下载、收藏或再次查找课程、视频、图书、文章、练习、活动方案等资源时使用；也用于从模糊的学习或成长问题出发澄清目标、审查搜索候选、提交实际展示集、保存用户选择，以及恢复、确认、取消或查询资源任务。通过 education-resources v2 MCP 控制 Flow、ResultSet、Presentation、Selection、Plan、Job 和 Asset；平台登录交给独立 session-manager。
+description: 面向孩子和家长的教育资源唯一对话入口。用户想寻找、推荐、比较、筛选、下载、收藏或再次查找课程、视频、图书、文章、练习、活动方案等资源时使用；也用于从模糊的学习或成长问题出发澄清目标、审查搜索候选、提交实际展示集、保存用户选择，以及恢复、确认、取消或查询资源任务。通过 education-resources MCP 控制 Flow、ResultSet、Presentation、Selection、Plan、Job 和 Asset；平台登录交给独立 session-manager。
 ---
 
 # Learning Resource Flow
@@ -21,7 +21,7 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 - 实际向用户展示经过审查的有序子集，并把完全相同的顺序提交为 Presentation。
 - 解释选择、计划、风险、进度、失败和下一步。
 
-由 `education-resources` v2 MCP 负责：
+由 `education-resources` MCP 负责：
 
 - Flow、ResultSet、Presentation、Selection、Plan、Job 和 Asset 的权威状态。
 - 结果集和展示集成员校验、位置映射、版本、幂等、恢复、下载、取消和归档。
@@ -38,7 +38,7 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 - `resource_target`：资源给孩子使用、给家长参考或未知。
 - `constraints`：用户明示或有充分证据支持的 must、prefer、exclude 及具体使用条件。
 
-同时保存核心目标 `goal`。`user_role` 与 `resource_target` 相互独立，不能互相推导；未知保持未知。年龄和年级不是默认必填信息。把该模型按 v2 Task Schema 传给 `resource_flow_start`，不得回退为混合的 audience 字段。
+同时保存核心目标 `goal`。`user_role` 与 `resource_target` 相互独立，不能互相推导；未知保持未知。年龄和年级不是默认必填信息。把该模型按 Task Schema 传给 `resource_flow_start`，不得回退为混合的 audience 字段。
 
 处理模糊请求、冲突、短回答或敏感儿童主题时读取 `references/intent-and-clarification.md`。
 
@@ -48,7 +48,7 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 
 ```text
 resource_flow_start
--> resource_search                    # 只产生 ResultSet 候选
+-> resource_search / resource_browse_creator  # 关键词搜索 或 创作者主页浏览
 -> 模型审查并实际向用户展示有序子集
 -> resource_presentation_save         # 提交刚才实际展示的完全相同集合和顺序
 -> 等待用户选择
@@ -160,7 +160,7 @@ resource_flow_start
 - `references/discovery-strategy.md`：搜索方向、查询设计、来源策略和停止条件。
 - `references/site-whitelist.md`：可信站点定向搜索参考。
 - `references/candidate-judgment.md`：ResultSet 审查、展示子集和证据护栏。
-- `references/mcp-workflow.md`：v2 工具顺序、幂等、Presentation、恢复、独立登录和错误处理。
+- `references/mcp-workflow.md`：工具顺序、幂等、Presentation、恢复、独立登录和错误处理。
 - `references/library-structure.md`：归档前必读；学习领域、分类元数据、物理目录和资料库检索规则。
 - `references/response-guidelines.md`：实际展示、选择、确认、进度和失败表达。
 - `examples/semantic-regression-cases.json`：修改 Skill 或执行回归时读取，不作为正常对话输入。

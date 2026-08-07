@@ -29,12 +29,12 @@ class DomainError(Exception):
 
 
 def ok(data: dict[str, Any]) -> dict[str, Any]:
-    return {"contract_version": "2.0.0", "ok": True, **data}
+    return {"contract_version": "1.0.0", "ok": True, **data}
 
 
 def failure(error: DomainError, **identifiers: str | None) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "contract_version": "2.0.0",
+        "contract_version": "1.0.0",
         "ok": False,
         "error": error.to_dict(),
     }

@@ -1,8 +1,8 @@
-# Education Resources v2 MCP 工作流
+# Education Resources MCP 工作流
 
 ## 通用规则
 
-- 使用 `contract_version: "2.0.0"`。
+- 使用 `contract_version: "1.0.0"`。
 - 有副作用的首次调用生成 16–128 位 `idempotency_key`；同一请求重试复用原键，参数变化使用新键。
 - 业务结果 `ok=false` 时读取结构化错误，不继续假定状态转换成功。
 - 内部 ID、版本、position 和确认令牌只用于工具调用，不向用户复述。
@@ -25,7 +25,7 @@
 
 ```text
 resource_flow_start
--> resource_search
+-> resource_search 或 resource_browse_creator
 -> 实际展示审查后的有序子集
 -> resource_presentation_save
 -> 等待用户选择
@@ -65,6 +65,38 @@ weibo 必须登录才能搜索。
 返回的 `candidates` 只是 ResultSet，不是已展示集合，不能直接用于 Selection。模型可以审查和过滤，但不能创建候选、修改 ID 或混合不同 ResultSet。
 
 同一目标换搜索角度时可创建新 ResultSet。新结果出现后仍要重新审查、实际展示并提交 Presentation；不能沿用旧编号指向新候选。
+
+### Creator 浏览（社媒主页抓取）
+
+当用户提供**创作者主页 URL** 或明确想浏览某创作者的全部内容时（如"把这个人发的视频都找出来"），使用 `resource_browse_creator` 代替 `resource_search`：
+
+```json
+{
+  "contract_version": "1.0.0",
+  "flow_id": "flow_...",
+  "task_version": 1,
+  "idempotency_key": "browse-...",
+  "platform": "douyin",
+  "creator_id": "https://www.douyin.com/user/MS4wLjAB...",
+  "limit": 50
+}
+```
+
+规则：
+
+- `creator_id` 接受完整主页 URL 或裸 ID（sec_user_id / mid / url_token，取决于平台）。
+- **只支持社媒平台**：`douyin`、`bilibili`、`weibo`、`zhihu`。教育/资源平台（smartedu、cctv、nlc 等）返回 `FEATURE_NOT_SUPPORTED`。
+- 返回的也是 ResultSet，后续走相同的 Presentation → Selection → Download 主链路。
+- creator ResultSet 和 keyword ResultSet 一样是独立候选集，不混合。
+- 社媒平台同样适用搜索前的 session 检查规则（weibo 必须登录，bilibili/zhihu 有登录更全面）。
+
+判断用 search 还是 browse_creator：
+
+| 用户意图 | 工具 |
+|---------|------|
+| "搜一下编程副业的视频" | `resource_search`（关键词） |
+| "把这个 UP 主的视频都下载了" | `resource_browse_creator`（主页 URL） |
+| "这个人发的内容有什么" | `resource_browse_creator`（主页 URL） |
 
 ## Presentation：实际展示后提交
 
@@ -152,7 +184,7 @@ weibo 必须登录才能搜索。
 
 ## 独立 Session Manager
 
-平台登录由独立 `session-manager` / `session-login-flow` 处理，不属于 education-resources v2 主链路。
+平台登录由独立 `session-manager` / `session-login-flow` 处理，不属于 education-resources 主链路。
 
 ### 主动检查（推荐）
 
@@ -187,7 +219,7 @@ weibo 必须登录才能搜索。
 - MCP 决定安全相对目录、内容去重和 `pending -> ready` 提交；只有工具返回成功后才能向用户说明已归档或已去重。
 - 同一幂等键只重放完全相同的请求；分类或辅助元数据变化时使用新键，不用旧键覆盖请求。
 
-`resource_library_search` 按 v2 Flow/身份边界调用。结构化字段精确过滤，同字段多值为 OR、
+`resource_library_search` 按 Flow/身份边界调用。结构化字段精确过滤，同字段多值为 OR、
 跨字段为 AND；自由关键词只对标题、主题、标签和备注做受控模糊匹配。继续翻页时原样提交
 MCP 返回的不透明 `next_cursor`，不猜测游标或排序。只解释 ready 结果；不得展示数据库路径、
 任务目录或绝对路径，只能使用 MCP 返回的资料库内安全相对路径。

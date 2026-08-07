@@ -1,10 +1,10 @@
-# Education Resource Domain Contract v2
+# Education Resource Domain Contract
 
-协议版本：`2.0.0`
+协议版本：`1.0.0`
 
 ## 1. 当前公共控制面
 
-Python stdio MCP 当前运行 v2，公共 catalog **仅包含 11 个工具**：
+Python stdio MCP 当前运行，公共 catalog **仅包含 11 个工具**：
 
 1. `resource_flow_start`
 2. `resource_flow_status`
@@ -188,7 +188,7 @@ Flow 状态输出不得暴露：
 所有状态写入和 Job 控制工具都必须使用幂等键。相同范围、相同键和相同规范请求返回原结果；同一键配合不同请求返回
 `IDEMPOTENCY_CONFLICT`。业务错误使用结构化结果；协议损坏和不可恢复内部错误才抛出异常。
 
-v2 错误码目录在同一 major 内 append-only。runtime 产生的 item failure 包括 `DOWNLOAD_FAILED` 和
+错误码目录在同一 major 内 append-only。runtime 产生的 item failure 包括 `DOWNLOAD_FAILED` 和
 `JOB_CANCELLED`，两者均已进入稳定错误码目录；消费者必须按 `retriable` 字段决定恢复策略，不得依赖未登记字符串。
 
 ## 11. 安全边界

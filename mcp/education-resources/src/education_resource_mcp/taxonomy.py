@@ -274,7 +274,7 @@ def normalize_classification(value: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def normalize_archive_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
-    """Return canonical metadata while accepting deployed flat v2 fields.
+    """Return canonical metadata while accepting deployed flat fields.
 
     New persistence always receives a nested ``classification`` object. Known
     legacy Chinese domains are mapped; unknown legacy values are retained and

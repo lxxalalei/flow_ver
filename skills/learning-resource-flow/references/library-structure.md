@@ -108,7 +108,7 @@
 - `notes` 只记录对后续使用确有帮助的简短说明，不复制完整需求。
 - 新调用不提交模型猜测的本地路径、格式目录、标题、来源、媒体类型、大小或 SHA-256。
 
-旧平铺 `primary_domain`、`topics`、`source_name` 和旧中文领域仅用于 v2 兼容读取。
+旧平铺 `primary_domain`、`topics`、`source_name` 和旧中文领域仅用于 兼容读取。
 已知值由 MCP 映射到 `learning-v1`；无法可靠映射的记录进入 `needs_review` 并保留原始
 元数据。新归档统一写入嵌套分类结构。
 
