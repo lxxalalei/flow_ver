@@ -14,6 +14,11 @@ import secrets
 import threading
 from typing import Any
 
+from .acquisition import (
+    AcquisitionRequest,
+    AcquisitionRouter,
+    AcquisitionStrategy,
+)
 from .archive import (
     ArchiveFileError,
     ArchiveFileManager,
@@ -23,8 +28,12 @@ from .archive import (
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
+from .inspection import INSPECTION_PROFILE_VERSION, InspectionRouter, source_fingerprint
+from .inspection_registry import default_inspection_router
 from .jobs import JobRunner
 from .policy import PolicyError, ensure_within_root
+from .retrieval import CandidateResourceInternal, deduplicate_candidates
+from .retrieval.identity import identities_match, resolve_identity
 from .search import SearchProvider, canonical_http_url, default_search_provider
 from .session_bridge import create_session_store
 from .storage import Store, new_id, utc_now
@@ -37,6 +46,39 @@ from .taxonomy import (
 
 TERMINAL_JOB_STATES = {"succeeded", "failed", "cancelled"}
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,128}$")
+REPRESENTATION_ID_PATTERN = re.compile(r"^repr_[A-Za-z0-9_-]{16,64}$")
+PERSISTED_ASSET_ROLES = {
+    "primary",
+    "subtitle",
+    "cover",
+    "metadata",
+    "attachment",
+    "transcript",
+    "companion",
+}
+ACQUISITION_ABORT_CODES = {
+    "AUTH_REQUIRED",
+    "JOB_CANCELLED",
+    "NETWORK_BLOCKED",
+    "POLICY_DENIED",
+    "REDIRECT_BLOCKED",
+}
+PUBLIC_JOB_FAILURE_CODES = {
+    "AUTH_REQUIRED",
+    "CONTENT_TYPE_REJECTED",
+    "CONTENT_VALIDATION_FAILED",
+    "DOWNLOAD_FAILED",
+    "DOWNLOAD_TOO_LARGE",
+    "INTERNAL_ERROR",
+    "JOB_CANCELLED",
+    "NETWORK_BLOCKED",
+    "PARTIAL_FAILURE",
+    "PLATFORM_UNAVAILABLE",
+    "POLICY_DENIED",
+    "RATE_LIMITED",
+    "REDIRECT_BLOCKED",
+    "STORAGE_UNAVAILABLE",
+}
 
 
 class ResourceService:
@@ -48,8 +90,10 @@ class ResourceService:
         search_provider: SearchProvider | None = None,
         download_provider: DownloadProvider | None = None,
         rendering_downloader: DownloadProvider | None = None,
+        acquisition_router: AcquisitionRouter | None = None,
         job_runner: JobRunner | None = None,
         archive_file_manager: ArchiveFileManager | None = None,
+        inspection_router: InspectionRouter | None = None,
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.settings.ensure_directories()
@@ -58,27 +102,21 @@ class ResourceService:
         self.search_provider = search_provider or default_search_provider(
             self.settings, self.session_store
         )
+        self.inspection_router = inspection_router or default_inspection_router(
+            self.settings
+        )
+        self._download_provider_was_injected = download_provider is not None
         self.download_provider = download_provider or PublicHttpDownloader(self.settings)
-        # Auto-create the rendering downloader only when the caller hasn't
-        # injected a custom download_provider — otherwise the caller owns the
-        # entire download stack and we must not intercept "webpage" strategy.
-        if rendering_downloader is not None:
-            self.rendering_downloader = rendering_downloader
-        elif download_provider is not None:
-            self.rendering_downloader = None
-        else:
-            try:
-                from .adapters.rendering_download import RenderingDownloader
-
-                self.rendering_downloader = RenderingDownloader(
-                    self.settings, session_store=self.session_store
-                )
-            except ImportError:
-                self.rendering_downloader = None
+        # Browser capture is an explicit capability.  Merely classifying a
+        # resource as a webpage must never launch Chrome or forward a stored
+        # session; the static materializer is the default acquisition path.
+        self.rendering_downloader = rendering_downloader
         self._platform_downloaders: dict[str, Any] = {}
         self._register_default_downloaders()
+        self.acquisition_router = acquisition_router
         self.job_runner = job_runner or JobRunner(self.settings.max_workers)
         self._mutation_lock = threading.RLock()
+        self._inspection_lock = threading.RLock()
         self.store.mark_incomplete_jobs_failed()
         self.archive_files = archive_file_manager or ArchiveFileManager(
             self.settings.library_dir
@@ -141,6 +179,8 @@ class ResourceService:
         search_tasks: list[dict[str, Any]],
         *,
         task_version: int | None = None,
+        mode: str = "replace",
+        base_result_set_id: str | None = None,
         filters: dict[str, Any] | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
@@ -152,6 +192,14 @@ class ResourceService:
         )
         if effective_task_version != current_task_version:
             raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化")
+        normalised_mode = str(mode or "replace").strip().lower()
+        normalised_base = str(base_result_set_id or "").strip() or None
+        if normalised_mode not in {"replace", "extend"}:
+            raise DomainError("INVALID_ARGUMENT", "mode 只能是 replace 或 extend")
+        if normalised_mode == "replace" and normalised_base is not None:
+            raise DomainError("INVALID_ARGUMENT", "replace 不得提供 base_result_set_id")
+        if normalised_mode == "extend" and normalised_base is None:
+            raise DomainError("INVALID_ARGUMENT", "extend 必须提供 base_result_set_id")
         if not 1 <= limit <= self.settings.max_search_results:
             raise DomainError(
                 "INVALID_ARGUMENT",
@@ -178,12 +226,23 @@ class ResourceService:
                     raise DomainError("INVALID_ARGUMENT", "query 不能为空")
                 clean_queries.append({"query": query_text})
                 all_queries.append(query_text)
-            normalised_tasks.append({"platform": platform, "queries": clean_queries})
+            normalised_task: dict[str, Any] = {
+                "platform": platform,
+                "queries": clean_queries,
+            }
+            direction = str(task.get("direction") or "").strip()
+            if direction:
+                if len(direction) > 256:
+                    raise DomainError("INVALID_ARGUMENT", "search_task.direction 不能超过 256 字符")
+                normalised_task["direction"] = direction
+            normalised_tasks.append(normalised_task)
         search_filters = filters or {}
         request = {
             "flow_id": flow_id,
             "search_tasks": normalised_tasks,
             "task_version": effective_task_version,
+            "mode": normalised_mode,
+            "base_result_set_id": normalised_base,
             "filters": search_filters,
             "limit": limit,
         }
@@ -191,36 +250,40 @@ class ResourceService:
         scope = f"resource_search:{flow_id}"
         replay = self._idempotency_replay(scope, idempotency_key, request_hash)
         if replay is not None:
-            return replay
+            return self._public_search_snapshot(replay)
+
+        base_result_set: dict[str, Any] | None = None
+        if normalised_mode == "extend":
+            base_result_set = self.store.get_result_set(normalised_base or "")
+            if base_result_set is None or base_result_set.get("flow_id") != flow_id:
+                raise DomainError("RESULT_SET_NOT_FOUND", "基础 ResultSet 不存在")
+            if flow.get("current_result_set_id") != normalised_base:
+                raise DomainError("RESULT_SET_STATE_CONFLICT", "基础 ResultSet 已不是当前快照")
+            if int(base_result_set.get("task_version") or 1) != effective_task_version:
+                raise DomainError("TASK_VERSION_CONFLICT", "基础 ResultSet 的任务版本已经变化")
         raw_resources, platform_runs = self.search_provider.search(
             normalised_tasks, limit
         )
-        resources: list[dict[str, Any]] = []
-        seen_urls: set[str] = set()
-        for raw in raw_resources:
-            try:
-                source_url = canonical_http_url(str(raw.get("source_url") or ""))
-            except DomainError:
-                continue
-            if source_url in seen_urls:
-                continue
-            seen_urls.add(source_url)
-            title = str(raw.get("title") or "").strip()
-            if not title:
-                continue
-            resources.append(
-                {
-                    "resource_id": new_id("res"),
-                    "platform": str(raw.get("platform") or "generic"),
-                    "title": title,
-                    "source_url": source_url,
-                    "resource_type": self._normalise_resource_type(
-                        str(raw.get("resource_type") or "other")
-                    ),
-                    "summary": raw.get("summary"),
-                    "metadata": dict(raw.get("metadata") or {}),
-                }
-            )
+        platform_runs = self._annotate_search_directions(
+            normalised_tasks,
+            platform_runs,
+        )
+        incoming_candidates = self._normalise_retrieval_candidates(
+            raw_resources, default_platform="generic"
+        )
+        base_candidates = self._stored_retrieval_candidates(base_result_set)
+        metrics = self._retrieval_provenance(base_candidates, incoming_candidates)
+        merged_candidates = deduplicate_candidates(
+            [*base_candidates, *incoming_candidates],
+            limit=limit,
+        )
+        resources = self._materialise_retrieval_candidates(merged_candidates)
+        round_number = (
+            int((base_result_set or {}).get("round") or 1) + 1
+            if normalised_mode == "extend"
+            else 1
+        )
+        provenance = metrics
         # Extract flat failures from platform_runs query_run errors.
         failures: list[dict[str, Any]] = []
         for run in platform_runs:
@@ -237,10 +300,11 @@ class ResourceService:
                         }
                     )
         failures = failures[:32]
+        coverage = self._fact_coverage(resources, platform_runs, failures)
         # Build a human-readable summary for audit/storage.
         query_summary = "; ".join(all_queries)[:1000]
         try:
-            return self.store.create_result_set(
+            result = self.store.create_result_set(
                 flow_id,
                 resources,
                 query=query_summary,
@@ -248,18 +312,35 @@ class ResourceService:
                 filters=search_filters,
                 failures=failures,
                 platform_runs=platform_runs,
+                mode=normalised_mode,
+                base_result_set_id=normalised_base,
+                provenance=provenance,
+                coverage=coverage,
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
             )
+            return self._public_search_snapshot(result)
         except KeyError as exc:
             raise DomainError("FLOW_NOT_FOUND", "Flow 不存在") from exc
         except ValueError as exc:
             if str(exc) == "idempotency_conflict":
                 raise DomainError("IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求") from exc
+            if str(exc) in {
+                "invalid_result_set_mode",
+                "base_result_set_required",
+                "base_result_set_forbidden",
+            }:
+                raise DomainError("INVALID_ARGUMENT", "ResultSet 扩展参数无效") from exc
+            if str(exc) in {"base_result_set_not_found", "base_result_set_flow_mismatch"}:
+                raise DomainError("RESULT_SET_NOT_FOUND", "基础 ResultSet 不存在") from exc
             raise
         except RuntimeError as exc:
             if str(exc) == "task_version_conflict":
                 raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化") from exc
+            if str(exc) == "base_task_version_conflict":
+                raise DomainError("TASK_VERSION_CONFLICT", "基础 ResultSet 的任务版本已经变化") from exc
+            if str(exc) == "base_result_set_stale":
+                raise DomainError("RESULT_SET_STATE_CONFLICT", "基础 ResultSet 已不是当前快照") from exc
             raise DomainError("FLOW_STATE_CONFLICT", "搜索状态冲突") from exc
 
     def browse_creator(
@@ -313,44 +394,25 @@ class ResourceService:
         raw_resources, platform_runs = self.search_provider.search_creator(
             platform, creator_id, limit
         )
-        resources: list[dict[str, Any]] = []
-        seen_urls: set[str] = set()
-        for raw in raw_resources:
-            try:
-                source_url = canonical_http_url(str(raw.get("source_url") or ""))
-            except DomainError:
-                continue
-            if source_url in seen_urls:
-                continue
-            seen_urls.add(source_url)
-            title = str(raw.get("title") or "").strip()
-            if not title:
-                continue
-            resources.append(
-                {
-                    "resource_id": new_id("res"),
-                    "platform": str(raw.get("platform") or platform),
-                    "title": title,
-                    "source_url": source_url,
-                    "resource_type": self._normalise_resource_type(
-                        str(raw.get("resource_type") or "other")
-                    ),
-                    "summary": raw.get("summary"),
-                    "metadata": dict(raw.get("metadata") or {}),
-                }
-            )
+        resources = self._public_retrieval_candidates(
+            raw_resources,
+            default_platform=platform,
+            limit=limit,
+        )
         failures: list[dict[str, Any]] = []
         for run in platform_runs:
-            err = run.get("error")
-            if err:
-                failures.append(
-                    {
-                        "platform": str(run.get("platform") or platform),
-                        "code": self._normalise_failure_code(err.get("code")),
-                        "message": str(err.get("message") or "创作者浏览失败")[:1024],
-                        "retriable": bool(err.get("retryable")),
-                    }
-                )
+            run_platform = str(run.get("platform") or platform)
+            for query_run in run.get("query_runs") or []:
+                err = query_run.get("error")
+                if err:
+                    failures.append(
+                        {
+                            "platform": run_platform,
+                            "code": self._normalise_failure_code(err.get("code")),
+                            "message": str(err.get("message") or "创作者浏览失败")[:1024],
+                            "retriable": bool(err.get("retryable")),
+                        }
+                    )
         failures = failures[:32]
         query_summary = f"creator:{platform}:{creator_id}"[:1000]
         try:
@@ -364,6 +426,8 @@ class ResourceService:
                 platform_runs=platform_runs,
                 idempotency_key=idempotency_key,
                 request_hash=request_hash,
+                idempotency_scope=scope,
+                idempotency_action="resource.browse_creator",
             )
         except KeyError as exc:
             raise DomainError("FLOW_NOT_FOUND", "Flow 不存在") from exc
@@ -375,6 +439,116 @@ class ResourceService:
             if str(exc) == "task_version_conflict":
                 raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化") from exc
             raise DomainError("FLOW_STATE_CONFLICT", "浏览状态冲突") from exc
+
+    def inspect(
+        self,
+        flow_id: str,
+        idempotency_key: str,
+        resource_id: str,
+    ) -> dict[str, Any]:
+        """Inspect one server-owned resource and persist its Resolution."""
+
+        self._require_flow(flow_id)
+        self._validate_idempotency_key(idempotency_key)
+        profile_version = INSPECTION_PROFILE_VERSION
+        request_hash = self._request_hash(
+            {
+                "flow_id": flow_id,
+                "resource_id": resource_id,
+                "profile_version": profile_version,
+            }
+        )
+        scope = f"resource_inspect:{flow_id}"
+
+        # This lock is deliberately separate from the mutation lock.  It
+        # covers the replay/cache/network/save sequence so two calls sharing
+        # an idempotency key cannot both perform an external inspection.
+        with self._inspection_lock:
+            replay = self._idempotency_replay(scope, idempotency_key, request_hash)
+            if replay is not None:
+                return self._public_resolution_output(
+                    flow_id, resource_id, replay
+                )
+
+            resources = self.store.get_resources(flow_id, [resource_id])
+            if len(resources) != 1 or resources[0].get("resource_id") != resource_id:
+                # get_resources intentionally filters by Flow.  Do not reveal
+                # whether a matching ID belongs to another Flow.
+                raise DomainError("RESOURCE_NOT_FOUND", "资源不存在")
+            resource = resources[0]
+            fingerprint = source_fingerprint(resource)
+
+            cached = self.store.get_cached_resolution(
+                flow_id,
+                resource_id,
+                profile_version,
+                fingerprint,
+            )
+            if cached is not None:
+                resolved_resource = self._ensure_representation_ids(
+                    cached.get("resolved") or cached.get("resolved_resource") or {}
+                )
+                inspection = self._with_cache_status(
+                    cached.get("inspection") or {}, "hit"
+                )
+                failures = cached.get("failures") or []
+                try:
+                    saved = self.store.save_resolution(
+                        flow_id,
+                        resource_id,
+                        profile_version,
+                        fingerprint,
+                        cached["resolution_status"],
+                        resolved=resolved_resource,
+                        inspection=inspection,
+                        failures=failures,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        inspected_at=cached.get("inspected_at"),
+                    )
+                except ValueError as exc:
+                    if str(exc) == "idempotency_conflict":
+                        raise DomainError(
+                            "IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求"
+                        ) from exc
+                    raise
+                return self._public_resolution_output(
+                    flow_id, resource_id, saved
+                )
+
+            # The router preserves FEATURE_NOT_SUPPORTED as a domain error.
+            # Unsupported platforms are not converted into a generic network
+            # request and are not written as a false successful Resolution.
+            result = self.inspection_router.inspect(resource)
+            payload = result.to_mapping()
+            resolved_resource = self._ensure_representation_ids(
+                payload.get("resolved_resource") or {}
+            )
+            try:
+                saved = self.store.save_resolution(
+                    flow_id,
+                    resource_id,
+                    profile_version,
+                    fingerprint,
+                    payload["resolution_status"],
+                    resolved=resolved_resource,
+                    inspection=payload.get("inspection") or {},
+                    failures=payload.get("failures") or [],
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                    inspected_at=(payload.get("inspection") or {}).get("inspected_at"),
+                )
+            except KeyError as exc:
+                raise DomainError("RESOURCE_NOT_FOUND", "资源不存在") from exc
+            except (LookupError, PermissionError) as exc:
+                raise DomainError("RESOURCE_NOT_FOUND", "资源不存在") from exc
+            except ValueError as exc:
+                if str(exc) == "idempotency_conflict":
+                    raise DomainError(
+                        "IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求"
+                    ) from exc
+                raise
+            return self._public_resolution_output(flow_id, resource_id, saved)
 
 
     def presentation_save(
@@ -670,6 +844,9 @@ class ResourceService:
         selection = self.store.get_selection(flow_id)
         plan = self.store.get_latest_plan_for_flow(flow_id)
         job = self.store.get_latest_job_for_flow(flow_id)
+        resolutions = self.store.list_latest_resolutions_for_flow(
+            flow_id, include_unresolved=True
+        )
 
         current_selection = None
         if (
@@ -737,6 +914,7 @@ class ResourceService:
         if job is not None:
             job_plan = self.store.get_plan(job["plan_id"])
             if job_plan is not None:
+                job_bundles = self.store.get_asset_bundles_for_job(job["job_id"])
                 ready_asset_ids = []
                 for asset_id in job["asset_ids"]:
                     asset = self.store.get_asset(asset_id)
@@ -753,10 +931,19 @@ class ResourceService:
                     "status": job["status"],
                     "progress_percent": int(job["progress"]),
                     "asset_ids": ready_asset_ids,
-                    "failures": [job["error"]] if job.get("error") else [],
+                    "bundle_ids": [bundle["bundle_id"] for bundle in job_bundles],
+                    "failures": self._public_bundle_failures(job_bundles)[:32]
+                    or (
+                        [self._public_stored_job_error(job.get("error"))]
+                        if self._public_stored_job_error(job.get("error"))
+                        else []
+                    ),
                     "created_at": job["created_at"],
                     "updated_at": job["updated_at"],
                 }
+                completion = self._job_completion(job, job_bundles)
+                if completion is not None:
+                    current_job["completion"] = completion
 
         current_presentation = None
         if presentation is not None:
@@ -775,9 +962,14 @@ class ResourceService:
                 "created_at": presentation["created_at"],
             }
 
-        allowed = ["resource_flow_status", "resource_search", "resource_library_search"]
+        allowed = [
+            "resource_flow_status",
+            "resource_search",
+            "resource_browse_creator",
+            "resource_library_search",
+        ]
         if result_set is not None:
-            allowed.append("resource_presentation_save")
+            allowed.extend(["resource_presentation_save", "resource_inspect"])
         if current_presentation is not None:
             allowed.append("resource_selection_save")
         if current_selection is not None and current_selection["stage"] == "selected":
@@ -811,6 +1003,23 @@ class ResourceService:
                     "search_run_id": result_set["search_run_id"],
                     "result_set_id": result_set["result_set_id"],
                     "result_version": int(result_set["result_version"]),
+                    "mode": result_set.get("mode") or "replace",
+                    **(
+                        {"base_result_set_id": result_set["base_result_set_id"]}
+                        if result_set.get("base_result_set_id")
+                        else {}
+                    ),
+                    "round": int(result_set.get("round") or 1),
+                    **(
+                        {"provenance": result_set["provenance"]}
+                        if result_set.get("provenance")
+                        else {}
+                    ),
+                    **(
+                        {"coverage": result_set["coverage"]}
+                        if result_set.get("coverage")
+                        else {}
+                    ),
                     "status": result_set["status"],
                     "platform_runs": result_set.get("platform_runs") or [],
                     "candidates": [
@@ -828,6 +1037,14 @@ class ResourceService:
             "current_selection": current_selection,
             "current_plan": current_plan,
             "current_job": current_job,
+            "current_resolutions": [
+                self._public_resolution_output(
+                    flow_id,
+                    str(resolution["resource_id"]),
+                    resolution,
+                )
+                for resolution in resolutions[:50]
+            ],
             "allowed_next_actions": list(dict.fromkeys(allowed)),
             "created_at": flow["created_at"],
             "updated_at": flow["updated_at"],
@@ -841,12 +1058,17 @@ class ResourceService:
         plan = self.store.get_plan(job["plan_id"])
         if plan is None:
             raise DomainError("PLAN_NOT_FOUND", "任务对应的下载计划不存在")
+        bundles = self.store.get_asset_bundles_for_job(job_id)
         assets = []
         for asset_id in job["asset_ids"]:
             asset = self.store.get_asset(asset_id)
             if asset is not None and asset["status"] == "ready":
                 assets.append(self._public_asset(asset))
-        return {
+        failures = self._public_bundle_failures(bundles)[:50]
+        if not failures and job["error"]:
+            public_error = self._public_stored_job_error(job["error"])
+            failures = [public_error] if public_error is not None else []
+        result = {
             "job_id": job_id,
             "flow_id": job["flow_id"],
             "plan_id": plan["plan_id"],
@@ -857,14 +1079,18 @@ class ResourceService:
             "plan_digest": plan.get("plan_digest") or "",
             "status": job["status"],
             "progress": {
-                "completed_items": len(assets),
+                "completed_items": min(len(bundles), len(plan["resource_ids"])),
                 "total_items": len(plan["resource_ids"]),
                 "percent": job["progress"],
             },
             "assets": assets,
-            "failures": [job["error"]] if job["error"] else [],
+            "failures": failures,
             "updated_at": job["updated_at"],
         }
+        completion = self._job_completion(job, bundles)
+        if completion is not None:
+            result["completion"] = completion
+        return result
 
     def job_cancel(
         self,
@@ -1232,6 +1458,16 @@ class ResourceService:
                 "tags": item.get("tags") or [],
                 "archived_at": item["archived_at"],
             }
+            if item.get("bundle_id"):
+                public_item.update(
+                    {
+                        "bundle_id": item["bundle_id"],
+                        "role": item["role"],
+                        "order": int(item["position"]) + 1,
+                        "bundle_completion": item.get("bundle_completion")
+                        or item["completion"],
+                    }
+                )
             if primary_domain:
                 public_item["primary_domain"] = primary_domain
                 public_item["primary_domain_display_name"] = domain_display_name(
@@ -1285,6 +1521,7 @@ class ResourceService:
             result["primary_domain_display_name"] = "待分类"
         if archive.get("relative_path"):
             result["relative_path"] = archive["relative_path"]
+        result.update(self._bundle_relation_for_asset(str(asset["asset_id"])))
         return result
 
     def _normalize_library_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
@@ -1580,6 +1817,29 @@ class ResourceService:
         except ImportError:
             pass
 
+    def _acquisition_router_for_jobs(self) -> AcquisitionRouter:
+        """Build the private Router lazily after all provider seams are known."""
+
+        if self.acquisition_router is not None:
+            return self.acquisition_router
+
+        materializer = None
+        if not self._download_provider_was_injected:
+            from .acquisition.web_materializer import WebMaterializer
+
+            # Let the materializer create a bounded fetcher for each response
+            # so page and image requests receive their own tighter byte caps.
+            materializer = WebMaterializer(settings=self.settings)
+        self.acquisition_router = AcquisitionRouter(
+            direct_provider=self.download_provider,
+            platform_providers=self._platform_downloaders,
+            web_materializer=materializer,
+            # This dependency is inert unless a trusted internal caller asks
+            # for WEB_CAPTURE explicitly; webpage plans map to static materialization.
+            browser_capture=self.rendering_downloader,
+        )
+        return self.acquisition_router
+
     def _run_download_job(self, job_id: str, cancel_event: threading.Event) -> None:
         job = self.store.get_job(job_id)
         if job is None:
@@ -1594,69 +1854,195 @@ class ResourceService:
             return
         resources = self.store.get_resources(job["flow_id"], plan["resource_ids"])
         asset_ids: list[str] = []
+        usable_primary_count = 0
+        processed_count = 0
+        saw_partial = False
         try:
             self.store.update_job(job_id, status="running", progress=0)
             for index, resource in enumerate(resources):
                 if cancel_event.is_set():
                     raise DomainError("JOB_CANCELLED", "任务已取消")
-                platform = str(resource.get("platform") or "")
-                strategy = str(plan["options"]["strategy"])
-                # Web-page resources are rendered into visual-archive files
-                # (MHTML/PDF/PNG) rather than captured as raw HTTP bodies,
-                # because their real content is produced by JavaScript.
-                if strategy == "webpage" and self.rendering_downloader is not None:
-                    # Surface the user's container preference to the renderer so
-                    # it knows whether to also emit PDF / full-page PNG.
-                    render_resource = dict(resource)
-                    render_resource["preferred_container"] = str(
+                strategy = AcquisitionStrategy.from_plan(
+                    str(plan["options"].get("strategy") or ""), resource
+                )
+                # A caller that injects the legacy download provider owns the
+                # complete test/deployment stack.  Preserve that seam by using
+                # its direct adapter unless it also supplied an Acquisition
+                # Router.  Production defaults still materialize webpages.
+                if (
+                    self._download_provider_was_injected
+                    and self.acquisition_router is None
+                    and strategy is AcquisitionStrategy.WEB_MATERIALIZE
+                ):
+                    strategy = AcquisitionStrategy.DIRECT_FILE
+                request = AcquisitionRequest(
+                    job_id=job_id,
+                    resource=resource,
+                    strategy=strategy,
+                    preferred_container=str(
                         plan["options"].get("preferred_container") or "html"
-                    )
-                    dl_result = self.rendering_downloader.download(
-                        render_resource, job_id, strategy,
-                        int(plan["options"]["max_bytes"]), cancel_event,
-                    )
-                else:
-                    # Route to platform-specific downloader if available.
-                    downloader = self._platform_downloaders.get(platform)
-                    if downloader is not None:
-                        dl_result = downloader.download(
-                            resource, job_id, strategy,
-                            int(plan["options"]["max_bytes"]), cancel_event,
-                        )
+                    ),
+                    max_bytes=int(plan["options"]["max_bytes"]),
+                    allow_safe_fallback=bool(
+                        plan["options"].get("allow_safe_fallback", True)
+                    ),
+                    cancel_event=cancel_event,
+                    jobs_root=self.settings.jobs_dir.resolve(),
+                )
+                acquisition = self._acquisition_router_for_jobs().acquire(request)
+                if not acquisition.ok or acquisition.bundle is None:
+                    failure = acquisition.failure
+                    if failure is None:
+                        failure_code = "DOWNLOAD_FAILED"
+                        failure_message = "获取任务没有产生可用结果"
+                        failure_retryable = False
+                        failure_details: dict[str, Any] = {}
                     else:
-                        dl_result = self.download_provider.download(
-                            resource,
-                            job_id,
-                            strategy,
-                            int(plan["options"]["max_bytes"]),
-                            cancel_event,
+                        failure_code = failure.code
+                        failure_message = failure.message
+                        failure_retryable = failure.retryable
+                        failure_details = dict(failure.details)
+                    if failure_code == "JOB_CANCELLED" or cancel_event.is_set():
+                        raise DomainError("JOB_CANCELLED", "任务已取消")
+                    self.store.persist_failed_asset_bundle(
+                        job_id,
+                        resource["resource_id"],
+                        failure={
+                            "code": failure_code,
+                            "message": failure_message,
+                            "retriable": failure_retryable,
+                            "details": failure_details,
+                            "item_position": 0,
+                            "item_role": "primary",
+                        },
+                    )
+                    processed_count += 1
+                    saw_partial = True
+                    progress = int(
+                        (processed_count / max(len(resources), 1)) * 100
+                    )
+                    current = self.store.get_job(job_id) or job
+                    asset_ids = list(current.get("asset_ids") or [])
+                    self.store.update_job(
+                        job_id, progress=progress, asset_ids=asset_ids
+                    )
+                    if failure_code in ACQUISITION_ABORT_CODES:
+                        raise DomainError(
+                            failure_code,
+                            failure_message,
+                            retryable=failure_retryable,
+                            details=failure_details,
                         )
-                # Normalise to list — platform downloaders may return multiple files.
-                dl_results = dl_result if isinstance(dl_result, list) else [dl_result]
-                for result in dl_results:
+                    continue
+                artifacts = acquisition.bundle.artifacts
+                if acquisition.strategy is AcquisitionStrategy.WEB_MATERIALIZE:
+                    # The portable ZIP remains the one public Asset for a web
+                    # materialization.  Its internal HTML/Markdown/image files
+                    # are members of that container, not separate public
+                    # AssetBundle members.
+                    primary = acquisition.bundle.primary
+                    artifacts = (primary,) if primary is not None else ()
+                item_specs: list[dict[str, Any]] = []
+                for position, result in enumerate(artifacts):
                     try:
                         ensure_within_root(result.path.resolve(), self.settings.jobs_dir)
                     except PolicyError as exc:
                         raise DomainError("POLICY_DENIED", str(exc)) from exc
                     if not result.path.is_file():
                         raise DomainError("CONTENT_VALIDATION_FAILED", "下载器没有产生受控文件")
-                    asset = self.store.create_asset(
-                        job_id,
-                        resource["resource_id"],
-                        result.path.resolve(),
-                        result.byte_size,
-                        result.media_type,
-                        result.sha256,
-                        result.filename,
+                    artifact_data = result.to_dict(include_path=False)
+                    role = str(result.role)
+                    if result.primary:
+                        role = "primary"
+                    elif role not in PERSISTED_ASSET_ROLES:
+                        role = "attachment"
+                    metadata = dict(artifact_data.get("metadata") or {})
+                    if result.item_key:
+                        metadata["item_key"] = result.item_key
+                    item_specs.append(
+                        {
+                            "position": position,
+                            "role": role,
+                            "status": "ready",
+                            "required": bool(result.required or result.primary),
+                            "metadata": metadata,
+                            "local_path": str(result.path.resolve()),
+                            "byte_size": result.byte_size,
+                            "media_type": result.media_type,
+                            "sha256": result.sha256,
+                            "filename": result.filename,
+                        }
                     )
-                    asset_ids.append(asset["asset_id"])
-                progress = int(((index + 1) / max(len(resources), 1)) * 100)
+                failure_specs: list[dict[str, Any]] = []
+                for failure in acquisition.item_failures:
+                    position = len(item_specs)
+                    role = failure.role or "attachment"
+                    if role not in PERSISTED_ASSET_ROLES or role == "primary":
+                        role = "attachment"
+                    metadata = dict(failure.metadata)
+                    metadata["item_key"] = failure.item_key
+                    item_specs.append(
+                        {
+                            "position": position,
+                            "role": role,
+                            "status": "failed",
+                            "required": bool(failure.required),
+                            "metadata": metadata,
+                        }
+                    )
+                    failure_specs.append(
+                        {
+                            "code": failure.code,
+                            "message": failure.message,
+                            "retriable": failure.retryable,
+                            "details": dict(failure.details),
+                            "item_position": position,
+                            "item_role": role,
+                        }
+                    )
+                if not item_specs or not any(
+                    item["role"] == "primary" and item["status"] == "ready"
+                    for item in item_specs
+                ):
+                    raise DomainError(
+                        "CONTENT_VALIDATION_FAILED",
+                        "获取任务没有产生可持久化的 primary 资产",
+                    )
+                bundle_completion = (
+                    "partial" if failure_specs or acquisition.completion == "partial" else "complete"
+                )
+                self.store.persist_asset_bundle(
+                    job_id,
+                    resource["resource_id"],
+                    item_specs=item_specs,
+                    failures=failure_specs,
+                    completion=bundle_completion,
+                )
+                usable_primary_count += 1
+                processed_count += 1
+                saw_partial = saw_partial or bundle_completion == "partial"
+                current = self.store.get_job(job_id) or job
+                asset_ids = list(current.get("asset_ids") or [])
+                progress = int((processed_count / max(len(resources), 1)) * 100)
                 self.store.update_job(job_id, progress=progress, asset_ids=asset_ids)
             if cancel_event.is_set():
                 raise DomainError("JOB_CANCELLED", "任务已取消")
-            self.store.update_job(
-                job_id, status="succeeded", progress=100, asset_ids=asset_ids
-            )
+            if usable_primary_count:
+                self.store.update_job(
+                    job_id, status="succeeded", progress=100, asset_ids=asset_ids
+                )
+            else:
+                self.store.update_job(
+                    job_id,
+                    status="failed",
+                    progress=100,
+                    asset_ids=asset_ids,
+                    error={
+                        "code": "DOWNLOAD_FAILED",
+                        "message": "所选资源均未产生可用 primary 资产",
+                        "retriable": bool(saw_partial),
+                    },
+                )
         except DomainError as exc:
             self.store.quarantine_job_assets(job_id)
             status = "cancelled" if exc.code == "JOB_CANCELLED" or cancel_event.is_set() else "failed"
@@ -1709,8 +2095,73 @@ class ResourceService:
         return result
 
     @staticmethod
-    def _public_asset(asset: dict[str, Any]) -> dict[str, Any]:
+    def _public_search_snapshot(value: dict[str, Any]) -> dict[str, Any]:
+        """Return a contract-safe copy of a durable search result."""
+
+        result = json.loads(json.dumps(value))
+        if result.get("base_result_set_id") is None:
+            result.pop("base_result_set_id", None)
+        return result
+
+    @staticmethod
+    def _ensure_representation_ids(value: Any) -> dict[str, Any]:
+        """Copy a resolved resource and assign only server-owned IDs."""
+
+        if not isinstance(value, dict):
+            raise DomainError("INTERNAL_ERROR", "检查器返回的资源解析结果无效")
+        resolved = dict(value)
+        raw_representations = resolved.get("representations")
+        if not isinstance(raw_representations, list):
+            return resolved
+        representations: list[dict[str, Any]] = []
+        for raw_representation in raw_representations:
+            if not isinstance(raw_representation, dict):
+                raise DomainError("INTERNAL_ERROR", "检查器返回的表示形式无效")
+            representation = dict(raw_representation)
+            representation_id = representation.get("representation_id")
+            if not isinstance(representation_id, str) or not REPRESENTATION_ID_PATTERN.fullmatch(
+                representation_id
+            ):
+                representation["representation_id"] = new_id("repr")
+            representations.append(representation)
+        resolved["representations"] = representations
+        return resolved
+
+    @staticmethod
+    def _with_cache_status(value: Any, cache_status: str) -> dict[str, Any]:
+        inspection = dict(value) if isinstance(value, dict) else {}
+        inspection["cache_status"] = cache_status
+        return inspection
+
+    @staticmethod
+    def _public_resolution_output(
+        flow_id: str, resource_id: str, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Translate Store's private Resolution row to the public shape."""
+
+        resolved_resource = value.get("resolved_resource")
+        if not isinstance(resolved_resource, dict):
+            resolved_resource = value.get("resolved")
+        if not isinstance(resolved_resource, dict):
+            resolved_resource = {}
+        inspection = value.get("inspection")
+        if not isinstance(inspection, dict):
+            inspection = {}
+        failures = value.get("failures")
+        if not isinstance(failures, list):
+            failures = []
         return {
+            "flow_id": flow_id,
+            "resource_id": resource_id,
+            "resolution_id": value.get("resolution_id"),
+            "resolution_status": value.get("resolution_status"),
+            "resolved_resource": json.loads(json.dumps(resolved_resource)),
+            "inspection": json.loads(json.dumps(inspection)),
+            "failures": json.loads(json.dumps(failures)),
+        }
+
+    def _public_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
+        result = {
             "asset_id": asset["asset_id"],
             "resource_id": asset["resource_id"],
             "size_bytes": asset["byte_size"],
@@ -1718,6 +2169,348 @@ class ResourceService:
             "sha256": asset["sha256"],
             "validation_status": "validated",
             "created_at": asset["created_at"],
+        }
+        result.update(self._bundle_relation_for_asset(str(asset["asset_id"])))
+        return result
+
+    def _bundle_relation_for_asset(self, asset_id: str) -> dict[str, Any]:
+        bundle = self.store.get_asset_bundle_for_asset(asset_id)
+        if bundle is None:
+            return {}
+        for item in bundle.get("items") or []:
+            if item.get("asset_id") != asset_id:
+                continue
+            return {
+                "bundle_id": bundle["bundle_id"],
+                "role": item["role"],
+                "order": int(item["position"]) + 1,
+                "bundle_completion": bundle["completion"],
+            }
+        return {}
+
+    @staticmethod
+    def _job_completion(
+        job: dict[str, Any], bundles: list[dict[str, Any]]
+    ) -> str | None:
+        if job.get("status") != "succeeded" or not bundles:
+            return None
+        if all(
+            bundle.get("status") == "succeeded"
+            and bundle.get("completion") == "complete"
+            for bundle in bundles
+        ):
+            return "complete"
+        return "partial"
+
+    @staticmethod
+    def _public_bundle_failures(
+        bundles: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        failures: list[dict[str, Any]] = []
+        for bundle in bundles:
+            items_by_id = {
+                item.get("bundle_item_id"): item
+                for item in bundle.get("items") or []
+            }
+            for failure in bundle.get("failures") or []:
+                item = items_by_id.get(failure.get("bundle_item_id")) or {}
+                code = str(failure.get("code") or "DOWNLOAD_FAILED")
+                public: dict[str, Any] = {
+                    "resource_id": bundle["resource_id"],
+                    "code": (
+                        code if code in PUBLIC_JOB_FAILURE_CODES else "DOWNLOAD_FAILED"
+                    ),
+                    "message": str(failure.get("message") or "资源项获取失败")[:1024],
+                    "retriable": bool(failure.get("retriable")),
+                    "bundle_id": bundle["bundle_id"],
+                }
+                if item:
+                    public["role"] = item["role"]
+                    public["order"] = int(item["position"]) + 1
+                    metadata = item.get("metadata") or {}
+                    if metadata.get("item_key"):
+                        public["item_key"] = str(metadata["item_key"])
+                failures.append(public)
+        return failures
+
+    @staticmethod
+    def _public_stored_job_error(error: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(error, dict):
+            return None
+        code = str(error.get("code") or "DOWNLOAD_FAILED")
+        return {
+            "code": code if code in PUBLIC_JOB_FAILURE_CODES else "DOWNLOAD_FAILED",
+            "message": str(error.get("message") or "资源获取失败")[:1024],
+            "retriable": bool(error.get("retriable")),
+        }
+
+    def _public_retrieval_candidates(
+        self,
+        raw_resources: list[dict[str, Any]],
+        *,
+        default_platform: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Normalize, identify, and expose search candidates.
+
+        URL policy validation and title filtering intentionally happen before
+        identity resolution.  The retrieval layer then owns platform-aware
+        identity matching and conservative enrichment; public IDs are minted
+        only after the de-duplicated prefix has been selected.
+        """
+
+        internal_candidates = self._normalise_retrieval_candidates(
+            raw_resources,
+            default_platform=default_platform,
+        )
+        deduplicated = deduplicate_candidates(internal_candidates, limit=limit)
+        return self._materialise_retrieval_candidates(deduplicated)
+
+    def _normalise_retrieval_candidates(
+        self,
+        raw_resources: list[dict[str, Any]],
+        *,
+        default_platform: str,
+    ) -> list[CandidateResourceInternal]:
+        """Validate adapter candidates without minting public IDs."""
+
+        internal_candidates: list[CandidateResourceInternal] = []
+        for raw in raw_resources:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                source_url = canonical_http_url(str(raw.get("source_url") or ""))
+            except DomainError:
+                continue
+            title = str(raw.get("title") or "").strip()
+            if not title:
+                continue
+
+            normalized = dict(raw)
+            # Adapter-provided IDs are never authority-bearing public IDs.
+            normalized.pop("resource_id", None)
+            normalized["platform"] = str(raw.get("platform") or default_platform)
+            normalized["title"] = title
+            normalized["source_url"] = source_url
+            # CandidateResourceInternal prefers canonical_url when present;
+            # make the already policy-checked URL the only locator it sees.
+            normalized["canonical_url"] = source_url
+            normalized["resource_type"] = self._normalise_resource_type(
+                str(raw.get("resource_type") or "other")
+            )
+            metadata = raw.get("metadata")
+            normalized["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
+            internal_candidates.append(
+                CandidateResourceInternal.from_mapping(normalized)
+            )
+        return internal_candidates
+
+    def _stored_retrieval_candidates(
+        self,
+        result_set: dict[str, Any] | None,
+    ) -> list[CandidateResourceInternal]:
+        """Rehydrate the private identity evidence of an immutable snapshot."""
+
+        if result_set is None:
+            return []
+        candidates: list[CandidateResourceInternal] = []
+        for resource in result_set.get("resources") or []:
+            if not isinstance(resource, dict):
+                continue
+            value = {
+                "platform": resource.get("platform"),
+                "title": resource.get("title"),
+                "source_url": resource.get("source_url"),
+                "resource_type": resource.get("resource_type"),
+                "summary": resource.get("summary"),
+                "metadata": resource.get("metadata") or {},
+            }
+            identity = resource.get("identity")
+            if isinstance(identity, dict):
+                value.update(identity)
+            candidates.append(CandidateResourceInternal.from_mapping(value))
+        return candidates
+
+    @staticmethod
+    def _retrieval_provenance(
+        base_candidates: list[CandidateResourceInternal],
+        incoming_candidates: list[CandidateResourceInternal],
+    ) -> dict[str, int]:
+        """Compute deterministic, recomputable cross-round information gain."""
+
+        base_unique = deduplicate_candidates(base_candidates)
+        round_unique: list[CandidateResourceInternal] = []
+        duplicate_of_base = 0
+        duplicate_within_round = 0
+        identity_unknown = 0
+        for candidate in incoming_candidates:
+            identity = resolve_identity(candidate)
+            if identity.key is None:
+                identity_unknown += 1
+            if any(
+                identities_match(resolve_identity(existing), identity)
+                for existing in base_unique
+            ):
+                duplicate_of_base += 1
+                continue
+            if any(
+                identities_match(resolve_identity(existing), identity)
+                for existing in round_unique
+            ):
+                duplicate_within_round += 1
+                continue
+            round_unique.append(candidate)
+        duplicate_count = duplicate_of_base + duplicate_within_round
+        new_unique_count = len(round_unique)
+        return {
+            "raw_candidate_count": len(incoming_candidates),
+            "new_unique_count": new_unique_count,
+            "duplicate_count": duplicate_count,
+            "duplicate_of_base_count": duplicate_of_base,
+            "duplicate_within_round_count": duplicate_within_round,
+            "identity_unknown_count": identity_unknown,
+            "new_displayable_count": new_unique_count,
+        }
+
+    @staticmethod
+    def _annotate_search_directions(
+        search_tasks: list[dict[str, Any]],
+        platform_runs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Attach semantic SearchDirection labels without changing providers."""
+
+        directions_by_query: dict[tuple[str, str], list[str]] = {}
+        directions_by_platform: dict[str, list[str]] = {}
+        for task in search_tasks:
+            platform = str(task.get("platform") or "")
+            direction = str(task.get("direction") or "").strip()
+            if not direction:
+                continue
+            if direction not in directions_by_platform.setdefault(platform, []):
+                directions_by_platform[platform].append(direction)
+            for query in task.get("queries") or []:
+                query_text = str((query or {}).get("query") or "").strip()
+                key = (platform, query_text)
+                if direction not in directions_by_query.setdefault(key, []):
+                    directions_by_query[key].append(direction)
+
+        annotated: list[dict[str, Any]] = []
+        for raw_run in platform_runs:
+            run = dict(raw_run) if isinstance(raw_run, dict) else {}
+            platform = str(run.get("platform") or "")
+            platform_directions = directions_by_platform.get(platform, [])
+            if len(platform_directions) == 1:
+                run["direction"] = platform_directions[0][:256]
+            query_runs: list[dict[str, Any]] = []
+            for raw_query_run in run.get("query_runs") or []:
+                query_run = (
+                    dict(raw_query_run)
+                    if isinstance(raw_query_run, dict)
+                    else {}
+                )
+                query_text = str(query_run.get("query") or "").strip()
+                query_directions = directions_by_query.get((platform, query_text), [])
+                if len(query_directions) == 1:
+                    query_run["direction"] = query_directions[0][:256]
+                query_runs.append(query_run)
+            run["query_runs"] = query_runs
+            annotated.append(run)
+        return annotated
+
+    def _materialise_retrieval_candidates(
+        self,
+        candidates: list[CandidateResourceInternal],
+    ) -> list[dict[str, Any]]:
+        """Mint fresh ResultSet-bound IDs while retaining private identity."""
+
+        resources: list[dict[str, Any]] = []
+        for candidate in candidates:
+            # to_mapping keeps the public-facing adapter shape while retaining
+            # only facts merged by the internal retrieval model.  The random
+            # resource_id is deliberately created at this final boundary.
+            candidate_mapping = candidate.to_mapping()
+            resources.append(
+                {
+                    "resource_id": new_id("res"),
+                    "platform": candidate_mapping["platform"],
+                    "title": candidate_mapping["title"],
+                    "source_url": candidate_mapping["source_url"],
+                    "resource_type": self._normalise_resource_type(
+                        str(candidate_mapping.get("resource_type") or "other")
+                    ),
+                    "summary": candidate_mapping.get("summary"),
+                    "metadata": dict(candidate_mapping.get("metadata") or {}),
+                    "identity": resolve_identity(candidate).to_mapping(),
+                    "identity_rules_version": "identity-v1",
+                }
+            )
+        return resources
+
+    @staticmethod
+    def _fact_coverage(
+        resources: list[dict[str, Any]],
+        platform_runs: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Report only server-observed facts; semantic sufficiency stays in Skill."""
+
+        type_counts: dict[str, int] = {}
+        platforms: set[str] = set()
+        identity_unknown = 0
+        for resource in resources:
+            resource_type = str(resource.get("resource_type") or "other")
+            type_counts[resource_type] = type_counts.get(resource_type, 0) + 1
+            platforms.add(str(resource.get("platform") or "generic"))
+            identity = resource.get("identity")
+            if not isinstance(identity, dict) or len(identity) <= 1:
+                identity_unknown += 1
+
+        gaps: list[dict[str, Any]] = []
+        if not resources:
+            gaps.append(
+                {
+                    "dimension": "source",
+                    "reason": "没有可展示候选",
+                    "count": 0,
+                }
+            )
+        if failures:
+            gaps.append(
+                {
+                    "dimension": "source",
+                    "reason": "一个或多个检索来源失败",
+                    "count": len(failures),
+                }
+            )
+        if resources:
+            gaps.append(
+                {
+                    "dimension": "inspection",
+                    "reason": "候选尚未完成详情检查",
+                    "count": len(resources),
+                }
+            )
+        if identity_unknown:
+            gaps.append(
+                {
+                    "dimension": "availability",
+                    "reason": "部分候选缺少稳定身份事实",
+                    "count": identity_unknown,
+                }
+            )
+        return {
+            "status": "empty" if not resources else ("partial" if gaps else "covered"),
+            "candidate_count": len(resources),
+            "platform_count": len(platforms or {
+                str(run.get("platform") or "generic")
+                for run in platform_runs
+                if isinstance(run, dict)
+            }),
+            "resource_types": [
+                {"resource_type": key, "count": type_counts[key]}
+                for key in sorted(type_counts)
+            ],
+            "gaps": gaps,
         }
 
     @staticmethod

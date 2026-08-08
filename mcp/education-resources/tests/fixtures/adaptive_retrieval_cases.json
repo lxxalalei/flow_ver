@@ -1,0 +1,113 @@
+[
+  {
+    "name": "exploration_starts_with_replan",
+    "task": {"goal": {"topic": "太阳系入门"}},
+    "rounds": [],
+    "expected": "Replan"
+  },
+  {
+    "name": "missing_goal_clarifies",
+    "task": {"goal": {"topic": ""}},
+    "rounds": [],
+    "expected": "Clarify"
+  },
+  {
+    "name": "curriculum_sync_missing_scope_clarifies",
+    "task": {"goal": {"topic": "教材同步练习"}},
+    "rounds": [],
+    "expected": "Clarify"
+  },
+  {
+    "name": "conflicting_constraints_clarify",
+    "task": {"goal": {"topic": "数学资料"}, "conflicts": ["免费和付费同时必须"]},
+    "rounds": [],
+    "expected": "Clarify"
+  },
+  {
+    "name": "one_available_article_can_present",
+    "task": {"goal": {"topic": "恐龙化石"}},
+    "rounds": [{"round": 1, "candidates": [{"title": "恐龙化石图解", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/fossil"}]}],
+    "expected": "Present"
+  },
+  {
+    "name": "parent_reference_uses_resource_target",
+    "task": {"goal": {"topic": "亲子阅读方法"}, "user_role": "child", "resource_target": "parent"},
+    "rounds": [{"round": 1, "candidates": [{"title": "家长阅读指导", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/parent", "resource_target_match": true}]}],
+    "expected": "Present"
+  },
+  {
+    "name": "multimodal_forms_covered",
+    "task": {"goal": {"topic": "太阳系"}, "required_forms": ["article", "video"]},
+    "rounds": [{"round": 1, "candidates": [{"title": "太阳系文章", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/solar"}, {"title": "太阳系视频", "platform": "bilibili", "resource_type": "video", "source_url": "https://www.bilibili.com/video/BV1Golden"}]}],
+    "expected": "Present"
+  },
+  {
+    "name": "missing_required_form_replans",
+    "task": {"goal": {"topic": "太阳系视频"}, "required_forms": ["video"]},
+    "rounds": [{"round": 1, "candidates": [{"title": "只有文章", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/article-only"}]}],
+    "expected": "Replan"
+  },
+  {
+    "name": "inspection_gap_replans",
+    "task": {"goal": {"topic": "可打印实验单"}, "inspection_required": true},
+    "rounds": [{"round": 1, "candidates": [{"title": "实验单候选", "platform": "generic", "resource_type": "document", "source_url": "https://example.test/sheet"}]}],
+    "expected": "Replan"
+  },
+  {
+    "name": "source_failure_replans",
+    "task": {"goal": {"topic": "古诗文讲解"}},
+    "rounds": [{"round": 1, "source_results": [{"source": "generic", "status": "failed", "failure_count": 1}]}],
+    "expected": "Replan"
+  },
+  {
+    "name": "authentication_boundary_clarifies",
+    "task": {"goal": {"topic": "课程视频"}},
+    "rounds": [{"round": 1, "source_results": [{"source": "smartedu", "status": "auth_required", "failure_count": 1}]}],
+    "expected": "Clarify"
+  },
+  {
+    "name": "policy_boundary_stops_with_gap",
+    "task": {"goal": {"topic": "受限资料"}},
+    "rounds": [{"round": 1, "source_results": [{"source": "generic", "status": "policy_blocked", "failure_count": 1}]}],
+    "expected": "StopWithGap"
+  },
+  {
+    "name": "unsupported_boundary_stops_with_gap",
+    "task": {"goal": {"topic": "不支持的平台资源"}},
+    "rounds": [{"round": 1, "source_results": [{"source": "unknown", "status": "unsupported", "failure_count": 1}]}],
+    "expected": "StopWithGap"
+  },
+  {
+    "name": "duplicates_do_not_inflate_unique_count",
+    "task": {"goal": {"topic": "重复候选"}},
+    "rounds": [{"round": 1, "candidates": [{"title": "首见", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/same#one"}, {"title": "重复", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/same#two"}]}],
+    "expected": "Present",
+    "expected_unique": 1,
+    "expected_duplicates": 1
+  },
+  {
+    "name": "two_no_gain_rounds_stop",
+    "task": {"goal": {"topic": "冷门主题"}},
+    "rounds": [{"round": 1, "candidates": []}, {"round": 2, "candidates": []}],
+    "expected": "StopWithGap"
+  },
+  {
+    "name": "comprehensive_budget_is_four",
+    "task": {"goal": {"topic": "综合检索"}, "mode": "comprehensive"},
+    "rounds": [{"round": 1, "candidates": []}, {"round": 2, "candidates": []}, {"round": 3, "candidates": []}, {"round": 4, "candidates": []}],
+    "expected": "StopWithGap",
+    "expected_max_rounds": 4
+  },
+  {
+    "name": "hard_constraint_unknown_replans",
+    "task": {"goal": {"topic": "练习题"}, "constraints": [{"kind": "must", "value": "可打印"}]},
+    "rounds": [{"round": 1, "candidates": [{"title": "练习题候选", "platform": "generic", "resource_type": "document", "source_url": "https://example.test/practice"}]}],
+    "expected": "Replan"
+  },
+  {
+    "name": "user_role_does_not_imply_resource_target_fit",
+    "task": {"goal": {"topic": "儿童实验"}, "user_role": "parent", "resource_target": "child"},
+    "rounds": [{"round": 1, "candidates": [{"title": "实验候选", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/experiment"}]}],
+    "expected": "Replan"
+  }
+]

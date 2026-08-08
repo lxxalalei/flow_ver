@@ -2,7 +2,14 @@
 
 ## 从学习结果反推搜索
 
-先判断资源给谁用、希望使用后发生什么，再决定搜索词。不要逐字段拼接关键词，也不要从旧平台清单反推需求。
+先判断 `resource_target`、`goal` 和显式 `constraints`：资源给谁用，以及用户希望使用后发生什么。
+再决定搜索方向和查询。不要逐字段拼接关键词，也不要从旧平台清单反推需求。
+
+`SearchDirection` 是为覆盖一个明确的学习目标、使用结果或决策缺口而选择的探索路线，
+不是 query、platform 或 resource type。query 是执行文本，platform 是来源路线，resource
+type 是结果形态；三者都不能代替方向。`user_role` 只影响交互方式，不推导内容方向；
+方向由 `resource_target`、`goal` 和 `constraints` 决定。统一的多轮循环、轮次上限、Coverage、
+Gap 和 StopDecision 见 [`adaptive-retrieval.md`](adaptive-retrieval.md)。
 
 常见学习体验包括：
 
@@ -17,12 +24,19 @@
 
 ## 选择本轮方向
 
-- 用户明确限定形态或具体使用条件时遵循它。
-- 任务很窄且单一形态足以完成时，只搜一个方向。
-- 未限定形态时，优先选择能产生不同学习价值的 2 个方向；宽泛探索可考虑第 3 个。
-- `resource_search` 每次只产生一个待审查 ResultSet，不产生展示集合。先执行最重要的一条；其他方向可形成后续 ResultSet，但每次都必须独立审查、实际展示并提交 Presentation，不能混合不同 ResultSet。
-- 不为了形式多样而加入与目标无关的课程、练习或文件。
-- 当前用户身份只影响交互方式。搜索方向由资源对象、目标和显式约束决定。
+- 用户明确限定形态或具体使用条件时遵循它；任务很窄且单一形态足以完成时，只搜一个方向。
+- 首轮默认规划 1–2 个 `SearchDirection`。每个方向选择 2–3 个直接相关的平台路线，
+  每个平台 1–2 条 query；用户指定来源、硬约束或安全边界可以使数量更少。
+- 每条 query 的目标召回预算为 5–10 条；首轮所有方向的 `new_unique` 不超过 30。预算是
+  规划边界，不是实际计数；不得用 query 数量、候选数组长度或模型估算替代服务端 provenance。
+- 用户未限定形态时，优先选择能产生不同学习价值的方向；不为了形式多样加入无关的课程、
+  练习或文件。宽泛探索也受常规最多 3 轮、综合最多 4 轮限制。
+- `resource_search` 每次只产生一个待审查的不可变 ResultSet，不产生展示集合。首轮使用
+  `mode=replace`（省略即为 replace）；后续确需补齐 Gap 时使用 `mode=extend`，并传当前
+  ResultSet 的 `base_result_set_id`。extend 由 MCP 复制 base、跨轮去重并返回新的 ResultSet，
+  不得由模型手工拼接候选或混用旧 Presentation。
+- 当前用户身份只影响交互方式。搜索方向始终由 `resource_target`、`goal` 和 `constraints`
+  决定。
 
 ## 构造查询
 
@@ -41,7 +55,11 @@
 
 不要加入"优质、权威、高赞、精品、必看、儿童友好、适合孩子"等无法由搜索词保证的评价词。`儿童`、`小学生` 等资源对象或用户已给出的学段词可以使用；质量、内容门槛和可信度留给候选审查。
 
-同一目标需要换方向时，改变搜索任务本身，例如从"原理图解"换成"可跟做实验"，不要只替换近义词。
+同一目标需要换方向时，改变搜索任务本身，例如从“获得原理图解”改为“获得可跟做实验以
+关闭实践缺口”，不要只替换近义词。新方向必须说明它要关闭的 Gap。
+
+未知年龄或年级不默认追问，也不因此减少搜索范围。只有教材同步、册次匹配或其他明确需要
+定位学段的硬范围缺失时才澄清年级/册次；其余情况使用通用儿童安全和理解门槛审查。
 
 ### 可信站点定向搜索
 
@@ -82,6 +100,31 @@
 - 聚合页、转载和平台热度只能作为发现线索，不自动证明内容质量。
 - 用户指定来源是约束；当前 MCP 未接入时如实降级到公开网页，不伪造平台搜索。
 
+### 候选后的选择性核验
+
+搜索只产生 Candidate。候选展示前读取 `inspection-strategy.md`，只将高潜、差异关键、
+可用性不确定或下载前需要判断表示形态的少量候选送入 Inspection Gate；不要默认全量
+调用检查，也不要因 ResultSet 有 URL 就把 URL 传给 Skill 或工具。
+
+`resource_inspect` 只接受 `contract_version`、`flow_id`、`resource_id` 和
+`idempotency_key`。服务端从当前 Flow 解析来源并执行安全边界；Skill 不传 URL、路径、
+检查深度、批量 ID 或凭据，也不自行拼接 `resolution_status`、`availability` 或
+`representations`。检查失败、未支持或未执行时，继续按未核验 Candidate 审查，不把它写成
+已确认可用资源。
+
+如果用户只是探索“有哪些”，优先保留搜索广度；如果用户要推荐或准备下载，再把会改变
+选择的候选送入 Gate。完整决策表、失败恢复和用户用语见
+[`inspection-strategy.md`](inspection-strategy.md)。
+
+### 平台路线按需选择
+
+规划或比较具体平台时，读取 [`platform-capabilities.md`](platform-capabilities.md)，并以其中引用的
+mcp/education-resources/contracts/platforms/platform-registry.json 作为能力、认证和
+获取策略的机器权威。平台选择仍由目标、resource_target 和显式 constraints 决定：
+先选与本轮学习结果直接相关的少量路线，只有确有互补价值时才增加平台；不要因为注册表
+列出 16 个平台就无差别全搜。平台能力和平台名称只说明检索或获取路径，不构成相关性、
+可信度、儿童适用性或内容质量证据。
+
 ## 平台登录与搜索质量
 
 MCP 搜索执行层会自动从 SessionStore 读取已保存的平台登录态。大部分平台无需登录即可搜索；
@@ -89,37 +132,52 @@ MCP 搜索执行层会自动从 SessionStore 读取已保存的平台登录态�
 
 ### 平台登录分级
 
-| 层级 | 平台 | 无登录时 | 有登录时 |
+| registry auth mode / kind | 平台 | 处理方式 |
 |---|---|---|---|
-| 免登录 | smartedu, cctv, ximalaya, kepu, open163, baiduwenku, nlc, yixi, annas-archive, wechat, runoob, generic | 完全可用 | 影响不大 |
-| 登录增强 | bilibili, zhihu | 可用但结果可能更少 | 结果更全面 |
-| 登录必需 | douyin, weibo | 无法搜索 | 正常搜索 |
+| none / none | generic, cctv, yixi, kepu, baiduwenku, runoob, nlc, open163, annas-archive | 注册表不要求会话 |
+| optional / cookie | bilibili, zhihu, ximalaya, wechat | 先按公开路线搜索；是否需要登录以实际返回状态为准 |
+| optional / token | smartedu | 先按公开路线搜索；需要令牌时按结构化状态处理 |
+| required / cookie | douyin, weibo | 缺少合法会话时可能返回 AUTH_REQUIRED，按登录流程处理 |
+
+该分级只描述会话路由，不描述结果质量。平台的具体 resource types、creator browse 和
+专用 acquisition/webpage 回退按需查阅 platform-capabilities.md，不要在本节维护第二份
+平台能力清单。
 
 ### 何时提醒
 
 1. **不阻塞首次搜索**：即使用户未登录任何平台，也先执行搜索，给出已有结果。
-2. **结果不足时建议**：如果搜索结果明显偏少（如某平台返回 0-2 条）且该平台属于"登录增强"或"登录必需"，
-   提示"登录 XX 平台可以获得更多结果，是否现在登录？"
-3. **用户主动指定平台时**：如果用户明确要求搜某个平台（如"去微博搜"）但该平台未登录，
-   直接提醒需要登录。
+2. **结果不足时建议**：如果搜索结果明显偏少（如某平台返回 0-2 条），且注册表显示该平台
+   需要或可选合法会话，提示“登录 XX 平台可能获得更多结果，是否现在登录？”
+3. **用户主动指定平台时**：如果用户明确要求搜某个平台（如“去微博搜”）但实际返回
+   AUTH_REQUIRED 或同类状态，直接提醒需要合法登录。
 4. **不重复提醒**：同一会话中对同一平台只提醒一次；用户选择跳过后不再追问。
 
 ### 提醒方式
 
 提醒不是搜索的前置条件，而是搜索质量的增强建议：
 
-- 简短说明："zhihu 未登录，登录后搜索结果更全面。"
+- 简短说明："zhihu 当前未登录，登录后可能获得更多结果。"
 - 给出选择："可以先看现有结果，也可以先登录再搜。要登录吗？"
 - 用户选择登录时，引导通过 session-manager 完成登录，然后重新搜索。
 - 用户选择跳过时，直接使用现有结果继续。
 
 ## 搜索后的判断
 
-检查本轮结果是否：
+每个 `SearchRound` 都要统一评估当前 ResultSet：
 
-- 保留了核心主题，没有被宽泛词带偏。
-- 至少有若干候选能支持实际学习行为。
-- 没有被同一来源、相同内容或广告页占满。
-- 对高风险主题包含可信来源线索。
+- 保留核心主题，没有被宽泛词带偏；候选能支持当前 `goal` 的学习结果。
+- 没有被同一来源、相同内容或广告页占满；`new_unique` 和 duplicate 只看 MCP provenance。
+- 对高风险主题包含可信来源线索；关键表示或可用性未知时识别为可能的 Gap，而不是猜测补齐。
+- 读取服务端 `Coverage`、`Gap`、失败和信息增益事实（若该版本契约返回）；模型不能自行
+  伪造 Coverage、provenance、候选计数或关闭 Gap 的记录。
 
-结果明显偏题、过宽或证据太弱时，调整查询后重新搜索。新的 ResultSet 仍只是候选；实际展示并成功提交新 Presentation 后，旧展示编号才不得继续使用。已经有足够多可区分、可解释的候选时停止，不为数量继续召回。
+如果存在可由新学习价值路线关闭的 Gap，按 [`adaptive-retrieval.md`](adaptive-retrieval.md)
+选择 `Replan` 并用 extend；如果 Coverage 足够则选择 `Present`，先按
+[`inspection-strategy.md`](inspection-strategy.md) 做选择性 Inspection，再展示并保存当前
+ResultSet 的 Presentation。仍有必要 Gap 且没有有价值的下一步时选择 `StopWithGap`；只有
+用户事实或硬范围缺失会实质改变方向时选择 `Clarify`。
+
+连续 2 轮 `new_unique=0` 且没有 Gap closure 时停止继续搜索；常规任务最多 3 轮，综合探索
+最多 4 轮。达到上限或继续搜索不会改变决策时也停止，不为了数量或让所有候选都有 Resolution
+而继续召回/检查。新的 ResultSet 必须独立审查；实际展示并成功提交新 Presentation 后，旧
+展示编号才不得继续使用。

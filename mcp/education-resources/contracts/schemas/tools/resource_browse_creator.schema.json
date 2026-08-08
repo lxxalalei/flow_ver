@@ -60,6 +60,7 @@
         "ok",
         "flow_id",
         "task_version",
+        "search_run_id",
         "result_set_id",
         "result_version",
         "stage",
@@ -84,6 +85,9 @@
           "type": "integer",
           "minimum": 1
         },
+        "search_run_id": {
+          "$ref": "../common.schema.json#/$defs/search_run_id"
+        },
         "result_set_id": {
           "$ref": "../common.schema.json#/$defs/result_set_id"
         },
@@ -102,7 +106,7 @@
           "type": "array",
           "maxItems": 16,
           "items": {
-            "$ref": "../resource_search.schema.json#/$defs/platform_run"
+            "$ref": "resource_search.schema.json#/$defs/platform_run"
           }
         },
         "candidates": {

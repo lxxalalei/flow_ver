@@ -125,6 +125,18 @@
         "asset_id": {
           "$ref": "../common.schema.json#/$defs/asset_id"
         },
+        "bundle_id": {
+          "$ref": "../common.schema.json#/$defs/bundle_id"
+        },
+        "role": {
+          "$ref": "../common.schema.json#/$defs/asset_role"
+        },
+        "order": {
+          "$ref": "../common.schema.json#/$defs/bundle_order"
+        },
+        "bundle_completion": {
+          "$ref": "../common.schema.json#/$defs/bundle_completion"
+        },
         "resource_id": {
           "$ref": "../common.schema.json#/$defs/resource_id"
         },

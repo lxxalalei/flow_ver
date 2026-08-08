@@ -114,6 +114,9 @@
         "status": {
           "$ref": "../common.schema.json#/$defs/job_status"
         },
+        "completion": {
+          "$ref": "../common.schema.json#/$defs/bundle_completion"
+        },
         "progress": {
           "$ref": "#/$defs/progress"
         },

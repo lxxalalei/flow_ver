@@ -1,0 +1,200 @@
+"""Service-level acceptance for the private 0021 acquisition seam."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import zipfile
+
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from education_resource_mcp.acquisition import AcquisitionRouter
+from education_resource_mcp.acquisition.web_fetch import FetchResult
+from education_resource_mcp.acquisition.web_materializer import WebMaterializer
+from education_resource_mcp.config import Settings
+from education_resource_mcp.downloader import DownloadResult
+from education_resource_mcp.search import StaticSearchProvider
+from education_resource_mcp.service import ResourceService
+
+
+PNG = b"\x89PNG\r\n\x1a\nservice-fixture"
+
+
+class _UnusedDirectProvider:
+    def download(
+        self,
+        resource,
+        job_id: str,
+        strategy: str,
+        max_bytes: int,
+        cancel_event: threading.Event,
+    ) -> DownloadResult:
+        raise AssertionError("web materialization must not use direct download")
+
+
+class _FixtureFetcher:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def fetch_html(self, url: str, *, cancel_event=None) -> FetchResult:
+        self.calls.append(("page", url))
+        body = (
+            "<html><body><article><h1>恐龙如何生活</h1>"
+            "<p>这是一份静态可读资料。</p>"
+            "<img src='/images/dinosaur.png' alt='恐龙图'>"
+            "<script>alert(1)</script></article></body></html>"
+        ).encode("utf-8")
+        return FetchResult(url, 200, "text/html", body, {})
+
+    def fetch_image(self, url: str, *, cancel_event=None):
+        self.calls.append(("image", url))
+        return FetchResult(url, 200, "image/png", PNG, {}), None
+
+
+def _settings(data_dir: Path) -> Settings:
+    return Settings(
+        data_dir=data_dir,
+        database_path=data_dir / "database.sqlite",
+        jobs_dir=data_dir / "jobs",
+        library_dir=data_dir / "library",
+        max_download_bytes=1024 * 1024,
+        max_search_results=20,
+        max_workers=2,
+        plan_ttl_seconds=60,
+    )
+
+
+class AcquisitionServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = _settings(Path(self.temp.name))
+        self.fetcher = _FixtureFetcher()
+        direct = _UnusedDirectProvider()
+        self.service = ResourceService(
+            self.settings,
+            search_provider=StaticSearchProvider(
+                [
+                    {
+                        "platform": "generic",
+                        "title": "儿童恐龙网页",
+                        "source_url": "https://example.com/dinosaurs",
+                        "resource_type": "article",
+                        "summary": "静态文章",
+                        "metadata": {},
+                    }
+                ]
+            ),
+            download_provider=direct,
+            acquisition_router=AcquisitionRouter(
+                direct_provider=direct,
+                web_materializer=WebMaterializer(fetcher=self.fetcher),
+            ),
+        )
+
+    def tearDown(self) -> None:
+        self.service.close()
+        self.temp.cleanup()
+
+    def _run_job(self) -> tuple[str, dict]:
+        flow = self.service.flow_start(
+            "flow-acquisition-service-0001",
+            {"goal": {"topic": "恐龙"}, "constraints": []},
+        )
+        result_set = self.service.search(
+            flow["flow_id"],
+            "search-acquisition-service-0001",
+            [{"platform": "generic", "queries": [{"query": "恐龙"}]}],
+            limit=10,
+        )
+        presentation = self.service.presentation_save(
+            flow["flow_id"],
+            result_set["result_set_id"],
+            [result_set["candidates"][0]["resource_id"]],
+            "present-acquisition-service-0001",
+        )
+        selection = self.service.selection_save(
+            flow["flow_id"],
+            "select-acquisition-service-00001",
+            presentation["presentation_id"],
+            presentation["presented_version"],
+            [1],
+        )
+        plan = self.service.download_prepare(
+            flow["flow_id"],
+            "prepare-acquisition-service-0001",
+            selection["selection_version"],
+            options={
+                "preferred_container": "html",
+                "max_bytes_per_resource": 512 * 1024,
+            },
+        )
+        started = self.service.download_start(
+            flow["flow_id"],
+            plan["plan_id"],
+            plan["confirmation_token"],
+            "start-acquisition-service-00001",
+        )
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            status = self.service.job_status(flow["flow_id"], started["job_id"])
+            if status["status"] in {"succeeded", "failed", "cancelled"}:
+                return flow["flow_id"], status
+            time.sleep(0.01)
+        self.fail("acquisition job did not reach a terminal state")
+
+    def test_static_bundle_is_single_public_asset_and_archives_portably(self) -> None:
+        flow_id, status = self._run_job()
+        self.assertEqual(status["status"], "succeeded")
+        self.assertEqual(len(status["assets"]), 1)
+        self.assertEqual(status["assets"][0]["media_type"], "application/zip")
+        asset_id = status["assets"][0]["asset_id"]
+        asset = self.service.store.get_asset(asset_id)
+        self.assertIsNotNone(asset)
+        assert asset is not None
+        self.assertEqual(asset["filename"], "webbundle.zip")
+
+        with zipfile.ZipFile(Path(asset["local_path"])) as archive:
+            names = archive.namelist()
+            self.assertEqual(names, sorted(names))
+            self.assertIn("index.html", names)
+            self.assertIn("content.md", names)
+            self.assertIn("metadata.json", names)
+            self.assertTrue(any(name.startswith("assets/image-") for name in names))
+            sanitized = archive.read("index.html").decode("utf-8")
+            self.assertNotIn("<script", sanitized.casefold())
+            self.assertIn("assets/image-", sanitized)
+
+        archived = self.service.archive(
+            flow_id,
+            status["job_id"],
+            asset_id,
+            idempotency_key="archive-acquisition-service-001",
+            metadata={"title": "恐龙网页资料", "tags": ["恐龙"]},
+        )
+        self.assertEqual(archived["asset_id"], asset_id)
+        stored_archive = self.service.store.get_archive_for_asset(asset_id)
+        self.assertIsNotNone(stored_archive)
+        assert stored_archive is not None
+        with zipfile.ZipFile(
+            self.settings.library_dir / Path(stored_archive["library_path"])
+        ) as archive:
+            self.assertIn("index.html", archive.namelist())
+
+        self.assertEqual(
+            self.fetcher.calls,
+            [
+                ("page", "https://example.com/dinosaurs"),
+                ("image", "https://example.com/images/dinosaur.png"),
+            ],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

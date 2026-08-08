@@ -1,10 +1,4 @@
-"""Tests for the CDP rendering downloader.
-
-The CDP renderer is exercised at the unit level with a mocked renderer, plus
-error paths that do not need a real browser.  The service routing test asserts
-that the ``webpage`` strategy selects the rendering downloader rather than the
-raw HTTP downloader.
-"""
+"""Tests for the explicit CDP capture adapter and static-first service routing."""
 
 from __future__ import annotations
 
@@ -22,6 +16,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from education_resource_mcp.adapters.rendering_download import RenderingDownloader
+from education_resource_mcp.acquisition import (
+    AcquisitionResult,
+    AcquisitionRouter,
+    AcquisitionStrategy,
+    Artifact,
+    ArtifactBundle,
+)
 from education_resource_mcp.cdp_renderer import CDPRenderer
 from education_resource_mcp.config import Settings
 from education_resource_mcp.downloader import DownloadResult
@@ -214,7 +215,7 @@ class CDPRendererErrorPathTests(unittest.TestCase):
 
 
 class ServiceRoutingTests(unittest.TestCase):
-    """The ``webpage`` strategy must select the rendering downloader in a real job."""
+    """A webpage plan uses the static materializer, never implicit browser capture."""
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -253,16 +254,51 @@ class ServiceRoutingTests(unittest.TestCase):
         renderer = RenderingDownloader(
             self.settings, renderer=fake  # type: ignore[arg-type]
         )
+
+        class StaticMaterializer:
+            def __init__(self) -> None:
+                self.called = False
+
+            def materialize(self, request):
+                self.called = True
+                job_dir = request.jobs_root / request.job_id
+                job_dir.mkdir(parents=True, exist_ok=True)
+                payload = b"PK\\x03\\x04static-web-bundle"
+                path = (job_dir / "webbundle.zip").resolve()
+                path.write_bytes(payload)
+                artifact = Artifact(
+                    artifact_id=f"{request.job_id}:artifact:bundle",
+                    role="bundle",
+                    path=path,
+                    filename="webbundle.zip",
+                    byte_size=len(payload),
+                    media_type="application/zip",
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    primary=True,
+                )
+                return AcquisitionResult.success(
+                    AcquisitionStrategy.WEB_MATERIALIZE,
+                    ArtifactBundle((artifact,), request.max_bytes),
+                )
+
+        static = StaticMaterializer()
+        acquisition_router = AcquisitionRouter(
+            direct_provider=MagicMock(),
+            web_materializer=static,
+            browser_capture=renderer,
+        )
         service = ResourceService(
             self.settings,
             search_provider=StaticSearchProvider(resources),
-            download_provider=MagicMock(),  # must NOT be used for webpage
+            download_provider=MagicMock(),
             rendering_downloader=renderer,
+            acquisition_router=acquisition_router,
         )
         service._fake_renderer = fake  # type: ignore[attr-defined]
+        service._fake_static_materializer = static  # type: ignore[attr-defined]
         return service
 
-    def test_webpage_job_produces_rendered_asset(self) -> None:
+    def test_webpage_job_uses_static_materializer_without_browser(self) -> None:
         service = self._make_service()
         flow = service.flow_start(
             "flow-routing-0001", {"goal": {"topic": "天文"}, "constraints": []}
@@ -307,11 +343,11 @@ class ServiceRoutingTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertIsNotNone(status)
         self.assertEqual(status["status"], "succeeded")
-        self.assertTrue(service._fake_renderer.called)  # type: ignore[attr-defined]
+        self.assertTrue(service._fake_static_materializer.called)  # type: ignore[attr-defined]
+        self.assertFalse(service._fake_renderer.called)  # type: ignore[attr-defined]
         assets = status.get("assets") or []
         self.assertEqual(len(assets), 1)
-        self.assertEqual(assets[0]["media_type"], "multipart/related")
-        self.assertEqual(assets[0]["size_bytes"], len(_mhtml_bytes()))
+        self.assertEqual(assets[0]["media_type"], "application/zip")
         service.close()
 
 

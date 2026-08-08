@@ -116,7 +116,7 @@ docs/                              # 架构、开发和运维文档
 - 业务错误作为结构化结果返回；协议错误和不可恢复错误才抛出异常。
 - 修改契约时同步更新文档、Schema、兼容说明和测试。
 - 适配器属于服务内部实现，不直接暴露为大量平台级 MCP 工具。
-- 领域契约位于 `mcp/education-resources/contracts/v2/`，修改工具时同步更新 Schema、
+- 领域契约位于 `mcp/education-resources/contracts/`，修改工具时同步更新 Schema、
   错误码、文档和契约测试。
 - 不把平台凭据写入 Skill、仓库配置或测试夹具。
 

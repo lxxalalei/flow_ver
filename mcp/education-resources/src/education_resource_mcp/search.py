@@ -11,7 +11,11 @@ from urllib.request import Request, urlopen
 from concurrent.futures import ThreadPoolExecutor
 
 from .adapters import generic_web
-from .adapters.base import PlatformSearchAdapter
+from .adapters.base import (
+    AdapterDescriptor,
+    PlatformSearchAdapter,
+    descriptor_for_platform,
+)
 from .config import Settings
 from .errors import DomainError
 
@@ -22,7 +26,9 @@ class SearchProvider(Protocol):
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Execute *search_tasks* and return ``(resources, platform_runs)``.
 
-        *search_tasks* is a list of ``{"platform": str, "queries": [str, ...]}`` dicts.
+        *search_tasks* is a list of ``{"platform": str, "queries": [str, ...]}``
+        dicts and may carry a semantic ``direction`` label. Providers ignore the
+        label; the service attaches it to durable query provenance.
         Implementations run platforms in parallel and queries within a platform
         serially.  Each *platform_run* in the return value has the shape::
 
@@ -43,6 +49,8 @@ def canonical_http_url(value: str) -> str:
 
 class GenericWebSearchProvider:
     """Search the public web through the MCP-owned generic adapter."""
+
+    descriptor = descriptor_for_platform("generic")
 
     def __init__(self, settings: Settings, engines: list[str] | None = None) -> None:
         self.settings = settings
@@ -178,6 +186,8 @@ class GenericWebSearchProvider:
 
 class SearXNGSearchProvider:
     """Search through a local SearXNG instance via its JSON API."""
+
+    descriptor = descriptor_for_platform("generic")
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -412,11 +422,64 @@ class MultiPlatformSearchProvider:
             except ImportError:
                 pass
         for pid, cls in adapter_classes:
-            self.register_adapter(cls(self.session_store, self.settings))
+            self.register_adapter(
+                cls(self.session_store, self.settings),
+                require_descriptor=True,
+            )
 
-    def register_adapter(self, adapter: PlatformSearchAdapter) -> None:
-        """Register or replace a platform adapter."""
+    def register_adapter(
+        self,
+        adapter: PlatformSearchAdapter,
+        *,
+        require_descriptor: bool = False,
+    ) -> None:
+        """Register or replace an adapter.
+
+        Built-ins must expose the exact active Registry descriptor.  The
+        default remains compatible with legacy and third-party test stubs
+        that only expose ``platform_id``.
+        """
+
+        if require_descriptor:
+            descriptor = getattr(adapter, "descriptor", None)
+            if not isinstance(descriptor, AdapterDescriptor):
+                raise TypeError(
+                    f"built-in adapter {adapter.platform_id!r} has no AdapterDescriptor"
+                )
+            expected = descriptor_for_platform(adapter.platform_id)
+            if descriptor != expected:
+                raise ValueError(
+                    f"built-in adapter {adapter.platform_id!r} descriptor does not match Registry"
+                )
         self._adapters[adapter.platform_id] = adapter
+
+    @staticmethod
+    def _creator_platform_run(
+        platform: str,
+        creator_id: str,
+        candidate_count: int,
+        error: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        query_run: dict[str, Any] = {
+            "query": creator_id,
+            "candidate_count": candidate_count,
+            "failure_count": 1 if error else 0,
+        }
+        if error:
+            query_run["error"] = {
+                "code": str(error.get("code") or "PARTIAL_FAILURE"),
+                "message": str(error.get("message") or "创作者浏览失败"),
+                "retryable": bool(error.get("retryable")),
+            }
+        return {
+            "platform": platform,
+            "status": (
+                "succeeded"
+                if error is None
+                else ("partial" if candidate_count else "failed")
+            ),
+            "query_runs": [query_run],
+        }
 
     def search_creator(
         self, platform: str, creator_id: str, limit: int
@@ -429,21 +492,35 @@ class MultiPlatformSearchProvider:
         """
         adapter = self._adapters.get(platform)
         if adapter is None:
-            return [], [{"platform": platform, "candidate_count": 0,
-                "error": {"code": "UNKNOWN_PLATFORM",
-                    "message": f"平台 {platform} 无 adapter", "retryable": False}}]
+            return [], [
+                self._creator_platform_run(
+                    platform,
+                    creator_id,
+                    0,
+                    {
+                        "code": "UNKNOWN_PLATFORM",
+                        "message": f"平台 {platform} 无 adapter",
+                        "retryable": False,
+                    },
+                )
+            ]
         if not hasattr(adapter, "search_creator"):
-            return [], [{"platform": platform, "candidate_count": 0,
-                "error": {"code": "FEATURE_NOT_SUPPORTED",
-                    "message": f"平台 {platform} 不支持创作者浏览", "retryable": False}}]
+            return [], [
+                self._creator_platform_run(
+                    platform,
+                    creator_id,
+                    0,
+                    {
+                        "code": "FEATURE_NOT_SUPPORTED",
+                        "message": f"平台 {platform} 不支持创作者浏览",
+                        "retryable": False,
+                    },
+                )
+            ]
         resources, error = adapter.search_creator(creator_id, limit)
-        run: dict[str, Any] = {"platform": platform,
-            "candidate_count": len(resources),
-            "queries": [{"creator_id": creator_id}]}
-        if error:
-            run["error"] = error
-            run["failure_count"] = 1
-        return resources, [run]
+        return resources, [
+            self._creator_platform_run(platform, creator_id, len(resources), error)
+        ]
 
 
     # ------------------------------------------------------------------

@@ -75,6 +75,154 @@
           "items": {
             "$ref": "#/$defs/SearchTaskQuery"
           }
+        },
+        "direction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Semantic search purpose; this is not an authoritative identifier."
+        }
+      }
+    },
+    "search_mode": {
+      "type": "string",
+      "enum": [
+        "replace",
+        "extend"
+      ]
+    },
+    "bounded_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_candidate_count",
+        "new_unique_count",
+        "duplicate_count",
+        "duplicate_of_base_count",
+        "duplicate_within_round_count",
+        "identity_unknown_count",
+        "new_displayable_count"
+      ],
+      "properties": {
+        "raw_candidate_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "new_unique_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "duplicate_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "duplicate_of_base_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "duplicate_within_round_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "identity_unknown_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "new_displayable_count": {
+          "$ref": "#/$defs/bounded_count"
+        }
+      }
+    },
+    "coverage_dimension": {
+      "type": "string",
+      "enum": [
+        "target",
+        "use",
+        "constraints",
+        "form",
+        "source",
+        "availability",
+        "selection",
+        "inspection"
+      ]
+    },
+    "coverage_resource_type": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_type",
+        "count"
+      ],
+      "properties": {
+        "resource_type": {
+          "$ref": "../common.schema.json#/$defs/resource_type"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "coverage_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "reason",
+        "count"
+      ],
+      "properties": {
+        "dimension": {
+          "$ref": "#/$defs/coverage_dimension"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "candidate_count",
+        "platform_count",
+        "resource_types",
+        "gaps"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "empty",
+            "partial",
+            "covered"
+          ]
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "platform_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resource_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/coverage_resource_type"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/coverage_gap"
+          }
         }
       }
     },
@@ -92,6 +240,12 @@
           "minLength": 1,
           "maxLength": 1000
         },
+        "direction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Semantic search purpose attached by the service; not an authoritative identifier."
+        },
         "candidate_count": {
           "type": "integer",
           "minimum": 0,
@@ -101,6 +255,12 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 32
+        },
+        "new_unique_count": {
+          "$ref": "#/$defs/bounded_count"
+        },
+        "duplicate_count": {
+          "$ref": "#/$defs/bounded_count"
         },
         "error": {
           "type": "object",
@@ -139,6 +299,12 @@
       "properties": {
         "platform": {
           "$ref": "../common.schema.json#/$defs/platform_id"
+        },
+        "direction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Semantic search purpose; this is not an authoritative identifier."
         },
         "status": {
           "type": "string",
@@ -197,8 +363,41 @@
           "minimum": 1,
           "maximum": 50,
           "default": 20
+        },
+        "mode": {
+          "$ref": "#/$defs/search_mode",
+          "default": "replace"
+        },
+        "base_result_set_id": {
+          "$ref": "../common.schema.json#/$defs/result_set_id"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "const": "extend"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "base_result_set_id"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "base_result_set_id"
+              ]
+            }
+          }
+        }
+      ]
     },
     "success": {
       "type": "object",
@@ -276,6 +475,22 @@
         },
         "created_at": {
           "$ref": "../common.schema.json#/$defs/timestamp"
+        },
+        "mode": {
+          "$ref": "#/$defs/search_mode"
+        },
+        "base_result_set_id": {
+          "$ref": "../common.schema.json#/$defs/result_set_id"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
         }
       }
     },

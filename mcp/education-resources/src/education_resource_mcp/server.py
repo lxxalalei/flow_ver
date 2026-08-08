@@ -64,6 +64,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         task_version: int,
         idempotency_key: str,
         search_tasks: list[SearchTask],
+        mode: Literal["replace", "extend"] = "replace",
+        base_result_set_id: str | None = None,
         filters: SearchFilters | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
@@ -78,6 +80,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
                 idempotency_key,
                 [t.model_dump() for t in search_tasks],
                 task_version=task_version,
+                mode=mode,
+                base_result_set_id=base_result_set_id,
                 filters=filters.model_dump(exclude_none=True) if filters else None,
                 limit=limit,
             ),
@@ -111,6 +115,24 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
                 limit=limit,
             ),
             flow_id=flow_id,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_inspect(
+        contract_version: Literal["1.0.0"],
+        flow_id: str,
+        resource_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Inspect one existing Flow resource through the active profile."""
+        return _invoke(
+            lambda: resource_service.inspect(
+                flow_id,
+                idempotency_key,
+                resource_id,
+            ),
+            flow_id=flow_id,
+            resource_id=resource_id,
         )
 
     @server.tool(structured_output=True)

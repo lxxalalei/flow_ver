@@ -1,6 +1,6 @@
 {
   "$schema": "schemas/tool-catalog.schema.json",
-  "catalog_version": "1.0.0",
+  "catalog_version": "1.3.0",
   "contract_version": "1.0.0",
   "server_id": "learning_resources",
   "tools": [
@@ -24,7 +24,7 @@
     },
     {
       "name": "resource_search",
-      "description": "Search across multiple platforms in parallel, then persist an immutable ResultSet that is not yet a Presentation.",
+      "description": "Search across multiple platforms in parallel, then persist an immutable ResultSet that is not yet a Presentation; requests may replace or extend a base ResultSet.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
@@ -111,6 +111,15 @@
       "idempotency_required": true,
       "input_schema": "schemas/tools/resource_browse_creator.schema.json#/$defs/input",
       "output_schema": "schemas/tools/resource_browse_creator.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_inspect",
+      "description": "Inspect one existing Flow resource through a server-selected bounded inspection profile without accepting a URL or local path.",
+      "side_effect": "state_write",
+      "requires_flow_id": true,
+      "idempotency_required": true,
+      "input_schema": "schemas/tools/resource_inspect.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_inspect.schema.json#/$defs/output"
     }
   ]
 }

@@ -18,6 +18,7 @@ EXPECTED_TOOLS = {
     "resource_flow_status",
     "resource_search",
     "resource_browse_creator",
+    "resource_inspect",
     "resource_presentation_save",
     "resource_selection_save",
     "resource_download_prepare",
@@ -62,7 +63,7 @@ def stdio_parameters(data_dir: str):
 
 @unittest.skipUnless(MCP_AVAILABLE, "install the service dependencies to run MCP stdio tests")
 class McpStdioTests(unittest.TestCase):
-    def test_initialize_lists_exact_12_tools_and_input_schemas(self) -> None:
+    def test_initialize_lists_exact_13_tools_and_input_schemas(self) -> None:
         import anyio
         from mcp.client.session import ClientSession
         from mcp.client.stdio import stdio_client

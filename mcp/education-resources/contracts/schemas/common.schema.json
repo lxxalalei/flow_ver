@@ -23,6 +23,14 @@
       "type": "string",
       "pattern": "^res_[A-Za-z0-9_-]{16,64}$"
     },
+    "resolution_id": {
+      "type": "string",
+      "pattern": "^resolve_[A-Za-z0-9_-]{16,64}$"
+    },
+    "representation_id": {
+      "type": "string",
+      "pattern": "^repr_[A-Za-z0-9_-]{16,64}$"
+    },
     "plan_id": {
       "type": "string",
       "pattern": "^plan_[A-Za-z0-9_-]{16,64}$"
@@ -34,6 +42,11 @@
     "asset_id": {
       "type": "string",
       "pattern": "^asset_[A-Za-z0-9_-]{16,64}$"
+    },
+    "bundle_id": {
+      "type": "string",
+      "pattern": "^bundle_[A-Za-z0-9_-]{16,64}$",
+      "description": "Server-generated stable identifier for one Job x Resource AssetBundle."
     },
     "archive_id": {
       "type": "string",
@@ -114,6 +127,40 @@
         "cancelled"
       ]
     },
+    "bundle_completion": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial"
+      ],
+      "description": "Server-owned completeness of an AssetBundle; not a Job lifecycle status."
+    },
+    "asset_role": {
+      "type": "string",
+      "enum": [
+        "primary",
+        "subtitle",
+        "cover",
+        "metadata",
+        "attachment",
+        "transcript",
+        "companion"
+      ],
+      "description": "Server-assigned public AssetBundle role; the role is not inferred from a filename."
+    },
+    "bundle_order": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "Server-assigned one-based order within an AssetBundle."
+    },
+    "bundle_item_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Server-owned stable key for one expected BundleItem; it is not a path."
+    },
     "result_set_status": {
       "type": "string",
       "enum": [
@@ -128,7 +175,8 @@
         "available",
         "auth_required",
         "unavailable",
-        "unknown"
+        "unknown",
+        "policy_blocked"
       ]
     },
     "risk_level": {
@@ -466,6 +514,18 @@
         },
         "retriable": {
           "type": "boolean"
+        },
+        "bundle_id": {
+          "$ref": "#/$defs/bundle_id"
+        },
+        "role": {
+          "$ref": "#/$defs/asset_role"
+        },
+        "order": {
+          "$ref": "#/$defs/bundle_order"
+        },
+        "item_key": {
+          "$ref": "#/$defs/bundle_item_key"
         }
       }
     },
@@ -507,6 +567,18 @@
         },
         "created_at": {
           "$ref": "#/$defs/timestamp"
+        },
+        "bundle_id": {
+          "$ref": "#/$defs/bundle_id"
+        },
+        "role": {
+          "$ref": "#/$defs/asset_role"
+        },
+        "order": {
+          "$ref": "#/$defs/bundle_order"
+        },
+        "bundle_completion": {
+          "$ref": "#/$defs/bundle_completion"
         }
       }
     },

@@ -10,12 +10,58 @@ from pathlib import Path, PurePosixPath
 import secrets
 import sqlite3
 import threading
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 import uuid
 
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 5
 ARCHIVE_STATES = {"pending", "ready", "failed", "missing", "corrupt"}
+ASSET_BUNDLE_STATUSES = frozenset(
+    {"pending", "running", "succeeded", "partial", "failed", "cancelled", "quarantined"}
+)
+ASSET_BUNDLE_COMPLETIONS = frozenset({"complete", "partial"})
+ASSET_BUNDLE_ITEM_STATUSES = frozenset({"pending", "ready", "failed", "quarantined"})
+ASSET_BUNDLE_ROLES = frozenset(
+    {
+        "primary",
+        "subtitle",
+        "cover",
+        "metadata",
+        "attachment",
+        "transcript",
+        "companion",
+    }
+)
+RESOLUTION_STATUSES = frozenset({"resolved", "partial", "unresolved"})
+RESOLUTION_CACHEABLE_STATUSES = frozenset({"resolved", "partial"})
+_RESOLUTION_PRIVATE_KEYS = frozenset(
+    {
+        "source_url",
+        "canonical_url",
+        "url",
+        "uri",
+        "href",
+        "path",
+        "file_path",
+        "local_path",
+        "locator",
+        "download_url",
+        "stream_url",
+        "cookie",
+        "cookies",
+        "token",
+        "access_token",
+        "authorization",
+        "credential",
+        "credentials",
+        "password",
+        "secret",
+    }
+)
+RESULT_SET_IDEMPOTENCY_SCOPE_PREFIXES = {
+    "resource.search": "resource_search",
+    "resource.browse_creator": "browse_creator",
+}
 
 
 def utc_now() -> str:
@@ -26,6 +72,13 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
+def _stable_id(prefix: str, *parts: object) -> str:
+    """Create a deterministic opaque ID for migration-created relations."""
+
+    payload = "\x1f".join(str(part) for part in parts).encode("utf-8")
+    return f"{prefix}_{hashlib.sha256(payload).hexdigest()[:32]}"
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -34,6 +87,32 @@ def _load(value: str | None, default: Any) -> Any:
     if value is None:
         return default
     return json.loads(value)
+
+
+def _copy_resolution_json(value: Any) -> Any:
+    """Return a JSON-safe copy without source locators.
+
+    Inspectors must not be able to persist a source URL into the resolution
+    payload that may later be returned by a recovery/status read.  The copy is
+    deliberately recursive so nested adapter payloads cannot bypass the
+    boundary.  JSON serialization below remains the final type validation.
+    """
+
+    if isinstance(value, Mapping):
+        return {
+            str(key): _copy_resolution_json(item)
+            for key, item in value.items()
+            if str(key).casefold() not in _RESOLUTION_PRIVATE_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_copy_resolution_json(item) for item in value]
+    return value
+
+
+def _encode_resolution_json(value: Any) -> str:
+    """Copy and encode a resolution payload using the store's JSON policy."""
+
+    return _json(_copy_resolution_json(value))
 
 
 class Store:
@@ -221,6 +300,9 @@ class Store:
         migrations = (
             (1, "v2_control_plane_columns", self._migration_control_plane_columns),
             (2, "learning_archive_foundation", self._migration_archive_foundation),
+            (3, "resource_resolution_foundation", self._migration_resource_resolution_foundation),
+            (4, "result_set_extend_storage", self._migration_result_set_extend_storage),
+            (5, "multimodal_asset_bundle", self._migration_asset_bundle),
         )
         for version, name, migration in migrations:
             with self.transaction(immediate=True) as connection:
@@ -486,6 +568,280 @@ class Store:
                 archived_at=str(row["created_at"]),
                 legacy_metadata=legacy_metadata,
             )
+
+    def _migration_resource_resolution_foundation(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Create the isolated, cache-keyed Resolution store.
+
+        Resolution data is intentionally not added to ``resources`` or a
+        ResultSet. The foreign keys provide lifecycle cleanup while the
+        service-level ownership checks below ensure that a caller cannot use a
+        resource belonging to another Flow.
+        """
+
+        self._execute_statements(
+            connection,
+            """
+            CREATE TABLE IF NOT EXISTS resource_resolutions (
+                resolution_id TEXT PRIMARY KEY,
+                flow_id TEXT NOT NULL REFERENCES flows(flow_id) ON DELETE CASCADE,
+                resource_id TEXT NOT NULL REFERENCES resources(resource_id) ON DELETE CASCADE,
+                profile_version TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL,
+                resolution_status TEXT NOT NULL,
+                resolved_json TEXT NOT NULL,
+                inspection_json TEXT NOT NULL,
+                failures_json TEXT NOT NULL,
+                inspected_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(resource_id, profile_version, source_fingerprint)
+            );
+            CREATE INDEX IF NOT EXISTS idx_resource_resolutions_flow_resource
+                ON resource_resolutions(flow_id, resource_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_resource_resolutions_resource_cache
+                ON resource_resolutions(
+                    resource_id, profile_version, source_fingerprint,
+                    resolution_status, updated_at DESC
+                );
+            CREATE INDEX IF NOT EXISTS idx_resource_resolutions_flow_updated
+                ON resource_resolutions(flow_id, updated_at DESC, resolution_id);
+            """,
+        )
+
+    def _migration_result_set_extend_storage(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Add immutable retrieval-round and private identity snapshots."""
+
+        self._add_columns(
+            connection,
+            "search_result_sets",
+            [
+                ("task_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("mode", "TEXT NOT NULL DEFAULT 'replace'"),
+                ("base_result_set_id", "TEXT"),
+                ("round", "INTEGER NOT NULL DEFAULT 1"),
+                ("provenance_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("coverage_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ],
+        )
+        self._add_columns(
+            connection,
+            "resources",
+            [
+                ("identity_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("identity_rules_version", "TEXT NOT NULL DEFAULT 'identity-v1'"),
+            ],
+        )
+
+    def _migration_asset_bundle(self, connection: sqlite3.Connection) -> None:
+        """Create the authoritative multi-asset relation and backfill v1 rows.
+
+        The old schema only recorded an ordered flat ``jobs.asset_ids_json``
+        list.  Migration deliberately uses that order and never infers a
+        semantic role from a filename: the first asset for a Job x Resource
+        becomes ``primary`` and every later asset becomes ``attachment``.
+        Deterministic IDs make the migration safe to rerun after an interrupted
+        database upgrade.
+        """
+
+        self._execute_statements(
+            connection,
+            """
+            CREATE TABLE IF NOT EXISTS asset_bundles (
+                bundle_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+                resource_id TEXT NOT NULL REFERENCES resources(resource_id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'running', 'succeeded', 'partial', 'failed', 'cancelled',
+                    'quarantined'
+                )),
+                completion TEXT CHECK(completion IS NULL OR completion IN ('complete', 'partial')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id, resource_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_asset_bundles_job
+                ON asset_bundles(job_id, created_at, bundle_id);
+            CREATE INDEX IF NOT EXISTS idx_asset_bundles_resource
+                ON asset_bundles(resource_id, updated_at DESC, bundle_id);
+
+            CREATE TABLE IF NOT EXISTS asset_bundle_items (
+                bundle_item_id TEXT PRIMARY KEY,
+                bundle_id TEXT NOT NULL REFERENCES asset_bundles(bundle_id) ON DELETE CASCADE,
+                asset_id TEXT REFERENCES assets(asset_id) ON DELETE SET NULL,
+                position INTEGER NOT NULL CHECK(position >= 0),
+                role TEXT NOT NULL CHECK(role IN (
+                    'primary', 'subtitle', 'cover', 'metadata', 'attachment',
+                    'transcript', 'companion'
+                )),
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'ready', 'failed', 'quarantined'
+                )),
+                required INTEGER NOT NULL CHECK(required IN (0, 1)),
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(bundle_id, position),
+                UNIQUE(bundle_id, asset_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_asset_bundle_items_primary
+                ON asset_bundle_items(bundle_id) WHERE role = 'primary';
+            CREATE INDEX IF NOT EXISTS idx_asset_bundle_items_bundle
+                ON asset_bundle_items(bundle_id, position);
+            CREATE INDEX IF NOT EXISTS idx_asset_bundle_items_asset
+                ON asset_bundle_items(asset_id);
+
+            CREATE TABLE IF NOT EXISTS asset_bundle_failures (
+                failure_id TEXT PRIMARY KEY,
+                bundle_id TEXT NOT NULL REFERENCES asset_bundles(bundle_id) ON DELETE CASCADE,
+                bundle_item_id TEXT REFERENCES asset_bundle_items(bundle_item_id) ON DELETE SET NULL,
+                attempt INTEGER NOT NULL CHECK(attempt >= 1),
+                code TEXT NOT NULL CHECK(length(trim(code)) > 0),
+                message TEXT NOT NULL CHECK(length(trim(message)) > 0),
+                retriable INTEGER NOT NULL CHECK(retriable IN (0, 1)),
+                details_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_asset_bundle_failures_bundle
+                ON asset_bundle_failures(bundle_id, created_at, failure_id);
+            CREATE INDEX IF NOT EXISTS idx_asset_bundle_failures_item
+                ON asset_bundle_failures(bundle_item_id, created_at, failure_id);
+            """,
+        )
+        self._backfill_asset_bundles(connection)
+
+    def _backfill_asset_bundles(self, connection: sqlite3.Connection) -> None:
+        """Backfill all historical assets into deterministic Job x Resource bundles."""
+
+        jobs = connection.execute(
+            "SELECT job_id, asset_ids_json FROM jobs ORDER BY created_at, job_id"
+        ).fetchall()
+        assets = connection.execute(
+            """
+            SELECT asset_id, job_id, resource_id, status, created_at
+            FROM assets
+            ORDER BY created_at, asset_id
+            """
+        ).fetchall()
+        assets_by_id: dict[str, sqlite3.Row] = {}
+        for asset in assets:
+            assets_by_id[str(asset["asset_id"])] = asset
+
+        now = utc_now()
+        seen_assets: set[str] = set()
+        for job in jobs:
+            job_id = str(job["job_id"])
+            ordered_ids: list[str] = []
+            try:
+                raw_ids = _load(job["asset_ids_json"], [])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raw_ids = []
+            if isinstance(raw_ids, list):
+                for raw_id in raw_ids:
+                    asset_id = str(raw_id)
+                    if asset_id not in ordered_ids:
+                        ordered_ids.append(asset_id)
+            grouped: dict[str, list[sqlite3.Row]] = {}
+            for asset_id in ordered_ids:
+                asset = assets_by_id.get(asset_id)
+                if asset is None or str(asset["job_id"]) != job_id:
+                    continue
+                grouped.setdefault(str(asset["resource_id"]), []).append(asset)
+
+            for resource_id, resource_assets in grouped.items():
+                resource = connection.execute(
+                    "SELECT 1 FROM resources WHERE resource_id = ?", (resource_id,)
+                ).fetchone()
+                if resource is None:
+                    # Keep migration forward-compatible with a partially
+                    # restored legacy database whose Resource row is missing.
+                    continue
+                existing = connection.execute(
+                    "SELECT bundle_id FROM asset_bundles WHERE job_id = ? AND resource_id = ?",
+                    (job_id, resource_id),
+                ).fetchone()
+                if existing is not None:
+                    seen_assets.update(str(asset["asset_id"]) for asset in resource_assets)
+                    continue
+
+                bundle_id = _stable_id("bundle", "legacy", job_id, resource_id)
+                created_at = min(
+                    (str(asset["created_at"] or now) for asset in resource_assets),
+                    default=now,
+                )
+                updated_at = max(
+                    (str(asset["created_at"] or now) for asset in resource_assets),
+                    default=created_at,
+                )
+                ready_count = sum(str(asset["status"]) == "ready" for asset in resource_assets)
+                all_ready = ready_count == len(resource_assets)
+                bundle_status = (
+                    "succeeded" if all_ready else "partial" if ready_count else "failed"
+                )
+                completion = "complete" if all_ready else "partial"
+                connection.execute(
+                    """
+                    INSERT INTO asset_bundles(
+                        bundle_id, job_id, resource_id, status, completion,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bundle_id,
+                        job_id,
+                        resource_id,
+                        bundle_status,
+                        completion,
+                        created_at,
+                        updated_at,
+                    ),
+                )
+                for position, asset in enumerate(resource_assets):
+                    asset_id = str(asset["asset_id"])
+                    asset_status = str(asset["status"])
+                    item_status = "ready" if asset_status == "ready" else (
+                        "quarantined" if asset_status == "quarantined" else "failed"
+                    )
+                    item_id = _stable_id("bundle_item", "legacy", bundle_id, position, asset_id)
+                    connection.execute(
+                        """
+                        INSERT INTO asset_bundle_items(
+                            bundle_item_id, bundle_id, asset_id, position, role,
+                            status, required, metadata_json, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+                        """,
+                        (
+                            item_id,
+                            bundle_id,
+                            asset_id,
+                            position,
+                            "primary" if position == 0 else "attachment",
+                            item_status,
+                            1 if position == 0 else 0,
+                            str(asset["created_at"] or created_at),
+                            str(asset["created_at"] or updated_at),
+                        ),
+                    )
+                    if item_status == "failed":
+                        connection.execute(
+                            """
+                            INSERT INTO asset_bundle_failures(
+                                failure_id, bundle_id, bundle_item_id, attempt, code,
+                                message, retriable, details_json, created_at
+                            ) VALUES (?, ?, ?, 1, 'LEGACY_ASSET_NOT_READY', ?, 0, '{}', ?)
+                            """,
+                            (
+                                _stable_id("bundle_failure", "legacy", bundle_id, position, asset_id),
+                                bundle_id,
+                                item_id,
+                                f"legacy asset status: {asset_status}",
+                                str(asset["created_at"] or updated_at),
+                            ),
+                        )
+                    seen_assets.add(asset_id)
 
     @staticmethod
     def _normalize_archive_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -759,19 +1115,52 @@ class Store:
                 "retriable": True,
             }
         )
-        with self.transaction() as connection:
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            interrupted = connection.execute(
+                """
+                SELECT job_id FROM jobs
+                WHERE status IN ('queued', 'running', 'cancelling')
+                ORDER BY created_at, job_id
+                """
+            ).fetchall()
+            job_ids = [str(row["job_id"]) for row in interrupted]
+            if not job_ids:
+                return 0
             cursor = connection.execute(
                 """
                 UPDATE jobs SET status = 'failed', error_json = ?, updated_at = ?
                 WHERE status IN ('queued', 'running', 'cancelling')
                 """,
-                (error, utc_now()),
+                (error, now),
+            )
+            placeholders = ",".join("?" for _ in job_ids)
+            connection.execute(
+                f"UPDATE assets SET status = 'quarantined' WHERE job_id IN ({placeholders})",
+                job_ids,
             )
             connection.execute(
-                """
-                UPDATE assets SET status = 'quarantined'
-                WHERE job_id IN (SELECT job_id FROM jobs WHERE status = 'failed')
-                """
+                f"""
+                UPDATE asset_bundle_items
+                SET status = CASE
+                        WHEN asset_id IS NOT NULL OR status IN ('pending', 'ready')
+                            THEN 'quarantined'
+                        ELSE status
+                    END,
+                    updated_at = ?
+                WHERE bundle_id IN (
+                    SELECT bundle_id FROM asset_bundles WHERE job_id IN ({placeholders})
+                )
+                """,
+                [now, *job_ids],
+            )
+            connection.execute(
+                f"""
+                UPDATE asset_bundles
+                SET status = 'failed', completion = 'partial', updated_at = ?
+                WHERE job_id IN ({placeholders})
+                """,
+                [now, *job_ids],
             )
         return int(cursor.rowcount)
 
@@ -823,6 +1212,357 @@ class Store:
             "INSERT INTO audit_events VALUES (?, ?, ?, ?, ?, ?)",
             (new_id("evt"), flow_id, action, object_id, _json(details), now),
         )
+
+    @staticmethod
+    def _validate_resolution_key(name: str, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"invalid_{name}")
+        return value
+
+    @staticmethod
+    def _validate_resolution_status(value: str) -> str:
+        if value not in RESOLUTION_STATUSES:
+            raise ValueError("invalid_resolution_status")
+        return value
+
+    @staticmethod
+    def _decode_resolution(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["resolved"] = _copy_resolution_json(
+            _load(result.pop("resolved_json"), {})
+        )
+        result["inspection"] = _copy_resolution_json(
+            _load(result.pop("inspection_json"), {})
+        )
+        result["failures"] = _copy_resolution_json(
+            _load(result.pop("failures_json"), [])
+        )
+        result["cacheable"] = result["resolution_status"] in RESOLUTION_CACHEABLE_STATUSES
+        return result
+
+    @staticmethod
+    def _assert_resolution_ownership(
+        connection: sqlite3.Connection, flow_id: str, resource_id: str
+    ) -> sqlite3.Row:
+        flow = connection.execute(
+            "SELECT flow_id FROM flows WHERE flow_id = ?", (flow_id,)
+        ).fetchone()
+        if flow is None:
+            raise KeyError("flow_not_found")
+        resource = connection.execute(
+            "SELECT * FROM resources WHERE resource_id = ?", (resource_id,)
+        ).fetchone()
+        if resource is None:
+            raise LookupError("resource_not_found")
+        if resource["flow_id"] != flow_id:
+            raise PermissionError("resource_flow_mismatch")
+        return resource
+
+    def get_cached_resolution(
+        self,
+        flow_id: str,
+        resource_id: str,
+        profile_version: str,
+        source_fingerprint: str,
+        *,
+        allow_unresolved: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read one exact resolution cache key after ownership validation.
+
+        ``unresolved`` rows are retained for audit/recovery but are not cache
+        hits by default.  Callers that are explicitly replaying the same
+        inspection attempt may opt in with ``allow_unresolved``.
+        """
+
+        self._validate_resolution_key("flow_id", flow_id)
+        self._validate_resolution_key("resource_id", resource_id)
+        self._validate_resolution_key("profile_version", profile_version)
+        self._validate_resolution_key("source_fingerprint", source_fingerprint)
+        with self._connect() as connection:
+            self._assert_resolution_ownership(connection, flow_id, resource_id)
+            row = connection.execute(
+                """
+                SELECT * FROM resource_resolutions
+                WHERE flow_id = ? AND resource_id = ?
+                  AND profile_version = ? AND source_fingerprint = ?
+                """,
+                (flow_id, resource_id, profile_version, source_fingerprint),
+            ).fetchone()
+        if row is None:
+            return None
+        if not allow_unresolved and row["resolution_status"] not in RESOLUTION_CACHEABLE_STATUSES:
+            return None
+        return self._decode_resolution(row)
+
+    def get_resource_resolution(
+        self,
+        flow_id: str,
+        resource_id: str,
+        profile_version: str,
+        source_fingerprint: str,
+        *,
+        allow_unresolved: bool = False,
+    ) -> dict[str, Any] | None:
+        """Compatibility name for an exact Resolution cache read."""
+
+        return self.get_cached_resolution(
+            flow_id,
+            resource_id,
+            profile_version,
+            source_fingerprint,
+            allow_unresolved=allow_unresolved,
+        )
+
+    def list_latest_resolutions(
+        self,
+        flow_id: str,
+        *,
+        result_set_id: str | None = None,
+        include_unresolved: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List the newest safe Resolution for each resource in a Flow.
+
+        With no explicit ResultSet, only resources in the Flow's current
+        ResultSet are considered.  The default excludes unresolved attempts;
+        this prevents a retryable failure from being used as a cache hit for a
+        different idempotency key.
+        """
+
+        self._validate_resolution_key("flow_id", flow_id)
+        with self._connect() as connection:
+            flow = connection.execute(
+                "SELECT current_result_set_id FROM flows WHERE flow_id = ?",
+                (flow_id,),
+            ).fetchone()
+            if flow is None:
+                raise KeyError("flow_not_found")
+            selected_result_set_id = result_set_id or flow["current_result_set_id"]
+            if result_set_id is not None:
+                result_set = connection.execute(
+                    "SELECT flow_id FROM search_result_sets WHERE result_set_id = ?",
+                    (result_set_id,),
+                ).fetchone()
+                if result_set is None:
+                    raise LookupError("result_set_not_found")
+                if result_set["flow_id"] != flow_id:
+                    raise PermissionError("result_set_flow_mismatch")
+
+            status_sql = ""
+            status_args: tuple[Any, ...] = ()
+            if not include_unresolved:
+                status_sql = " AND rr.resolution_status IN ('resolved', 'partial')"
+            if selected_result_set_id is None:
+                rows = connection.execute(
+                    f"""
+                    SELECT rr.*, r.result_position, r.created_at AS resource_created_at
+                    FROM resource_resolutions rr
+                    JOIN resources r ON r.resource_id = rr.resource_id
+                    WHERE rr.flow_id = ? AND r.flow_id = ?{status_sql}
+                    ORDER BY rr.resource_id, rr.updated_at DESC, rr.resolution_id DESC
+                    """,
+                    (flow_id, flow_id, *status_args),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    f"""
+                    SELECT rr.*, r.result_position, r.created_at AS resource_created_at
+                    FROM resource_resolutions rr
+                    JOIN resources r ON r.resource_id = rr.resource_id
+                    WHERE rr.flow_id = ? AND r.flow_id = ? AND r.result_set_id = ?{status_sql}
+                    ORDER BY rr.resource_id, rr.updated_at DESC, rr.resolution_id DESC
+                    """,
+                    (flow_id, flow_id, selected_result_set_id, *status_args),
+                ).fetchall()
+
+        latest: dict[str, dict[str, Any]] = {}
+        positions: dict[str, tuple[int, str, str]] = {}
+        for row in rows:
+            if row["resource_id"] in latest:
+                continue
+            latest[row["resource_id"]] = self._decode_resolution(row)
+            positions[row["resource_id"]] = (
+                int(row["result_position"])
+                if row["result_position"] is not None
+                else 2**31 - 1,
+                str(row["resource_created_at"] or ""),
+                str(row["resource_id"]),
+            )
+        return [
+            latest[resource_id]
+            for resource_id in sorted(latest, key=lambda item: positions[item])
+        ]
+
+    def list_latest_resolutions_for_flow(
+        self,
+        flow_id: str,
+        *,
+        result_set_id: str | None = None,
+        include_unresolved: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Explicit name for the current Flow/ResultSet recovery query."""
+
+        return self.list_latest_resolutions(
+            flow_id,
+            result_set_id=result_set_id,
+            include_unresolved=include_unresolved,
+        )
+
+    def save_resolution(
+        self,
+        flow_id: str,
+        resource_id: str,
+        profile_version: str,
+        source_fingerprint: str,
+        resolution_status: str,
+        resolved: Any = None,
+        inspection: Any = None,
+        failures: Any = None,
+        *,
+        idempotency_key: str,
+        request_hash: str | None = None,
+        inspected_at: str | None = None,
+        resolved_json: Any = None,
+        inspection_json: Any = None,
+        failures_json: Any = None,
+    ) -> dict[str, Any]:
+        """Atomically save a Resolution, audit event, and inspect idempotency.
+
+        The cache row is keyed by resource/profile/source fingerprint.  A
+        retryable unresolved result is still stored, but the read APIs exclude
+        it from cross-key cache hits unless the caller opts in.
+        """
+
+        self._validate_resolution_key("flow_id", flow_id)
+        self._validate_resolution_key("resource_id", resource_id)
+        self._validate_resolution_key("profile_version", profile_version)
+        self._validate_resolution_key("source_fingerprint", source_fingerprint)
+        self._validate_resolution_key("idempotency_key", idempotency_key)
+        status = self._validate_resolution_status(resolution_status)
+        if resolved_json is not None:
+            if resolved is not None:
+                raise ValueError("duplicate_resolved_payload")
+            resolved = resolved_json
+        if inspection_json is not None:
+            if inspection is not None:
+                raise ValueError("duplicate_inspection_payload")
+            inspection = inspection_json
+        if failures_json is not None:
+            if failures is not None:
+                raise ValueError("duplicate_failures_payload")
+            failures = failures_json
+        resolved = {} if resolved is None else resolved
+        inspection = {} if inspection is None else inspection
+        failures = [] if failures is None else failures
+        encoded_resolved = _encode_resolution_json(resolved)
+        encoded_inspection = _encode_resolution_json(inspection)
+        encoded_failures = _encode_resolution_json(failures)
+        inspected_at = inspected_at or utc_now()
+        request_hash = request_hash or self._request_digest(
+            {
+                "flow_id": flow_id,
+                "resource_id": resource_id,
+                "profile_version": profile_version,
+                "source_fingerprint": source_fingerprint,
+                "resolution_status": status,
+                "resolved_json": _load(encoded_resolved, {}),
+                "inspection_json": _load(encoded_inspection, {}),
+                "failures_json": _load(encoded_failures, []),
+                "inspected_at": inspected_at,
+            }
+        )
+        scope = f"resource_inspect:{flow_id}"
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            self._assert_resolution_ownership(connection, flow_id, resource_id)
+            replay = self._replay_in_transaction(
+                connection, scope, idempotency_key, request_hash
+            )
+            if replay is not None:
+                return replay
+            previous = connection.execute(
+                """
+                SELECT created_at FROM resource_resolutions
+                WHERE resource_id = ? AND profile_version = ? AND source_fingerprint = ?
+                """,
+                (resource_id, profile_version, source_fingerprint),
+            ).fetchone()
+            resolution_id = new_id("resolve")
+            created_at = str(previous["created_at"]) if previous is not None else now
+            connection.execute(
+                """
+                INSERT INTO resource_resolutions(
+                    resolution_id, flow_id, resource_id, profile_version,
+                    source_fingerprint, resolution_status, resolved_json,
+                    inspection_json, failures_json, inspected_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(resource_id, profile_version, source_fingerprint) DO UPDATE SET
+                    resolution_id = excluded.resolution_id,
+                    flow_id = excluded.flow_id,
+                    resolution_status = excluded.resolution_status,
+                    resolved_json = excluded.resolved_json,
+                    inspection_json = excluded.inspection_json,
+                    failures_json = excluded.failures_json,
+                    inspected_at = excluded.inspected_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    resolution_id,
+                    flow_id,
+                    resource_id,
+                    profile_version,
+                    source_fingerprint,
+                    status,
+                    encoded_resolved,
+                    encoded_inspection,
+                    encoded_failures,
+                    inspected_at,
+                    created_at,
+                    now,
+                ),
+            )
+            result = {
+                "resolution_id": resolution_id,
+                "flow_id": flow_id,
+                "resource_id": resource_id,
+                "profile_version": profile_version,
+                "source_fingerprint": source_fingerprint,
+                "resolution_status": status,
+                "resolved": _load(encoded_resolved, {}),
+                "inspection": _load(encoded_inspection, {}),
+                "failures": _load(encoded_failures, []),
+                "inspected_at": inspected_at,
+                "created_at": created_at,
+                "updated_at": now,
+                "cacheable": status in RESOLUTION_CACHEABLE_STATUSES,
+            }
+            self._audit_in_transaction(
+                connection,
+                flow_id,
+                "resource.inspect",
+                resolution_id,
+                {
+                    "resource_id": resource_id,
+                    "profile_version": profile_version,
+                    "source_fingerprint": source_fingerprint,
+                    "resolution_status": status,
+                },
+                now,
+            )
+            self._put_idempotency_in_transaction(
+                connection,
+                scope,
+                idempotency_key,
+                request_hash,
+                resolution_id,
+                result,
+                now,
+            )
+        return result
+
+    def save_resource_resolution(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Compatibility name for the atomic Resolution write."""
+
+        return self.save_resolution(*args, **kwargs)
 
     def create_flow(
         self,
@@ -877,8 +1617,31 @@ class Store:
         platform_runs: list[dict[str, Any]] | None = None,
         idempotency_key: str,
         request_hash: str,
+        idempotency_scope: str | None = None,
+        idempotency_action: str = "resource.search",
+        mode: str = "replace",
+        base_result_set_id: str | None = None,
+        provenance: dict[str, Any] | None = None,
+        coverage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        scope = f"resource_search:{flow_id}"
+        scope_prefix = RESULT_SET_IDEMPOTENCY_SCOPE_PREFIXES.get(idempotency_action)
+        if scope_prefix is None:
+            raise ValueError("unsupported_result_set_idempotency_action")
+        scope = f"{scope_prefix}:{flow_id}"
+        if idempotency_scope is not None and idempotency_scope != scope:
+            raise ValueError("invalid_result_set_idempotency_scope")
+        normalised_mode = str(mode or "replace").strip().lower()
+        if normalised_mode not in {"replace", "extend"}:
+            raise ValueError("invalid_result_set_mode")
+        normalised_base_result_set_id = (
+            str(base_result_set_id).strip() if base_result_set_id is not None else None
+        )
+        if not normalised_base_result_set_id:
+            normalised_base_result_set_id = None
+        if normalised_mode == "replace" and normalised_base_result_set_id is not None:
+            raise ValueError("base_result_set_forbidden")
+        if normalised_mode == "extend" and normalised_base_result_set_id is None:
+            raise ValueError("base_result_set_required")
         now = utc_now()
         with self.transaction(immediate=True) as connection:
             replay = self._replay_in_transaction(
@@ -887,23 +1650,49 @@ class Store:
             if replay is not None:
                 return replay
             flow = connection.execute(
-                "SELECT task_version, result_version FROM flows WHERE flow_id = ?",
+                """
+                SELECT task_version, result_version, current_result_set_id
+                FROM flows WHERE flow_id = ?
+                """,
                 (flow_id,),
             ).fetchone()
             if flow is None:
                 raise KeyError(flow_id)
             if int(flow["task_version"]) != int(task_version):
                 raise RuntimeError("task_version_conflict")
+
+            base_result_set: sqlite3.Row | None = None
+            if normalised_mode == "extend":
+                base_result_set = connection.execute(
+                    "SELECT * FROM search_result_sets WHERE result_set_id = ?",
+                    (normalised_base_result_set_id,),
+                ).fetchone()
+                if base_result_set is None:
+                    raise ValueError("base_result_set_not_found")
+                if base_result_set["flow_id"] != flow_id:
+                    raise ValueError("base_result_set_flow_mismatch")
+                if flow["current_result_set_id"] != normalised_base_result_set_id:
+                    raise RuntimeError("base_result_set_stale")
+                if int(base_result_set["task_version"]) != int(task_version):
+                    raise RuntimeError("base_task_version_conflict")
+
             result_version = int(flow["result_version"]) + 1
             result_set_id = new_id("rset")
             search_run_id = new_id("search")
             status = "ready"
+            round_number = (
+                int(base_result_set["round"]) + 1
+                if base_result_set is not None
+                else 1
+            )
             connection.execute(
                 """
                 INSERT INTO search_result_sets(
                     result_set_id, flow_id, search_run_id, result_version, query,
-                    filters_json, status, failures_json, platform_runs_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    filters_json, status, failures_json, platform_runs_json,
+                    task_version, mode, base_result_set_id, round,
+                    provenance_json, coverage_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result_set_id,
@@ -915,6 +1704,12 @@ class Store:
                     status,
                     _json(failures),
                     _json(platform_runs or []),
+                    int(task_version),
+                    normalised_mode,
+                    normalised_base_result_set_id,
+                    round_number,
+                    _json(provenance if provenance is not None else {}),
+                    _json(coverage if coverage is not None else {}),
                     now,
                 ),
             )
@@ -924,8 +1719,9 @@ class Store:
                     INSERT INTO resources(
                         resource_id, flow_id, presented_version, platform, title,
                         source_url, resource_type, summary, metadata_json, created_at,
-                        result_set_id, result_position
-                    ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        result_set_id, result_position, identity_json,
+                        identity_rules_version
+                    ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         resource["resource_id"],
@@ -939,6 +1735,8 @@ class Store:
                         now,
                         result_set_id,
                         position,
+                        _json(resource.get("identity", {})),
+                        str(resource.get("identity_rules_version") or "identity-v1"),
                     ),
                 )
             connection.execute(
@@ -985,12 +1783,29 @@ class Store:
                 "has_more": False,
                 "created_at": now,
             }
+            if idempotency_action == "resource.search":
+                result.update(
+                    {
+                        "mode": normalised_mode,
+                        "base_result_set_id": normalised_base_result_set_id,
+                        "round": round_number,
+                        "provenance": provenance if provenance is not None else {},
+                        "coverage": coverage if coverage is not None else {},
+                    }
+                )
             self._audit_in_transaction(
                 connection,
                 flow_id,
-                "resource.search",
+                idempotency_action,
                 result_set_id,
-                {"query": query, "count": len(resources), "result_version": result_version},
+                {
+                    "query": query,
+                    "count": len(resources),
+                    "result_version": result_version,
+                    "mode": normalised_mode,
+                    "base_result_set_id": normalised_base_result_set_id,
+                    "round": round_number,
+                },
                 now,
             )
             self._put_idempotency_in_transaction(
@@ -1415,10 +2230,13 @@ class Store:
         result["filters"] = _load(result.pop("filters_json"), {})
         result["failures"] = _load(result.pop("failures_json"), [])
         result["platform_runs"] = _load(result.pop("platform_runs_json", "[]"), [])
+        result["provenance"] = _load(result.pop("provenance_json", "{}"), {})
+        result["coverage"] = _load(result.pop("coverage_json", "{}"), {})
         resources = []
         for resource_row in resource_rows:
             resource = dict(resource_row)
             resource["metadata"] = _load(resource.pop("metadata_json"), {})
+            resource["identity"] = _load(resource.pop("identity_json", "{}"), {})
             resources.append(resource)
         result["resources"] = resources
         return result
@@ -1444,6 +2262,7 @@ class Store:
         for item_row in item_rows:
             item = dict(item_row)
             item["metadata"] = _load(item.pop("metadata_json"), {})
+            item["identity"] = _load(item.pop("identity_json", "{}"), {})
             items.append(item)
         result["items"] = items
         return result
@@ -1532,6 +2351,7 @@ class Store:
         for row in rows:
             item = dict(row)
             item["metadata"] = _load(item.pop("metadata_json"), {})
+            item["identity"] = _load(item.pop("identity_json", "{}"), {})
             output.append(item)
         return output
 
@@ -1548,6 +2368,7 @@ class Store:
         for row in rows:
             item = dict(row)
             item["metadata"] = _load(item.pop("metadata_json"), {})
+            item["identity"] = _load(item.pop("identity_json", "{}"), {})
             by_id[item["resource_id"]] = item
         return [by_id[item] for item in resource_ids if item in by_id]
 
@@ -1715,6 +2536,1118 @@ class Store:
                 ),
             )
 
+    @staticmethod
+    def _bundle_json(value: Any, field: str, *, default: Any = None) -> Any:
+        if value is None:
+            return {} if default is None else default
+        if isinstance(value, str):
+            try:
+                value = _load(value, {})
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError(f"invalid_{field}") from exc
+        try:
+            encoded = _json(value)
+            return _load(encoded, {})
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid_{field}") from exc
+
+    @staticmethod
+    def _bundle_bool(value: Any, field: str, *, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        raise ValueError(f"invalid_{field}")
+
+    @staticmethod
+    def _bundle_position(value: Any, field: str = "position") -> int:
+        if isinstance(value, bool):
+            raise ValueError(f"invalid_{field}")
+        try:
+            position = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid_{field}") from exc
+        if position < 0 or str(position) != str(value).strip() and not isinstance(value, int):
+            raise ValueError(f"invalid_{field}")
+        return position
+
+    @staticmethod
+    def _bundle_hash(value: Any) -> str:
+        return hashlib.sha256(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            .encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def _normalize_bundle_items(
+        cls,
+        item_specs: Any,
+        *,
+        job_id: str,
+        resource_id: str,
+    ) -> list[dict[str, Any]]:
+        if item_specs is None:
+            return []
+        if isinstance(item_specs, Mapping):
+            item_specs = [item_specs]
+        if isinstance(item_specs, (str, bytes)):
+            raise ValueError("invalid_asset_bundle_items")
+        try:
+            raw_items = list(item_specs)
+        except TypeError as exc:
+            raise ValueError("invalid_asset_bundle_items") from exc
+
+        normalized: list[dict[str, Any]] = []
+        positions: set[int] = set()
+        for index, raw in enumerate(raw_items):
+            if not isinstance(raw, Mapping) and hasattr(raw, "to_dict"):
+                raw = raw.to_dict(include_path=True)
+            if not isinstance(raw, Mapping):
+                raise ValueError("invalid_asset_bundle_item")
+            position = cls._bundle_position(raw.get("position", index))
+            if position in positions:
+                raise ValueError("duplicate_asset_bundle_position")
+            positions.add(position)
+            role = str(raw.get("role") or ("primary" if index == 0 else "attachment"))
+            if role not in ASSET_BUNDLE_ROLES:
+                raise ValueError("invalid_asset_bundle_role")
+            required = cls._bundle_bool(
+                raw.get("required"), "asset_bundle_required", default=role == "primary"
+            )
+            if role == "primary" and not required:
+                raise ValueError("primary_asset_bundle_item_must_be_required")
+            status = str(raw.get("status") or "ready").lower()
+            if status == "succeeded":
+                status = "ready"
+            if status not in ASSET_BUNDLE_ITEM_STATUSES:
+                raise ValueError("invalid_asset_bundle_item_status")
+            if raw.get("job_id") is not None and str(raw["job_id"]) != job_id:
+                raise ValueError("asset_bundle_job_mismatch")
+            if raw.get("resource_id") is not None and str(raw["resource_id"]) != resource_id:
+                raise ValueError("asset_bundle_resource_mismatch")
+            asset_id = raw.get("asset_id")
+            if asset_id is not None:
+                if not isinstance(asset_id, str) or not asset_id.strip():
+                    raise ValueError("invalid_asset_id")
+                asset_id = asset_id.strip()
+            metadata = cls._bundle_json(
+                raw.get("metadata", raw.get("metadata_json")),
+                "asset_bundle_metadata",
+                default={},
+            )
+            item: dict[str, Any] = {
+                "position": position,
+                "role": role,
+                "status": status,
+                "required": required,
+                "metadata": metadata,
+                "failure": raw.get("failure"),
+            }
+            if asset_id is not None:
+                item["asset_id"] = asset_id
+            if status == "ready":
+                if asset_id is None:
+                    local_path = raw.get("local_path", raw.get("path"))
+                    if local_path is None or not str(local_path).strip():
+                        raise ValueError("asset_bundle_file_metadata_required")
+                    byte_size = raw.get("byte_size", raw.get("size_bytes"))
+                    if isinstance(byte_size, bool):
+                        raise ValueError("invalid_asset_byte_size")
+                    try:
+                        byte_size = int(byte_size)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("invalid_asset_byte_size") from exc
+                    if byte_size < 0:
+                        raise ValueError("invalid_asset_byte_size")
+                    media_type = str(raw.get("media_type") or "").strip()
+                    filename = str(raw.get("filename") or "").strip()
+                    sha256 = str(raw.get("sha256") or "").strip().lower()
+                    if not media_type or not filename or len(sha256) != 64 or any(
+                        char not in "0123456789abcdef" for char in sha256
+                    ):
+                        raise ValueError("invalid_asset_file_metadata")
+                    portable_filename = filename.replace("\\", "/")
+                    filename_path = PurePosixPath(portable_filename)
+                    if (
+                        "\x00" in filename
+                        or filename_path.is_absolute()
+                        or portable_filename.startswith("//")
+                        or ".." in filename_path.parts
+                    ):
+                        raise ValueError("invalid_asset_filename")
+                    filename = PurePosixPath(
+                        *(part for part in filename_path.parts if part not in {"", "."})
+                    ).as_posix()
+                    if not filename:
+                        raise ValueError("invalid_asset_filename")
+                    item["asset"] = {
+                        "local_path": str(local_path),
+                        "byte_size": byte_size,
+                        "media_type": media_type,
+                        "sha256": sha256,
+                        "filename": filename,
+                    }
+                elif any(
+                    key in raw
+                    for key in (
+                        "local_path",
+                        "path",
+                        "byte_size",
+                        "size_bytes",
+                        "media_type",
+                        "sha256",
+                        "filename",
+                    )
+                ):
+                    raise ValueError("asset_id_and_file_metadata_are_mutually_exclusive")
+            elif any(
+                key in raw
+                for key in ("local_path", "path", "byte_size", "size_bytes", "media_type", "sha256", "filename")
+            ):
+                raise ValueError("failed_asset_bundle_item_cannot_have_file")
+            normalized.append(item)
+
+        primary_count = sum(item["role"] == "primary" for item in normalized)
+        if primary_count != 1:
+            raise ValueError("asset_bundle_requires_exactly_one_primary")
+        return normalized
+
+    @classmethod
+    def _normalize_bundle_failures(cls, failures: Any) -> list[dict[str, Any]]:
+        if failures is None:
+            return []
+        if isinstance(failures, Mapping):
+            failures = [failures]
+        if isinstance(failures, (str, bytes)):
+            raise ValueError("invalid_asset_bundle_failures")
+        try:
+            raw_failures = list(failures)
+        except TypeError as exc:
+            raise ValueError("invalid_asset_bundle_failures") from exc
+        normalized: list[dict[str, Any]] = []
+        for raw in raw_failures:
+            if not isinstance(raw, Mapping) and hasattr(raw, "to_dict"):
+                raw = raw.to_dict()
+            if not isinstance(raw, Mapping):
+                raise ValueError("invalid_asset_bundle_failure")
+            attempt = raw.get("attempt", 1)
+            if isinstance(attempt, bool):
+                raise ValueError("invalid_asset_bundle_failure_attempt")
+            try:
+                attempt = int(attempt)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid_asset_bundle_failure_attempt") from exc
+            if attempt < 1:
+                raise ValueError("invalid_asset_bundle_failure_attempt")
+            code = str(raw.get("code") or "").strip()
+            message = str(raw.get("message") or "").strip()
+            if not code or not message:
+                raise ValueError("invalid_asset_bundle_failure")
+            item_position = raw.get("item_position", raw.get("position"))
+            if item_position is not None:
+                item_position = cls._bundle_position(item_position, "item_position")
+            item_role = raw.get("item_role", raw.get("role"))
+            if item_role is not None:
+                item_role = str(item_role)
+                if item_role not in ASSET_BUNDLE_ROLES:
+                    raise ValueError("invalid_asset_bundle_failure_role")
+            normalized.append(
+                {
+                    "attempt": attempt,
+                    "code": code,
+                    "message": message,
+                    "retriable": cls._bundle_bool(
+                        raw.get("retriable", raw.get("retryable")), "retriable"
+                    ),
+                    "details": cls._bundle_json(
+                        raw.get("details", raw.get("details_json")),
+                        "asset_bundle_failure_details",
+                        default={},
+                    ),
+                    "item_position": item_position,
+                    "item_role": item_role,
+                    "bundle_item_id": raw.get("bundle_item_id"),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _bundle_request_fingerprint(
+        items: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+        completion: str,
+    ) -> str:
+        return Store._bundle_hash(
+            {
+                "completion": completion,
+                "items": [
+                    {
+                        "position": item["position"],
+                        "role": item["role"],
+                        "status": item["status"],
+                        "required": bool(item["required"]),
+                        "metadata": item["metadata"],
+                        "asset": item.get("asset"),
+                    }
+                    for item in sorted(items, key=lambda item: int(item["position"]))
+                ],
+                "failures": [
+                    {
+                        "attempt": failure["attempt"],
+                        "code": failure["code"],
+                        "message": failure["message"],
+                        "retriable": bool(failure["retriable"]),
+                        "details": failure["details"],
+                        "item_position": failure["item_position"],
+                        "item_role": failure["item_role"],
+                    }
+                    for failure in sorted(
+                        failures,
+                        key=lambda failure: json.dumps(
+                            {
+                                "attempt": failure["attempt"],
+                                "code": failure["code"],
+                                "message": failure["message"],
+                                "retriable": bool(failure["retriable"]),
+                                "details": failure["details"],
+                                "item_position": failure["item_position"],
+                                "item_role": failure["item_role"],
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
+                ],
+            }
+        )
+
+    @staticmethod
+    def _decode_bundle_json(value: str | None, default: Any) -> Any:
+        try:
+            return _load(value, default)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return default
+
+    def _decode_asset_bundle(
+        self, connection: sqlite3.Connection, bundle_row: sqlite3.Row
+    ) -> dict[str, Any]:
+        bundle = dict(bundle_row)
+        item_rows = connection.execute(
+            """
+            SELECT i.*, a.local_path, a.byte_size, a.media_type, a.sha256,
+                   a.filename, a.status AS asset_status, a.job_id AS asset_job_id,
+                   a.resource_id AS asset_resource_id
+            FROM asset_bundle_items i
+            LEFT JOIN assets a ON a.asset_id = i.asset_id
+            WHERE i.bundle_id = ?
+            ORDER BY i.position, i.bundle_item_id
+            """,
+            (bundle["bundle_id"],),
+        ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in item_rows:
+            item = dict(row)
+            item["required"] = bool(item["required"])
+            item["metadata"] = self._decode_bundle_json(item.pop("metadata_json"), {})
+            asset_fields = {
+                key: item.pop(key)
+                for key in (
+                    "local_path",
+                    "byte_size",
+                    "media_type",
+                    "sha256",
+                    "filename",
+                    "asset_status",
+                    "asset_job_id",
+                    "asset_resource_id",
+                )
+                if key in item and item[key] is not None
+            }
+            if asset_fields:
+                asset_fields["asset_id"] = item["asset_id"]
+                item["asset"] = asset_fields
+            items.append(item)
+
+        failure_rows = connection.execute(
+            """
+            SELECT * FROM asset_bundle_failures
+            WHERE bundle_id = ?
+            ORDER BY created_at, failure_id
+            """,
+            (bundle["bundle_id"],),
+        ).fetchall()
+        failures: list[dict[str, Any]] = []
+        for row in failure_rows:
+            failure = dict(row)
+            failure["retriable"] = bool(failure["retriable"])
+            failure["details"] = self._decode_bundle_json(failure.pop("details_json"), {})
+            failures.append(failure)
+        bundle["items"] = items
+        bundle["failures"] = failures
+        bundle["completion"] = str(bundle["completion"])
+        return bundle
+
+    def _bundle_fingerprint_from_row(
+        self, connection: sqlite3.Connection, bundle_row: sqlite3.Row
+    ) -> str:
+        bundle_id = str(bundle_row["bundle_id"])
+        items = connection.execute(
+            """
+            SELECT i.asset_id, i.position, i.role, i.status, i.required, i.metadata_json,
+                   a.local_path, a.byte_size, a.media_type, a.sha256, a.filename
+            FROM asset_bundle_items i
+            LEFT JOIN assets a ON a.asset_id = i.asset_id
+            WHERE i.bundle_id = ?
+            ORDER BY i.position, i.bundle_item_id
+            """,
+            (bundle_id,),
+        ).fetchall()
+        failures = connection.execute(
+            """
+            SELECT f.attempt, f.code, f.message, f.retriable, f.details_json,
+                   i.position, i.role
+            FROM asset_bundle_failures f
+            LEFT JOIN asset_bundle_items i ON i.bundle_item_id = f.bundle_item_id
+            WHERE f.bundle_id = ?
+            ORDER BY f.created_at, f.failure_id
+            """,
+            (bundle_id,),
+        ).fetchall()
+        normalized_items = [
+            {
+                "position": int(row["position"]),
+                "role": str(row["role"]),
+                "status": str(row["status"]),
+                "required": bool(row["required"]),
+                "metadata": self._decode_bundle_json(row["metadata_json"], {}),
+                "asset": (
+                    {
+                        "local_path": str(row["local_path"]),
+                        "byte_size": int(row["byte_size"]),
+                        "media_type": str(row["media_type"]),
+                        "sha256": str(row["sha256"]),
+                        "filename": str(row["filename"]),
+                    }
+                    if row["asset_id"] is not None
+                    else None
+                ),
+            }
+            for row in items
+        ]
+        normalized_failures = [
+            {
+                "attempt": int(row["attempt"]),
+                "code": str(row["code"]),
+                "message": str(row["message"]),
+                "retriable": bool(row["retriable"]),
+                "details": self._decode_bundle_json(row["details_json"], {}),
+                "item_position": int(row["position"]) if row["position"] is not None else None,
+                "item_role": str(row["role"]) if row["role"] is not None else None,
+            }
+            for row in failures
+        ]
+        return self._bundle_request_fingerprint(
+            normalized_items,
+            normalized_failures,
+            str(bundle_row["completion"]),
+        )
+
+    def _assert_bundle_job_resource(
+        self, connection: sqlite3.Connection, job_id: str, resource_id: str
+    ) -> None:
+        job = connection.execute(
+            "SELECT flow_id FROM jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if job is None:
+            raise KeyError(job_id)
+        resource = connection.execute(
+            "SELECT flow_id FROM resources WHERE resource_id = ?", (resource_id,)
+        ).fetchone()
+        if resource is None:
+            raise KeyError(resource_id)
+        if str(job["flow_id"]) != str(resource["flow_id"]):
+            raise ValueError("job_resource_flow_mismatch")
+
+    def persist_asset_bundle(
+        self,
+        job_id: str,
+        resource_id: str,
+        item_specs: Any = None,
+        failures: Any = None,
+        completion: str | None = None,
+        *,
+        status: str | None = None,
+        items: Any = None,
+        **aliases: Any,
+    ) -> dict[str, Any]:
+        """Atomically promote validated acquisition file metadata into a Bundle.
+
+        ``item_specs`` may contain server-validated file metadata or existing
+        Asset IDs.  The store generates IDs for new files.  A second identical
+        call replays the existing Job x Resource Bundle; a changed payload
+        reopens that same relation atomically instead of creating a duplicate.
+        """
+
+        if item_specs is not None and items is not None:
+            raise ValueError("duplicate_asset_bundle_items")
+        if item_specs is None:
+            item_specs = items
+        if item_specs is None:
+            item_specs = aliases.pop("artifacts", None)
+        if failures is None and aliases.get("failure_specs") is not None:
+            failures = aliases.pop("failure_specs")
+        if failures is None and aliases.get("failure") is not None:
+            failures = [aliases.pop("failure")]
+        if aliases:
+            raise TypeError(f"unexpected_asset_bundle_arguments: {sorted(aliases)}")
+        return self._persist_asset_bundle_v2(
+            job_id,
+            resource_id,
+            item_specs,
+            failures,
+            completion,
+            status=status,
+        )
+        completion = str(completion).lower()
+        if completion not in ASSET_BUNDLE_COMPLETIONS:
+            raise ValueError("invalid_asset_bundle_completion")
+        normalized_items = self._normalize_bundle_items(
+            item_specs,
+            job_id=job_id,
+            resource_id=resource_id,
+        )
+        normalized_failures = self._normalize_bundle_failures(failures)
+        for item in normalized_items:
+            if item.get("failure") is not None:
+                if not isinstance(item["failure"], Mapping):
+                    raise ValueError("invalid_asset_bundle_failure")
+                normalized_failures.extend(
+                    self._normalize_bundle_failures(
+                        [{**item["failure"], "item_position": item["position"]}]
+                    )
+                )
+        positions_by_role: dict[str, list[int]] = {}
+        for item in normalized_items:
+            positions_by_role.setdefault(str(item["role"]), []).append(int(item["position"]))
+        for failure in normalized_failures:
+            if failure.get("bundle_item_id") is not None:
+                raise ValueError("bundle_item_id_must_be_generated_by_store")
+            if failure.get("item_position") is None and failure.get("item_role") is not None:
+                matches = positions_by_role.get(str(failure["item_role"]), [])
+                if len(matches) != 1:
+                    raise ValueError("asset_bundle_failure_item_not_found")
+                failure["item_position"] = matches[0]
+            if failure.get("item_position") is not None:
+                matching_items = [
+                    item
+                    for item in normalized_items
+                    if int(item["position"]) == int(failure["item_position"])
+                ]
+                if len(matching_items) != 1:
+                    raise ValueError("asset_bundle_failure_item_not_found")
+                if (
+                    failure.get("item_role") is not None
+                    and str(failure["item_role"]) != str(matching_items[0]["role"])
+                ):
+                    raise ValueError("asset_bundle_failure_item_mismatch")
+                failure["item_role"] = matching_items[0]["role"]
+        request_fingerprint = self._bundle_request_fingerprint(
+            normalized_items, normalized_failures, completion
+        )
+        with self.transaction(immediate=True) as connection:
+            self._assert_bundle_job_resource(connection, job_id, resource_id)
+            existing = connection.execute(
+                "SELECT * FROM asset_bundles WHERE job_id = ? AND resource_id = ?",
+                (job_id, resource_id),
+            ).fetchone()
+            if existing is not None:
+                if self._bundle_fingerprint_from_row(connection, existing) != request_fingerprint:
+                    raise ValueError("asset_bundle_conflict")
+                result_id = str(existing["bundle_id"])
+            else:
+                primary_items = [
+                    item for item in normalized_items if item["role"] == "primary"
+                ]
+                if len(primary_items) != 1:
+                    raise ValueError("asset_bundle_requires_exactly_one_primary")
+                primary = primary_items[0]
+                primary_ready = primary["status"] == "ready"
+                all_ready = all(item["status"] == "ready" for item in normalized_items)
+                if status is None:
+                    resolved_status = (
+                        "succeeded"
+                        if primary_ready and all_ready and not normalized_failures
+                        else "partial"
+                        if primary_ready
+                        else "failed"
+                    )
+                else:
+                    resolved_status = str(status).lower()
+                    if resolved_status not in ASSET_BUNDLE_STATUSES:
+                        raise ValueError("invalid_asset_bundle_status")
+                if completion == "complete" and (
+                    resolved_status != "succeeded" or not primary_ready or not all_ready
+                ):
+                    raise ValueError("complete_asset_bundle_has_incomplete_items")
+                if resolved_status in {"succeeded", "partial"} and not primary_ready:
+                    raise ValueError("usable_asset_bundle_requires_ready_primary")
+                if resolved_status == "succeeded" and (
+                    not all_ready or normalized_failures or completion != "complete"
+                ):
+                    raise ValueError("succeeded_asset_bundle_has_partial_items")
+                if resolved_status == "partial" and completion != "partial":
+                    raise ValueError("partial_asset_bundle_requires_partial_completion")
+                if resolved_status in {"pending", "running", "cancelled"}:
+                    raise ValueError("invalid_persisted_asset_bundle_status")
+
+                now = utc_now()
+                bundle_id = new_id("bundle")
+                connection.execute(
+                    """
+                    INSERT INTO asset_bundles(
+                        bundle_id, job_id, resource_id, status, completion,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (bundle_id, job_id, resource_id, resolved_status, completion, now, now),
+                )
+                asset_ids: list[str] = []
+                item_ids_by_position: dict[int, str] = {}
+                for item in normalized_items:
+                    item_id = new_id("bundle_item")
+                    item_ids_by_position[item["position"]] = item_id
+                    asset_id: str | None = None
+                    asset = item.get("asset")
+                    if asset is not None:
+                        asset_id = new_id("asset")
+                        connection.execute(
+                            """
+                            INSERT INTO assets(
+                                asset_id, job_id, resource_id, status, local_path,
+                                byte_size, media_type, sha256, filename, created_at
+                            ) VALUES (?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                asset_id,
+                                job_id,
+                                resource_id,
+                                asset["local_path"],
+                                asset["byte_size"],
+                                asset["media_type"],
+                                asset["sha256"],
+                                asset["filename"],
+                                now,
+                            ),
+                        )
+                        asset_ids.append(asset_id)
+                    connection.execute(
+                        """
+                        INSERT INTO asset_bundle_items(
+                            bundle_item_id, bundle_id, asset_id, position, role,
+                            status, required, metadata_json, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            item_id,
+                            bundle_id,
+                            asset_id,
+                            item["position"],
+                            item["role"],
+                            item["status"],
+                            1 if item["required"] else 0,
+                            _json(item["metadata"]),
+                            now,
+                            now,
+                        ),
+                    )
+                for failure in normalized_failures:
+                    item_id = failure.get("bundle_item_id")
+                    if item_id is None and failure.get("item_position") is not None:
+                        item_id = item_ids_by_position.get(failure["item_position"])
+                        if item_id is None:
+                            raise ValueError("asset_bundle_failure_item_not_found")
+                    elif item_id is not None and item_id not in item_ids_by_position.values():
+                        raise ValueError("asset_bundle_failure_item_not_found")
+                    if item_id is None and failure.get("item_role") is not None:
+                        matches = [
+                            candidate_id
+                            for position, candidate_id in item_ids_by_position.items()
+                            if next(
+                                item["role"]
+                                for item in normalized_items
+                                if item["position"] == position
+                            )
+                            == failure["item_role"]
+                        ]
+                        if len(matches) == 1:
+                            item_id = matches[0]
+                    connection.execute(
+                        """
+                        INSERT INTO asset_bundle_failures(
+                            failure_id, bundle_id, bundle_item_id, attempt, code,
+                            message, retriable, details_json, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            new_id("bundle_failure"),
+                            bundle_id,
+                            item_id,
+                            failure["attempt"],
+                            failure["code"],
+                            failure["message"],
+                            1 if failure["retriable"] else 0,
+                            _json(failure["details"]),
+                            now,
+                        ),
+                    )
+                job = connection.execute(
+                    "SELECT asset_ids_json FROM jobs WHERE job_id = ?", (job_id,)
+                ).fetchone()
+                current_asset_ids = self._decode_bundle_json(
+                    job["asset_ids_json"] if job is not None else None, []
+                )
+                if not isinstance(current_asset_ids, list):
+                    current_asset_ids = []
+                current_asset_ids = [str(asset_id) for asset_id in current_asset_ids]
+                for asset_id in asset_ids:
+                    if asset_id not in current_asset_ids:
+                        current_asset_ids.append(asset_id)
+                connection.execute(
+                    "UPDATE jobs SET asset_ids_json = ?, updated_at = ? WHERE job_id = ?",
+                    (_json(current_asset_ids), now, job_id),
+                )
+                result_id = bundle_id
+        result = self.get_asset_bundle(result_id)
+        if result is None:
+            raise RuntimeError("asset_bundle_persist_failed")
+        return result
+
+    def _persist_asset_bundle_v2(
+        self,
+        job_id: str,
+        resource_id: str,
+        item_specs: Any,
+        failures: Any,
+        completion: str | None,
+        *,
+        status: str | None,
+    ) -> dict[str, Any]:
+        """Persist or reopen one authoritative Job x Resource Bundle.
+
+        The first implementation of the migration accepted only a replay of
+        an identical payload.  A real acquisition can first produce a partial
+        result and later reopen the same relation with a repaired primary or
+        companion.  This helper keeps the relation stable, replaces its
+        current item projection atomically, and never creates an Asset for a
+        failed item that has no existing ``asset_id``.
+        """
+
+        normalized_items = self._normalize_bundle_items(
+            item_specs,
+            job_id=job_id,
+            resource_id=resource_id,
+        )
+        normalized_failures = self._normalize_bundle_failures(failures)
+        for item in normalized_items:
+            if item.get("failure") is not None:
+                if not isinstance(item["failure"], Mapping):
+                    raise ValueError("invalid_asset_bundle_failure")
+                normalized_failures.extend(
+                    self._normalize_bundle_failures(
+                        [{**item["failure"], "item_position": item["position"]}]
+                    )
+                )
+        positions_by_role: dict[str, list[int]] = {}
+        for item in normalized_items:
+            positions_by_role.setdefault(str(item["role"]), []).append(int(item["position"]))
+        for failure in normalized_failures:
+            if failure.get("bundle_item_id") is not None:
+                raise ValueError("bundle_item_id_must_be_generated_by_store")
+            if failure.get("item_position") is None and failure.get("item_role") is not None:
+                matches = positions_by_role.get(str(failure["item_role"]), [])
+                if len(matches) != 1:
+                    raise ValueError("asset_bundle_failure_item_not_found")
+                failure["item_position"] = matches[0]
+            if failure.get("item_position") is not None:
+                matching_items = [
+                    item
+                    for item in normalized_items
+                    if int(item["position"]) == int(failure["item_position"])
+                ]
+                if len(matching_items) != 1:
+                    raise ValueError("asset_bundle_failure_item_not_found")
+                if (
+                    failure.get("item_role") is not None
+                    and str(failure["item_role"]) != str(matching_items[0]["role"])
+                ):
+                    raise ValueError("asset_bundle_failure_item_mismatch")
+                failure["item_role"] = matching_items[0]["role"]
+
+        with self.transaction(immediate=True) as connection:
+            self._assert_bundle_job_resource(connection, job_id, resource_id)
+            for item in normalized_items:
+                asset_id = item.get("asset_id")
+                if asset_id is None:
+                    continue
+                asset_row = connection.execute(
+                    """
+                    SELECT job_id, resource_id, local_path, byte_size,
+                           media_type, sha256, filename
+                    FROM assets WHERE asset_id = ?
+                    """,
+                    (asset_id,),
+                ).fetchone()
+                if asset_row is None:
+                    raise KeyError(asset_id)
+                if (
+                    str(asset_row["job_id"]) != job_id
+                    or str(asset_row["resource_id"]) != resource_id
+                ):
+                    raise ValueError("asset_bundle_asset_scope_mismatch")
+                # Canonicalize an existing Asset to the same file projection
+                # used by file-metadata calls, so replay does not depend on
+                # whether the caller used create_asset first.
+                item["asset"] = {
+                    "local_path": str(asset_row["local_path"]),
+                    "byte_size": int(asset_row["byte_size"]),
+                    "media_type": str(asset_row["media_type"]),
+                    "sha256": str(asset_row["sha256"]),
+                    "filename": str(asset_row["filename"]),
+                }
+
+            primary_items = [
+                item for item in normalized_items if item["role"] == "primary"
+            ]
+            if len(primary_items) != 1:
+                raise ValueError("asset_bundle_requires_exactly_one_primary")
+            primary = primary_items[0]
+            primary_ready = primary["status"] == "ready"
+            all_ready = all(item["status"] == "ready" for item in normalized_items)
+            resolved_status = str(status).lower() if status is not None else None
+            if resolved_status is None:
+                resolved_status = (
+                    "succeeded"
+                    if primary_ready and all_ready and not normalized_failures
+                    else "partial"
+                    if primary_ready
+                    else "failed"
+                )
+            if resolved_status not in ASSET_BUNDLE_STATUSES:
+                raise ValueError("invalid_asset_bundle_status")
+            if completion is None:
+                resolved_completion = (
+                    "complete"
+                    if resolved_status == "succeeded"
+                    and primary_ready
+                    and all_ready
+                    and not normalized_failures
+                    else "partial"
+                )
+            else:
+                resolved_completion = str(completion).lower()
+                if resolved_completion not in ASSET_BUNDLE_COMPLETIONS:
+                    raise ValueError("invalid_asset_bundle_completion")
+            if resolved_completion == "complete" and (
+                resolved_status != "succeeded"
+                or not primary_ready
+                or not all_ready
+                or normalized_failures
+            ):
+                raise ValueError("complete_asset_bundle_has_incomplete_items")
+            if resolved_status in {"succeeded", "partial"} and not primary_ready:
+                raise ValueError("usable_asset_bundle_requires_ready_primary")
+            if resolved_status == "succeeded" and resolved_completion != "complete":
+                raise ValueError("succeeded_asset_bundle_has_partial_items")
+
+            existing = connection.execute(
+                "SELECT * FROM asset_bundles WHERE job_id = ? AND resource_id = ?",
+                (job_id, resource_id),
+            ).fetchone()
+            request_fingerprint = self._bundle_request_fingerprint(
+                normalized_items, normalized_failures, resolved_completion
+            )
+            if existing is not None:
+                bundle_id = str(existing["bundle_id"])
+                same_projection = (
+                    self._bundle_fingerprint_from_row(connection, existing)
+                    == request_fingerprint
+                    and str(existing["status"]) == resolved_status
+                    and str(existing["completion"]) == resolved_completion
+                )
+                if same_projection:
+                    return self._decode_asset_bundle(connection, existing)
+                if str(existing["status"]) == "succeeded":
+                    raise ValueError("asset_bundle_conflict")
+                created_at = str(existing["created_at"])
+                now = utc_now()
+                connection.execute(
+                    "DELETE FROM asset_bundle_failures WHERE bundle_id = ?",
+                    (bundle_id,),
+                )
+                connection.execute(
+                    "DELETE FROM asset_bundle_items WHERE bundle_id = ?",
+                    (bundle_id,),
+                )
+                connection.execute(
+                    """
+                    UPDATE asset_bundles
+                    SET status = ?, completion = ?, updated_at = ?
+                    WHERE bundle_id = ?
+                    """,
+                    (resolved_status, resolved_completion, now, bundle_id),
+                )
+            else:
+                bundle_id = new_id("bundle")
+                created_at = utc_now()
+                now = created_at
+                connection.execute(
+                    """
+                    INSERT INTO asset_bundles(
+                        bundle_id, job_id, resource_id, status, completion,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bundle_id,
+                        job_id,
+                        resource_id,
+                        resolved_status,
+                        resolved_completion,
+                        created_at,
+                        now,
+                    ),
+                )
+
+            asset_ids: list[str] = []
+            item_ids_by_position: dict[int, str] = {}
+            roles_by_position = {
+                int(item["position"]): str(item["role"]) for item in normalized_items
+            }
+            for item in normalized_items:
+                item_id = new_id("bundle_item")
+                item_ids_by_position[int(item["position"])] = item_id
+                asset_id = item.get("asset_id")
+                asset = item.get("asset")
+                # An existing asset was hydrated above only for its
+                # fingerprint.  It must never be copied into a new Asset.
+                if asset_id is None and asset is not None:
+                    asset_id = new_id("asset")
+                    connection.execute(
+                        """
+                        INSERT INTO assets(
+                            asset_id, job_id, resource_id, status, local_path,
+                            byte_size, media_type, sha256, filename, created_at
+                        ) VALUES (?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            asset_id,
+                            job_id,
+                            resource_id,
+                            asset["local_path"],
+                            asset["byte_size"],
+                            asset["media_type"],
+                            asset["sha256"],
+                            asset["filename"],
+                            now,
+                        ),
+                    )
+                if asset_id is not None:
+                    asset_ids.append(str(asset_id))
+                connection.execute(
+                    """
+                    INSERT INTO asset_bundle_items(
+                        bundle_item_id, bundle_id, asset_id, position, role,
+                        status, required, metadata_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item_id,
+                        bundle_id,
+                        asset_id,
+                        int(item["position"]),
+                        item["role"],
+                        item["status"],
+                        1 if item["required"] else 0,
+                        _json(item["metadata"]),
+                        created_at,
+                        now,
+                    ),
+                )
+
+            for failure in normalized_failures:
+                item_id = None
+                if failure.get("item_position") is not None:
+                    item_id = item_ids_by_position.get(int(failure["item_position"]))
+                    if item_id is None:
+                        raise ValueError("asset_bundle_failure_item_not_found")
+                elif failure.get("item_role") is not None:
+                    matches = [
+                        candidate_id
+                        for position, candidate_id in item_ids_by_position.items()
+                        if roles_by_position[position] == failure["item_role"]
+                    ]
+                    if len(matches) == 1:
+                        item_id = matches[0]
+                failure_id = _stable_id(
+                    "bundle_failure",
+                    bundle_id,
+                    failure["attempt"],
+                    failure["code"],
+                    failure.get("item_position"),
+                    failure.get("item_role"),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO asset_bundle_failures(
+                        failure_id, bundle_id, bundle_item_id, attempt, code,
+                        message, retriable, details_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        failure_id,
+                        bundle_id,
+                        item_id,
+                        failure["attempt"],
+                        failure["code"],
+                        failure["message"],
+                        1 if failure["retriable"] else 0,
+                        _json(failure["details"]),
+                        now,
+                    ),
+                )
+
+            job = connection.execute(
+                "SELECT asset_ids_json FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            current_asset_ids = self._decode_bundle_json(
+                job["asset_ids_json"] if job is not None else None, []
+            )
+            if not isinstance(current_asset_ids, list):
+                current_asset_ids = []
+            current_asset_ids = [str(asset_id) for asset_id in current_asset_ids]
+            for asset_id in asset_ids:
+                if asset_id not in current_asset_ids:
+                    current_asset_ids.append(asset_id)
+            connection.execute(
+                "UPDATE jobs SET asset_ids_json = ?, updated_at = ? WHERE job_id = ?",
+                (_json(current_asset_ids), now, job_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM asset_bundles WHERE bundle_id = ?", (bundle_id,)
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("asset_bundle_persist_failed")
+            return self._decode_asset_bundle(connection, row)
+
+    def persist_failed_asset_bundle(
+        self,
+        job_id: str,
+        resource_id: str,
+        item_specs: Any = None,
+        failures: Any = None,
+        *,
+        items: Any = None,
+        failure: Any = None,
+        completion: str = "partial",
+    ) -> dict[str, Any]:
+        if item_specs is not None and items is not None:
+            raise ValueError("duplicate_asset_bundle_items")
+        if item_specs is not None and failures is None:
+            candidate_items_raw = (
+                [item_specs]
+                if isinstance(item_specs, Mapping) or hasattr(item_specs, "to_dict")
+                else list(item_specs)
+            )
+            candidate_items = [
+                candidate.to_dict() if not isinstance(candidate, Mapping) and hasattr(candidate, "to_dict") else candidate
+                for candidate in candidate_items_raw
+            ]
+            if candidate_items and all(
+                isinstance(candidate, Mapping)
+                and "code" in candidate
+                and "message" in candidate
+                and not any(key in candidate for key in ("role", "status", "position"))
+                for candidate in candidate_items
+            ):
+                failures = candidate_items
+                item_specs = None
+        if item_specs is None:
+            item_specs = items
+        if item_specs is None:
+            item_specs = [
+                {
+                    "position": 0,
+                    "role": "primary",
+                    "status": "failed",
+                    "required": True,
+                    "metadata": {},
+                }
+            ]
+        if failure is not None:
+            failures = list(failures or []) if not isinstance(failures, Mapping) else [failures]
+            failures.append(failure)
+        return self.persist_asset_bundle(
+            job_id,
+            resource_id,
+            item_specs=item_specs,
+            failures=failures,
+            completion=completion,
+            status="failed",
+        )
+
+    def get_asset_bundle(self, bundle_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM asset_bundles WHERE bundle_id = ?", (bundle_id,)
+            ).fetchone()
+            return self._decode_asset_bundle(connection, row) if row is not None else None
+
+    def get_asset_bundle_for_asset(self, asset_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT b.*
+                FROM asset_bundles b
+                JOIN asset_bundle_items i ON i.bundle_id = b.bundle_id
+                WHERE i.asset_id = ?
+                """,
+                (asset_id,),
+            ).fetchone()
+            return self._decode_asset_bundle(connection, row) if row is not None else None
+
+    def get_asset_bundle_for_job_resource(
+        self, job_id: str, resource_id: str
+    ) -> dict[str, Any] | None:
+        """Return the unique Bundle for one Job x Resource pair."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM asset_bundles
+                WHERE job_id = ? AND resource_id = ?
+                """,
+                (job_id, resource_id),
+            ).fetchone()
+            return self._decode_asset_bundle(connection, row) if row is not None else None
+
+    # Keep a concise alias for internal callers that use the domain term.
+    get_asset_bundle_for_resource = get_asset_bundle_for_job_resource
+
+    def get_asset_bundles_for_job(self, job_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM asset_bundles
+                WHERE job_id = ?
+                ORDER BY created_at, bundle_id
+                """,
+                (job_id,),
+            ).fetchall()
+            return [self._decode_asset_bundle(connection, row) for row in rows]
+
     def create_asset(
         self,
         job_id: str,
@@ -1754,9 +3687,43 @@ class Store:
         return dict(row) if row is not None else None
 
     def quarantine_job_assets(self, job_id: str) -> None:
-        with self.transaction() as connection:
+        with self.transaction(immediate=True) as connection:
+            job = connection.execute(
+                "SELECT status FROM jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if job is None:
+                return
+            bundle_status = (
+                "cancelled"
+                if str(job["status"]) in {"cancelling", "cancelled"}
+                else "failed"
+            )
+            now = utc_now()
             connection.execute(
                 "UPDATE assets SET status = 'quarantined' WHERE job_id = ?", (job_id,)
+            )
+            connection.execute(
+                """
+                UPDATE asset_bundle_items
+                SET status = CASE
+                        WHEN asset_id IS NOT NULL OR status IN ('pending', 'ready')
+                            THEN 'quarantined'
+                        ELSE status
+                    END,
+                    updated_at = ?
+                WHERE bundle_id IN (
+                    SELECT bundle_id FROM asset_bundles WHERE job_id = ?
+                )
+                """,
+                (now, job_id),
+            )
+            connection.execute(
+                """
+                UPDATE asset_bundles
+                SET status = ?, completion = 'partial', updated_at = ?
+                WHERE job_id = ?
+                """,
+                (bundle_status, now, job_id),
             )
 
     def get_archive_for_asset(self, asset_id: str) -> dict[str, Any] | None:
@@ -1765,9 +3732,13 @@ class Store:
                 """
                 SELECT ae.*, c.sha256 AS content_sha256, c.byte_size AS content_byte_size,
                        c.media_type AS content_media_type, c.resource_format,
-                       c.relative_path, c.temporary_path, c.status AS content_status
+                       c.relative_path, c.temporary_path, c.status AS content_status,
+                       b.bundle_id, b.completion AS bundle_completion,
+                       i.role AS bundle_role, i.position AS bundle_order
                 FROM archive_entries ae
                 LEFT JOIN archive_contents c ON c.content_id = ae.content_id
+                LEFT JOIN asset_bundle_items i ON i.asset_id = ae.asset_id
+                LEFT JOIN asset_bundles b ON b.bundle_id = i.bundle_id
                 WHERE ae.asset_id = ?
                 """,
                 (asset_id,),
@@ -1842,6 +3813,20 @@ class Store:
         result["metadata"] = metadata
         result["legacy_metadata"] = _load(result.pop("legacy_metadata_json", None), None)
         result["error"] = _load(result.pop("error_json", None), None)
+        bundle_role = result.pop("bundle_role", None)
+        if bundle_role is None:
+            bundle_role = result.pop("role", None)
+        bundle_order = result.pop("bundle_order", None)
+        if bundle_order is None:
+            bundle_order = result.pop("position", None)
+        bundle_completion = result.pop("bundle_completion", None)
+        if bundle_completion is None:
+            bundle_completion = result.pop("completion", None)
+        result.setdefault("bundle_id", None)
+        result["role"] = bundle_role
+        result["position"] = bundle_order
+        result["order"] = bundle_order
+        result["completion"] = bundle_completion
         values = self._archive_values(connection, result["archive_id"])
         classification: dict[str, Any] = {
             "taxonomy_version": result.get("taxonomy_version") or "learning-v1",
@@ -2430,11 +4415,15 @@ class Store:
                    ae.notes, ae.status, ae.content_id,
                    c.relative_path, c.resource_format, c.status AS content_status,
                    s.filename, s.byte_size, s.media_type, s.sha256, r.resource_id,
-                   r.title, r.platform, r.resource_type, r.source_url
+                   r.title, r.platform, r.resource_type, r.source_url,
+                   b.bundle_id AS bundle_id, bi.role AS role, bi.position AS position,
+                   b.completion AS completion
             FROM archive_entries ae
             JOIN archive_contents c ON c.content_id = ae.content_id
             JOIN assets s ON s.asset_id = ae.asset_id
             JOIN resources r ON r.resource_id = s.resource_id
+            LEFT JOIN asset_bundle_items bi ON bi.asset_id = s.asset_id
+            LEFT JOIN asset_bundles b ON b.bundle_id = bi.bundle_id
         """
         conditions = ["ae.status = 'ready'", "c.status = 'ready'", "s.status = 'ready'"]
         values: list[Any] = []

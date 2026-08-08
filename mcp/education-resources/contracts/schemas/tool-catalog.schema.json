@@ -18,7 +18,7 @@
     },
     "catalog_version": {
       "type": "string",
-      "const": "1.0.0"
+      "const": "1.3.0"
     },
     "contract_version": {
       "$ref": "common.schema.json#/$defs/contract_version"
@@ -29,8 +29,8 @@
     },
     "tools": {
       "type": "array",
-      "minItems": 11,
-      "maxItems": 11,
+      "minItems": 13,
+      "maxItems": 13,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -57,7 +57,9 @@
               "resource_job_status",
               "resource_job_cancel",
               "resource_archive",
-              "resource_library_search"
+              "resource_library_search",
+              "resource_browse_creator",
+              "resource_inspect"
             ]
           },
           "description": {

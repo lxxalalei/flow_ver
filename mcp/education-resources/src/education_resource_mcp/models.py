@@ -132,6 +132,7 @@ class SearchTaskQuery(StrictModel):
 class SearchTask(StrictModel):
     platform: str = Field(min_length=1, max_length=64)
     queries: list[SearchTaskQuery] = Field(min_length=1, max_length=8)
+    direction: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class SearchFilters(StrictModel):

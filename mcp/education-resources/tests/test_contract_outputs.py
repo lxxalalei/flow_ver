@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib.util
 import json
+import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import threading
@@ -14,17 +18,93 @@ from referencing import Registry, Resource
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = SERVICE_ROOT.parents[1]
 CONTRACTS_ROOT = SERVICE_ROOT / "contracts"
+CATALOG_PATH = CONTRACTS_ROOT / "tool-catalog.json"
+SCHEMA_ROOT = CONTRACTS_ROOT / "schemas"
+SERVER_PATH = SERVICE_ROOT / "src" / "education_resource_mcp" / "server.py"
 SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.config import Settings
-from education_resource_mcp.downloader import DownloadResult
-from education_resource_mcp.errors import DomainError, failure, ok
-from education_resource_mcp.models import FlowTask
-from education_resource_mcp.search import StaticSearchProvider
-from education_resource_mcp.service import ResourceService
+EXPECTED_CATALOG_VERSION = "1.3.0"
+EXPECTED_CONTRACT_VERSION = "1.0.0"
+EXPECTED_TOOL_NAMES = (
+    "resource_flow_start",
+    "resource_flow_status",
+    "resource_search",
+    "resource_presentation_save",
+    "resource_selection_save",
+    "resource_download_prepare",
+    "resource_download_start",
+    "resource_job_status",
+    "resource_job_cancel",
+    "resource_archive",
+    "resource_library_search",
+    "resource_browse_creator",
+    "resource_inspect",
+)
+KEY_DOCUMENTS = (
+    WORKSPACE_ROOT / "README.md",
+    WORKSPACE_ROOT / "TOOLS.md",
+    WORKSPACE_ROOT / "docs" / "DEVELOPMENT_PLAN.md",
+    SERVICE_ROOT / "README.md",
+    CONTRACTS_ROOT / "README.md",
+    CONTRACTS_ROOT / "domain-contract.md",
+    CONTRACTS_ROOT / "compatibility.md",
+)
+STALE_DOCUMENT_PATTERNS = (
+    re.compile(r"contracts/v2"),
+    re.compile(r"\b2\.0\.0\b"),
+    re.compile(r"11\s*(?:个工具|tools)", re.IGNORECASE),
+)
+HISTORICAL_OR_NEGATED_DOCUMENT_MARKERS = (
+    "历史",
+    "过渡",
+    "迁移",
+    "旧",
+    "不存在",
+    "不是",
+    "不代表",
+    "retired",
+    "legacy",
+    "not current",
+)
+
+
+def module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+MCP_REQUIRED_MODULES = (
+    "mcp.server",
+    "mcp.client.session",
+    "mcp.client.stdio",
+    "anyio",
+)
+MCP_MISSING_MODULES = tuple(
+    module_name
+    for module_name in MCP_REQUIRED_MODULES
+    if not module_available(module_name)
+)
+MCP_AVAILABLE = not MCP_MISSING_MODULES
+
+try:
+    from education_resource_mcp.config import Settings
+    from education_resource_mcp.downloader import DownloadResult
+    from education_resource_mcp.errors import DomainError, failure, ok
+    from education_resource_mcp.models import FlowTask
+    from education_resource_mcp.search import StaticSearchProvider
+    from education_resource_mcp.service import ResourceService
+except ImportError as exc:
+    RUNTIME_AVAILABLE = False
+    RUNTIME_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+else:
+    RUNTIME_AVAILABLE = True
+    RUNTIME_IMPORT_ERROR = ""
 
 
 TERMINAL_JOB_STATES = {"succeeded", "failed", "cancelled"}
@@ -34,6 +114,7 @@ EXPECTED_FLOW_STATUS_FIELDS = {
     "current_selection",
     "current_plan",
     "current_job",
+    "current_resolutions",
 }
 LEGACY_FLOW_STATUS_FIELDS = {"latest_result_set", "active_plan", "latest_job"}
 BINDING_FIELDS = {
@@ -42,6 +123,258 @@ BINDING_FIELDS = {
     "selection_version",
     "selection_digest",
 }
+
+
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_json_pointer(document: object, pointer: str) -> object:
+    if pointer == "":
+        return document
+    value = document
+    for token in pointer.lstrip("/").split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, list):
+            value = value[int(token)]
+        else:
+            value = value[token]
+    return value
+
+
+def resolve_catalog_schema_reference(reference: str) -> tuple[Path, object]:
+    relative_path, separator, pointer = reference.partition("#")
+    if not separator or not relative_path or not pointer.startswith("/"):
+        raise ValueError(f"invalid catalog schema reference: {reference}")
+    path = (CONTRACTS_ROOT / relative_path).resolve()
+    contracts_root = CONTRACTS_ROOT.resolve()
+    if not path.is_relative_to(contracts_root):
+        raise ValueError(f"catalog schema reference escapes contracts root: {reference}")
+    document = load_json(path)
+    return path, resolve_json_pointer(document, pointer)
+
+
+def iter_schema_refs(value: object, location: tuple[str, ...] = ()):
+    if isinstance(value, dict):
+        if "$ref" in value:
+            yield location + ("$ref",), value["$ref"]
+        for key, child in value.items():
+            yield from iter_schema_refs(child, location + (str(key),))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from iter_schema_refs(child, location + (str(index),))
+
+
+def resolve_local_schema_reference(
+    source_path: Path, reference: str
+) -> tuple[Path, object, str] | None:
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", reference) or reference.startswith("//"):
+        return None
+    relative_path, separator, fragment = reference.partition("#")
+    target_path = (
+        source_path
+        if not relative_path
+        else (source_path.parent / relative_path).resolve()
+    )
+    contracts_root = CONTRACTS_ROOT.resolve()
+    if not target_path.is_relative_to(contracts_root):
+        raise ValueError(f"reference escapes contracts root: {reference}")
+    if not target_path.is_file():
+        raise FileNotFoundError(target_path)
+    target_document = load_json(target_path)
+    pointer = fragment if separator else ""
+    if pointer and not pointer.startswith("/"):
+        raise ValueError(f"invalid JSON Pointer fragment: {reference}")
+    return target_path, target_document, pointer
+
+
+def stdio_parameters(data_dir: str):
+    from mcp.client.stdio import StdioServerParameters
+
+    environment = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            [str(SERVICE_ROOT / "src"), str(SERVICE_ROOT / "tests")]
+        ),
+        "EDUCATION_RESOURCE_MCP_DATA_DIR": data_dir,
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    return StdioServerParameters(
+        command=sys.executable,
+        args=[str(SERVICE_ROOT / "tests" / "stdio_fixture_server.py")],
+        cwd=SERVICE_ROOT,
+        env=environment,
+    )
+
+
+class ContractCatalogConsistencyTests(unittest.TestCase):
+    def test_catalog_has_current_version_and_exact_13_tools(self) -> None:
+        catalog = load_json(CATALOG_PATH)
+        names = [tool["name"] for tool in catalog["tools"]]
+
+        self.assertEqual(EXPECTED_CATALOG_VERSION, catalog["catalog_version"])
+        self.assertEqual(EXPECTED_CONTRACT_VERSION, catalog["contract_version"])
+        self.assertEqual(13, len(names))
+        self.assertEqual(EXPECTED_TOOL_NAMES, tuple(names))
+        self.assertEqual(13, len(set(names)))
+        self.assertIn("resource_browse_creator", names)
+        self.assertIn("resource_inspect", names)
+
+    def test_catalog_instance_matches_catalog_schema(self) -> None:
+        catalog_schema = load_json(SCHEMA_ROOT / "tool-catalog.schema.json")
+        catalog = load_json(CATALOG_PATH)
+        validator = Draft202012Validator(
+            catalog_schema,
+            registry=build_registry(),
+            format_checker=FormatChecker(),
+        )
+        errors = sorted(
+            validator.iter_errors(catalog),
+            key=lambda error: list(error.absolute_path),
+        )
+        messages = [
+            f"/{'/'.join(str(part) for part in error.absolute_path)}: {error.message}"
+            for error in errors
+        ]
+        self.assertEqual([], messages)
+
+    def test_all_declared_schemas_exist_parse_and_resolve(self) -> None:
+        catalog = load_json(CATALOG_PATH)
+        schema_paths = sorted(SCHEMA_ROOT.rglob("*.schema.json"))
+        self.assertGreater(len(schema_paths), 0)
+
+        for path in schema_paths:
+            with self.subTest(schema=path.relative_to(CONTRACTS_ROOT)):
+                document = load_json(path)
+                Draft202012Validator.check_schema(document)
+
+        for tool in catalog["tools"]:
+            for field in ("input_schema", "output_schema"):
+                reference = tool[field]
+                with self.subTest(tool=tool["name"], schema_field=field):
+                    relative_path = reference.partition("#")[0]
+                    path = (CONTRACTS_ROOT / relative_path).resolve()
+                    self.assertTrue(path.is_file(), reference)
+                    resolved_path, fragment = resolve_catalog_schema_reference(reference)
+                    self.assertEqual(path, resolved_path)
+                    self.assertIsNotNone(fragment)
+
+    def test_all_local_schema_refs_resolve_to_files_and_json_pointers(self) -> None:
+        schema_paths = sorted(SCHEMA_ROOT.rglob("*.schema.json"))
+        for source_path in schema_paths:
+            document = load_json(source_path)
+            for location, reference in iter_schema_refs(document):
+                with self.subTest(
+                    schema=source_path.relative_to(CONTRACTS_ROOT),
+                    location="/" + "/".join(location),
+                    reference=reference,
+                ):
+                    self.assertIsInstance(reference, str)
+                    if not isinstance(reference, str):
+                        continue
+                    if re.match(
+                        r"^[A-Za-z][A-Za-z0-9+.-]*:", reference
+                    ) or reference.startswith("//"):
+                        continue
+                    try:
+                        resolved = resolve_local_schema_reference(
+                            source_path, reference
+                        )
+                        self.assertIsNotNone(resolved)
+                        if resolved is None:
+                            continue
+                        _, target_document, pointer = resolved
+                        resolve_json_pointer(target_document, pointer)
+                    except Exception as exc:
+                        self.fail(
+                            f"{source_path.relative_to(CONTRACTS_ROOT)}"
+                            f" / {'/'.join(location)} / {reference}: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+
+    def test_static_server_registration_matches_catalog(self) -> None:
+        tree = ast.parse(SERVER_PATH.read_text(encoding="utf-8"), filename=str(SERVER_PATH))
+        registered_names = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if any(
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "tool"
+                for decorator in node.decorator_list
+            ):
+                registered_names.append(node.name)
+
+        self.assertEqual(13, len(registered_names))
+        self.assertEqual(set(EXPECTED_TOOL_NAMES), set(registered_names))
+        self.assertIn("resource_browse_creator", registered_names)
+
+    def test_key_documents_do_not_claim_retired_contract_as_current(self) -> None:
+        violations = []
+        for path in KEY_DOCUMENTS:
+            self.assertTrue(path.is_file(), path)
+            for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                normalized_line = line.casefold()
+                if any(
+                    marker.casefold() in normalized_line
+                    for marker in HISTORICAL_OR_NEGATED_DOCUMENT_MARKERS
+                ):
+                    continue
+                for pattern in STALE_DOCUMENT_PATTERNS:
+                    if pattern.search(line):
+                        violations.append(
+                            f"{path.relative_to(WORKSPACE_ROOT)}:{line_number}: "
+                            f"{pattern.pattern}"
+                        )
+        self.assertEqual([], violations)
+
+    def test_server_tools_list_matches_catalog(self) -> None:
+        if not MCP_AVAILABLE:
+            self.skipTest(
+                "MCP tools/list dependencies unavailable: "
+                + ", ".join(MCP_MISSING_MODULES)
+            )
+
+        import anyio
+        from mcp.client.session import ClientSession
+        from mcp.client.stdio import stdio_client
+
+        catalog = load_json(CATALOG_PATH)
+        catalog_tools = {tool["name"]: tool for tool in catalog["tools"]}
+
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as data_dir:
+                async with stdio_client(stdio_parameters(data_dir)) as (
+                    read_stream,
+                    write_stream,
+                ):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        listed = await session.list_tools()
+                        listed_names = [tool.name for tool in listed.tools]
+                        self.assertEqual(13, len(listed_names))
+                        self.assertEqual(set(catalog_tools), set(listed_names))
+
+                        for tool in listed.tools:
+                            catalog_entry = catalog_tools[tool.name]
+                            _, expected_input_schema = resolve_catalog_schema_reference(
+                                catalog_entry["input_schema"]
+                            )
+                            self.assertEqual(
+                                set(expected_input_schema.get("required", [])),
+                                set(tool.input_schema.get("required", [])),
+                                tool.name,
+                            )
+                            self.assertEqual(
+                                set(expected_input_schema.get("properties", {})),
+                                set(tool.input_schema.get("properties", {})),
+                                tool.name,
+                            )
+
+        anyio.run(run)
 
 
 class ContractDownloader:
@@ -66,6 +399,39 @@ class ContractDownloader:
         )
 
 
+class CreatorSearchProvider:
+    """Minimal deterministic provider for the creator-browse contract test."""
+
+    def search(
+        self, search_tasks: list[dict], limit: int
+    ) -> tuple[list[dict], list[dict]]:
+        return [], []
+
+    def search_creator(
+        self, platform: str, creator_id: str, limit: int
+    ) -> tuple[list[dict], list[dict]]:
+        resource = {
+            "platform": platform,
+            "title": "创作者示例视频",
+            "source_url": f"https://example.com/{platform}/{creator_id}/video-1",
+            "resource_type": "video",
+            "summary": "用于契约测试的创作者内容",
+            "metadata": {"author": creator_id, "language": "zh-CN"},
+        }
+        platform_run = {
+            "platform": platform,
+            "status": "succeeded",
+            "query_runs": [
+                {
+                    "query": f"creator:{creator_id}",
+                    "candidate_count": 1,
+                    "failure_count": 0,
+                }
+            ],
+        }
+        return [resource][:limit], [platform_run]
+
+
 def build_registry() -> Registry:
     registry = Registry()
     for path in CONTRACTS_ROOT.rglob("*.json"):
@@ -76,6 +442,10 @@ def build_registry() -> Registry:
     return registry
 
 
+@unittest.skipUnless(
+    RUNTIME_AVAILABLE,
+    f"service runtime dependencies unavailable: {RUNTIME_IMPORT_ERROR}",
+)
 class ContractOutputTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -349,6 +719,29 @@ class ContractOutputTests(unittest.TestCase):
         self.assertFalse(error["ok"])
         self.assertEqual("FLOW_NOT_FOUND", error["error"]["code"])
         self.assert_contract("resource_search", error)
+
+    def test_browse_creator_success_output_matches_contract(self) -> None:
+        self.service.close()
+        self.service = ResourceService(
+            self.settings,
+            search_provider=CreatorSearchProvider(),
+            download_provider=ContractDownloader(self.settings.jobs_dir),
+        )
+        flow = self.service.flow_start(
+            "contract-browse-flow-0001", self._flow_task()
+        )
+        result = self.service.browse_creator(
+            flow["flow_id"],
+            "contract-browse-creator-0001",
+            "bilibili",
+            "creator-0001",
+            task_version=flow["task_version"],
+            limit=1,
+        )
+
+        self.assertEqual("reviewing", result["stage"])
+        self.assertEqual(1, len(result["candidates"]))
+        self.assert_contract("resource_browse_creator", ok(result))
 
 
 if __name__ == "__main__":

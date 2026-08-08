@@ -4,12 +4,21 @@
 
 本计划指导现有教育资源 Skill 套件在不依赖远端服务器的条件下，迁移到原生 OpenClaw。首个可运行版本采用本地 Python stdio MCP、SQLite 和隔离测试目录；待教育平台后端具备部署条件后，再迁移到远程 Streamable HTTP MCP，并按需增加薄 Tool Plugin。
 
-本文同时记录未来产品路线和当前开发实现状态。截至 2026-08-03，本地 Python
-stdio MCP、active contract `mcp/education-resources/contracts/v2/`（`2.0.0`）、
-唯一入口 Skill、OpenClaw 专用 Agent/MCP 注册和 MCP doctor/probe 已完成；v1 已冻结，
-仅保留为迁移参考。2026-08-06 已删除工作区中的教育资源 v1 契约，当前仅保留 v2。
-`glm-req/glm-5.2` Provider probe 和最小真实 Agent 回合也已通过。
-完整教育资源业务回合仍未完成验收。
+本文同时记录未来产品路线和当前开发实现状态。截至 2026-08-08，当前分支的 active
+contract 目录为 `mcp/education-resources/contracts/`，公共协议版本为 `1.0.0`、catalog
+版本为 `1.3.0`，机器目录与运行时共 13 个工具（包含 `resource_browse_creator` 和
+`resource_inspect`）。唯一入口
+Skill、Python stdio MCP 和内部状态链已建立；教育资源 v1 契约已从工作区删除，历史迁移
+说明只保留为参考。当前分支、HEAD、完整工具表和 Adapter 快照见
+[当前架构事实快照](CURRENT_ARCHITECTURE.md)。
+0019 Inspection Layer 与 0022 AssetBundle 已完成本地根验收；真实 OpenClaw 完整教育资源业务回合进入 0023。
+
+当前执行队列：
+
+- `0021 Acquisition Core/Web Materializer`：实现与本地根回归已完成；
+- `0022 Multimodal AssetBundle`：实现与本地根回归已完成；
+- `0023 E2E Hardening`：进程级离线 E2E 与重启恢复已完成；当前 macOS 缺少 `openclaw`，
+  真实 doctor/probe 和默认 Agent 完整对话待外部环境就绪。
 
 当前 macOS 检查环境尚未安装 `openclaw`，且项目 Python 依赖未安装；历史 WSL
 OpenClaw doctor/probe 结果仍保留在本文件，不能当作本机当前环境的实时验证。
@@ -37,7 +46,7 @@ OpenClaw doctor/probe 结果仍保留在本文件，不能当作本机当前环�
 
 OpenClaw 默认 Agent `main`（名称 `education-resources`）绑定本工作区，Skill
 allowlist 只包含 `learning-resource-flow`，因此只有一个用户入口。MCP 注册名为
-`education-resources`，通过 `resource_*` 过滤严格暴露 11 个领域工具。
+`education-resources`，通过 `resource_*` 过滤严格暴露 13 个领域工具。
 
 Legacy 中的 7 个 Skill 组成六阶段业务流程：
 
@@ -122,14 +131,14 @@ File SecretRef 从 `~/.claude/settings.json` 的 `/env/ANTHROPIC_AUTH_TOKEN` 读
 - 当前确认令牌用于约束 `prepare -> start` 顺序，但令牌会经过模型上下文，不能单独
   证明真实用户审批。生产版应由平台 approval record 或薄 Plugin 的工具调用审批
   注入不可伪造的授权结论。
-- active v2 的资料库检索为了本地审计仍要求有效 `flow_id`；生产版应改为可信身份
+- active 1.0.0 的资料库检索为了本地审计仍要求有效 `flow_id`；生产版应改为可信身份
   注入的 tenant-scoped 查询，不能让模型提交 `tenant_id` 或 `user_id`。
 
-### 3.6 active v2 控制面与后续契约能力
+### 3.6 active 1.0.0 控制面与后续契约能力
 
-`mcp/education-resources/contracts/v2/` 是当前唯一 active contract，版本为 `2.0.0`；
-历史 v1 已从工作区清理，迁移差异保留在 `contracts/v2/compatibility.md` 和 Git 历史中。
-v2 已完成以下控制面边界：
+`mcp/education-resources/contracts/` 是当前唯一 active contract，公共协议版本为 `1.0.0`、
+catalog 版本为 `1.3.0`；历史教育资源 v1 已从工作区清理，迁移差异保留在
+`contracts/compatibility.md` 和 Git 历史中。当前 active 1.0.0 已完成以下控制面边界：
 
 - `FlowTask` 使用目标导向结构：必填 `goal.topic`，可选 `goal.outcome`；`user_role` 与
   `resource_target` 独立且均可未知；其他用户明示条件进入 `constraints` 数组。
@@ -143,13 +152,23 @@ v2 已完成以下控制面边界：
   `selection_version + selection_digest`，避免展示或选择变化后复用旧计划。
 - `resource_flow_status` 提供可恢复的权威状态快照，但不返回确认令牌等敏感能力。
 
+0019 在不改变公共 `contract_version=1.0.0` 的前提下，以 catalog 兼容加法增加
+`resource_inspect`。输入严格为 `contract_version`、`flow_id`、`resource_id`、
+`idempotency_key`；服务端从当前 Flow 资源取得来源，不接受 URL、路径、批量 ID、检查深度或
+凭据。Candidate、ResolvedResource、Representation、Resolution 分层；SQLite migration 3
+独立保存 `resource_resolutions`，ResultSet 保持不可变。成功/partial 按
+`resource_id + source_fingerprint + inspect-v1` 缓存，unresolved 仅保留审计并允许新幂等键重试；
+`resource_flow_status` 返回 `current_resolutions` 安全摘要。Inspect 不下载、不归档、不返回
+locator、文件字节或本地路径。
+
 当前权威状态链严格为：
 
 ```text
-FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive
+FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job
+         -> AssetBundle(服务端关系) -> Asset -> Archive
 ```
 
-以下内容尚未进入 active v2，仍属于后续能力，文档、Skill 和运行时不得把它们描述成
+以下内容尚未进入 active 1.0.0，仍属于后续能力，文档、Skill 和运行时不得把它们描述成
 已经由服务端保证：
 
 - `direction_runs` 及多方向搜索的执行记录、聚合和确定性去重。
@@ -157,7 +176,56 @@ FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Ass
 - 候选证据模型，包括来源可追溯证据、内容定位、使用门槛、安全提示和重要未知。
 
 这些能力应在运行时需求、迁移和测试方案明确后，通过后续显式契约版本引入，不回填或
-重新引入旧 v1 语义，也不能破坏 v2 已建立的展示、选择与下载绑定边界。
+重新引入旧 v1 语义，也不能破坏当前已建立的展示、选择与下载绑定边界。
+
+### 3.7 0018：内部 Resource Model 与 Platform Registry 当前实现
+
+0018 在 MCP 内部新增 private Retrieval 层，不改变公共输入/输出模型。当前实现包括：
+
+- `CandidateResourceInternal`、`ResourceIdentity`、`Representation` 等内部模型，以及按
+  平台 native identity、ISBN、DOI、平台感知 canonical URL、弱指纹排序的 Identity Resolver。
+- 保守 Candidate Dedup：保持首次顺序，后续重复候选只补充缺失事实；强身份冲突不自动合并，
+  `limit` 在去重后应用。
+- `mcp/education-resources/contracts/platforms/platform-registry.json` 的 16 平台 Registry：
+  `generic` 加 15 个内置平台；generic 搜索后端和 15 个内置 Adapter 均挂载不可变、与 Registry
+  一致的 `AdapterDescriptor`。
+- `resource_search` 与 `resource_browse_creator` 共用服务端安全规范化、Identity/Dedup 和
+  公共候选生成路径；逻辑资源先去重，最终公共 `resource_id` 仍由服务端随机生成。
+
+0018 的兼容与验收边界固定如下：
+
+- 公共 `contract_version=1.0.0`、当时 `catalog_version=1.2.0`、13 个 MCP Tool、现有公共资源
+  输出和下载/归档语义保持不变；`resource_inspect` 是 0019 的兼容新增工具。
+- SQLite 仍是 Flow、ResultSet、Presentation、Selection、Plan、Job、Asset、Archive 和
+  Resolution 的权威状态；0018 不新增迁移，0019 使用 migration 3 独立保存 Resolution；
+  内部 Identity 不是可提交的业务 ID。
+- Registry 与 Adapter descriptor 只属于服务内部事实和一致性校验，登录态继续由独立的
+  session registry 管理；历史/外部仅有 `platform_id` 的 stub 保持兼容。
+- 0018 阶段的 inspect 能力关闭事实已由 0019 更新：当前 Registry 精确启用 generic、Bilibili、
+  NLC、Anna/Libgen、Ximalaya、Zhihu、SmartEdu 七个平台；其余平台返回
+  `FEATURE_NOT_SUPPORTED`。Adaptive Retrieval Loop 已在 0020 通过兼容字段、migration 4、
+  immutable extend、SearchRun provenance、事实 coverage 与 Skill evaluator 实现。
+
+### 3.8 0022：AssetBundle 多资产关系与部分结果
+
+0022 保持公共 `contract_version=1.0.0`、13 个工具和既有 Job 生命周期状态；catalog 兼容加法
+升至 `1.3.0`，不新增 Bundle Tool，也不增加 `partial` Job 状态。当前冻结的领域边界为：
+
+- `Artifact` 是 Acquisition 的临时文件描述；`Asset` 是通过服务端校验后持久化的不可变内容；
+  `AssetBundle` 是一个 Job × Resource 的有序关系，不等于 ZIP 或本地目录。
+- 一个可用 Bundle 必须有且只有一个 `primary`；正式角色固定为 `primary`、`subtitle`、`cover`、
+  `metadata`、`attachment`、`transcript`、`companion`。失败 BundleItem 的 `asset_id` 为空，
+  不创建零字节假 Asset。
+- `completion=complete|partial` 只表达结果完整度。已有 primary 且存在失败项才是 partial；
+  没有 primary 为 failed；取消为 cancelled 并 quarantine，不自动重放网络副作用。
+- 旧单文件 Provider 映射 primary，旧有序列表首项映射 primary、其余 attachment；SmartEdu
+  保留视频/PDF/MP3/显式封面的来源关系和逐项失败，认证、策略阻断或取消终止整项获取。
+- Archive 仍按 `asset_id` 逐 Asset 归档，Library 仍按 Asset 返回并恢复 Bundle 关系；模型不能
+  提交或伪造 bundle_id、role、order、item_key。
+
+数据层使用 migration 5 的 `asset_bundles`、`asset_bundle_items`、`asset_bundle_failures`，
+历史 Asset 按 `jobs.asset_ids_json` 顺序回填 singleton Bundle，首项为 primary、其余为
+attachment，不按文件名猜测。该迁移和 0022 跨层本地根验收均已完成。
 
 ## 4. 目标目录
 
@@ -166,9 +234,11 @@ mcp/
 └── education-resources/
     ├── README.md
     ├── pyproject.toml
-    ├── contracts/v2/                  # active 2.0.0 契约
+    ├── contracts/                    # active 1.0.0 契约与 catalog
+    │   └── platforms/                # 16 平台 Registry（机器事实）
     ├── src/education_resource_mcp/
     │   ├── adapters/
+    │   ├── retrieval/                 # private resource model / identity / dedup
     │   ├── config.py
     │   ├── downloader.py
     │   ├── errors.py
@@ -194,8 +264,8 @@ legacy/
 
 ## 5. 领域工具契约
 
-active contract 为 `mcp/education-resources/contracts/v2/`，契约版本 `2.0.0`。对
-OpenClaw 公开的领域工具严格为以下 11 个，不为各平台 Adapter 额外暴露工具：
+active contract 为 `mcp/education-resources/contracts/`，公共协议版本为 `1.0.0`、catalog
+版本为 `1.3.0`。对 OpenClaw 公开的领域工具严格为以下 13 个，不为各平台 Adapter 额外暴露工具：
 
 | 工具 | 副作用 | 主要返回 |
 |---|---:|---|
@@ -206,15 +276,22 @@ OpenClaw 公开的领域工具严格为以下 11 个，不为各平台 Adapter �
 | `resource_selection_save` | 写选择状态 | `Selection`、选择版本和选择摘要 |
 | `resource_download_prepare` | 写下载计划，不下载 | `DownloadPlan`、大小/格式/风险摘要、确认要求 |
 | `resource_download_start` | 启动任务 | `Job`、`job_id`、任务状态 |
-| `resource_job_status` | 无或更新时间戳 | 进度、`Asset`、结构化错误 |
+| `resource_job_status` | 无或更新时间戳 | 进度、`Asset`/Bundle、结构化错误 |
 | `resource_job_cancel` | 请求取消 | 最终或过渡任务状态 |
-| `resource_archive` | 写资料库 | `Archive`、`asset_id`、归档元数据 |
-| `resource_library_search` | 无 | 已归档资产列表 |
+| `resource_archive` | 写资料库 | `Archive`、`asset_id`、归档元数据和可选 Bundle 投影 |
+| `resource_library_search` | 无 | 已归档 Asset 列表和可选 Bundle 投影 |
+| `resource_browse_creator` | 写结果集 | 创作者内容列表与部分失败摘要 |
+| `resource_inspect` | 写 Resolution | 当前 Flow 单个资源的有界核验、可用性、Representation 与失败摘要 |
 
 权威状态链为：
 
 ```text
-FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive
+FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job
+         -> AssetBundle(服务端关系) -> Asset -> Archive
+
+CandidateResource -> ResolvedResource -> Representation -> Resolution
+                                      ^
+                                      resource_inspect
 ```
 
 核心约束：
@@ -232,14 +309,26 @@ FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Ass
 - `resource_download_start` 只接受未过期的 `plan_id`、确认令牌和幂等键；确认令牌不得由
   `resource_flow_status` 返回。
 - Job 状态机至少包含 `queued`、`running`、`cancelling`、`succeeded`、`failed`、`cancelled`。
+- Job `status` 不含 `partial`；`completion=complete|partial` 只表达已有 primary 时的 Bundle
+  完整度。公共角色固定为 `primary`、`subtitle`、`cover`、`metadata`、`attachment`、
+  `transcript`、`companion`。
 - `cancelled` 不得被计为成功；临时文件必须清理或明确隔离为不可归档状态。
-- `resource_archive` 只接受已完成 Job 产生的 `asset_id`，不接受本地路径。
+- `resource_archive` 仍只接受已完成 Job 产生的服务端 `asset_id`，不接受本地路径或 Bundle
+  关系；Archive 以 Asset 为粒度，Library 通过 BundleItem 恢复关系。
+- `resource_inspect` 只接受当前 Flow 的 `resource_id`，不下载、不归档，且不返回 locator、文件字节或本地路径。
 - `direction_runs`、多方向聚合、`filter_execution`、完整硬过滤执行报告和候选证据模型
-  不属于当前 11 个工具的 v2 保证，留待后续显式契约版本。
+  不属于当前 13 个工具的 active 1.0.0 保证，留待后续显式契约版本。
 
 ## 6. 数据与状态
 
 ### 6.1 SQLite 作为权威状态
+
+0019 通过 migration 3 新增 `resource_resolutions`；0020 的 migration 4 同时保存可恢复的
+检索轮次、provenance、coverage 与私有 identity；0022 在当前工作树增加 migration 5，
+建立 `asset_bundles`、`asset_bundle_items`、`asset_bundle_failures`。`resource_resolutions`
+与 `resources/search_result_sets` 分表，保存 `resolution_id`、Flow/resource ownership、
+profile、source fingerprint、状态、受控解析/检查/失败 JSON 和时间戳，并以
+资源/profile/fingerprint 唯一约束实现 Resolution 缓存。ResultSet 快照不可被 Inspect 改写。
 
 建议首版至少建立：
 
@@ -251,6 +340,10 @@ FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Ass
 - `download_plans`
 - `jobs`
 - `assets`
+- `asset_bundles`
+- `asset_bundle_items`
+- `asset_bundle_failures`
+- `resource_resolutions`
 - `schema_migrations`
 - `archive_contents`
 - `archive_entries`
@@ -361,10 +454,10 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 
 当前结果：
 
-- active `mcp/education-resources/contracts/v2/` 已提供领域不变量、41 个稳定错误码、
-  严格 11 个工具目录和 Draft 2020-12 输入/输出 Schema；契约版本为 `2.0.0`。
-  v2 延续历史 v1 中仍有效的错误语义，并追加控制面与任务终态错误码；旧 v1 文件不再
-  作为工作区契约分发。
+- active `mcp/education-resources/contracts/` 已提供领域不变量、41 个稳定错误码、
+  `contract_version=1.0.0`、`catalog_version=1.3.0` 和 Draft 2020-12 输入/输出 Schema；
+  机器目录、catalog meta-schema 与 Python runtime 当前都是 13 个工具；旧教育资源 v1
+  文件不再作为工作区契约分发。
 - Python stdio MCP、SQLite repository、配置、结构化业务错误和协议 smoke test
   已实现。
 - MCP initialize、tools/list 和 tools/call 测试通过；运行数据写入独立 data 目录，
@@ -397,8 +490,8 @@ data:    /home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data
 - 实现 `resource_download_prepare`、`resource_download_start`、状态和取消工具。
 - 服务端重新执行来源、Selection、策略、大小和路径验证。
 - 建立 Job worker、幂等和临时文件提交协议。
-- 首批支持公开网页正文、公开文件直链，以及已接入的 Bilibili、SmartEdu、喜马拉雅下载器；
-  平台下载仍需合法会话和逐平台真实验收。
+- 首批支持公开网页正文、公开文件直链，以及运行时已注册的 Bilibili、SmartEdu、喜马拉雅、
+  Douyin、Anna's Archive 下载器；平台下载仍需合法会话、平台条款审查和逐平台真实验收。
 
 当前结果：已实现 prepare/confirmation/start 两阶段、幂等 Job、状态查询、取消、
 受控临时目录、公开 HTTP(S) 下载和资产提交；网络与路径策略测试覆盖私网/保留地址、
@@ -432,6 +525,56 @@ cancelled/failed Asset 不可归档，但审计发现它仍使用旧成长领域
 复制；索引和文件提交可对账恢复；结构化过滤没有子串误匹配；分页无重复或遗漏；只返回
 ready 且文件存在的记录和安全相对路径；任意路径输入被拒绝；完整教育资源 MCP 测试无回归。
 
+### 阶段 5.1：资源核验与 Resolution — 实现与根验收完成（0019）
+
+工作：
+
+- 以 catalog 兼容加法新增 `resource_inspect`，保持公共 `contract_version=1.0.0`，
+  0019 当时的 `catalog_version=1.1.0`；输入严格为 `contract_version`、`flow_id`、`resource_id`、
+  `idempotency_key`，服务端从 Flow 资源取得来源。
+- 建立 Candidate、ResolvedResource、Representation、Resolution 分层；SQLite migration 3
+  新建 `resource_resolutions`，不改写 immutable ResultSet。
+- 实现 `resource_inspect:{flow_id}` 幂等 scope、source fingerprint 缓存、resolved/partial
+  跨键缓存、unresolved 新键重试和 `resource_flow_status.current_resolutions` 恢复摘要。
+- 实现 generic 有界 GET、逐跳 SSRF/重定向校验、1 MiB 上限、MIME/魔数交叉验证，以及
+  Bilibili、NLC、Anna/Libgen、Ximalaya、Zhihu、SmartEdu 六个平台 Inspector；其余平台
+  返回 `FEATURE_NOT_SUPPORTED`。
+- 保持下载 `prepare -> 用户明确确认 -> start` 两阶段不变；Inspect 不下载、不归档，
+  不返回 locator、文件字节或本地路径。
+
+当前实现：上述代码、Schema、Registry、服务注册和恢复输出已由 0019 工作包完成；实现者
+报告的定向测试包括契约 4/4、存储 11/11、Inspection Core 7/7、Generic/Core 18/18、
+两组平台 Inspector 各 26/26、服务接入 30/30（其中 Inspect Service 9/9）。当前阶段
+最终根验收合并复跑 109/109 通过，同时通过源码编译、23 条本地 Markdown 链接、
+16 平台中 inspect 7 开 9 关、catalog/runtime 13 tools 与差异检查。这些结果仍不等于
+全量测试、真实平台网络或 OpenClaw doctor/probe 验收。
+
+根验收：需运行契约、迁移、SSRF/重定向/大小/MIME、安全、服务、stdio、编译、链接和差异
+检查，并确认旧 12 个工具的兼容性。未完成根验收前，不得将 0019 写成生产可用或完整闭环完成。
+
+### 阶段 5.2：多模态 AssetBundle（0022）— 实现与本地根验收完成
+
+工作：
+
+- 将 `Artifact`、`Asset`、`AssetBundle`、`BundleItem` 和 `PartialFailure` 的领域边界固化为
+  文档与服务端持久化语言；Bundle 是关系，不是 ZIP。
+- 保持公共 `contract_version=1.0.0`、13 个工具和 Job 生命周期状态；catalog 升至 `1.3.0`，
+  只追加可选的 `bundle_id`、`role`、`order`、`bundle_completion`、`completion`、`bundle_ids`
+  和 `item_key` 输出。
+- 使用 migration 5 建立 `asset_bundles`、`asset_bundle_items`、`asset_bundle_failures`；
+  历史资产按 `jobs.asset_ids_json` 顺序回填 singleton Bundle，首项 primary、其余 attachment。
+- 保留旧 DownloadProvider 和 SmartEdu 来源关系；失败项不创建假 Asset，Archive 继续按
+  Asset 归档，Library 通过 BundleItem 恢复关系；取消 quarantine，重启不自动重放网络副作用。
+
+当前结果与边界：catalog 1.3.0、migration 5、服务层多资产持久化、SmartEdu/旧 Provider、
+Archive/Library 关系、取消 quarantine 与重启终结语义均已落盘。契约 Bundle 检查 3/3、
+16 个 JSON Schema 校验和 education-resources 全量本地固定夹具回归 348/348 通过。真实杀
+进程、真实平台网络、OpenClaw doctor/probe 和生产多租户隔离仍没有验收结论，转入 0023。
+
+验收：视频、音频、图书、课程固定夹具覆盖 primary/companion 与课程部分失败；验证角色和顺序、
+旧 Provider 兼容、幂等冲突、取消 quarantine、进程杀死恢复、Archive/Library 关系、Schema、
+编译、链接和完整本地回归；这些本地结果不得写成生产就绪。
+
 ### 阶段 6：OpenClaw 原生联调 — 部分完成
 
 工作：
@@ -452,7 +595,7 @@ ready 且文件存在的记录和安全相对路径；任意路径输入被拒�
   与 `mcp probe education-resources --json` 已成功，证明 MCP 进程、工具发现和协议
   调用可用。
 - 已配置 `glm-req/glm-5.2` 为默认模型。模型 Provider probe 返回成功，最小
-  `openclaw agent --local` 回合能够加载工作区、唯一入口 Skill 和 11 个 MCP 工具，
+  `openclaw agent --local` 回合能够加载工作区、唯一入口 Skill 和当时的 11 个 MCP 工具，
   由目标模型返回预期最终文本，未使用 fallback。
 - 唯一入口 Skill 已从用户结果重新构建需求理解、澄清、发现策略、候选判断和响应
   references；没有恢复旧 Intent/Search/Selector Skill、Stage JSON 或模型评分文件。
@@ -509,11 +652,16 @@ ready 且文件存在的记录和安全相对路径；任意路径输入被拒�
 - 用户拒绝下载、修改选择、取消任务和恢复会话。
 - 单个平台失败、网络超时、超限文件和无效内容。
 
+当前机器已新增 4 个真实 MCP stdio 子进程 E2E：原始 JSON-RPC 调用 13 个公开工具，覆盖
+多资源 Inspect/确认/partial Bundle、网页 ZIP、逐 Asset Archive/Library、AUTH_REQUIRED 后
+由外部会话就绪并创建新 Job，以及下载中强杀进程后同 SQLite 重启并确认不自动重放。
+4/4 E2E 和包含它们的全量本地回归 352/352 通过；测试数据全部位于临时目录且不访问网络。
+
 真实联网测试必须低频、可控且符合目标站点访问边界；默认测试使用录制响应、Mock 或本地测试服务器。
 
-### 当前 OpenClaw 验证快照
+### 历史 OpenClaw 验证快照（不代表当前 macOS）
 
-当前默认 Node 已切换为用户级 `24.18.1`，OpenClaw CLI 可以直接运行：
+历史 WSL 环境的默认 Node 曾切换为用户级 `24.18.1`，OpenClaw CLI 可以直接运行：
 
 ```bash
 node --version
@@ -547,8 +695,8 @@ openclaw agent --agent main --local \
 目录中的 OpenClaw，`mcp status/doctor/probe` 曾出现无输出挂起。升级 Node 本身没有
 解决问题。改为 WSL 原生安装后，`agents list`、`mcp status --verbose`、
 `mcp doctor education-resources --probe` 和 `mcp probe education-resources --json`
-均成功；active v2 的工具发现口径已更新为严格 11 个工具，验收要求
-`diagnostics=[]`。因此该 MCP CLI 挂起已解决，主要原因是跨 Windows/WSL 混用安装，
+均成功；该历史快照早于 `resource_browse_creator` 接入，不能作为当前 12 工具
+catalog 的实时验收，当前重新验证仍要求 `diagnostics=[]`。因此该 MCP CLI 挂起已解决，主要原因是跨 Windows/WSL 混用安装，
 而不是 Python stdio MCP 协议回归。
 
 ## 10. 回滚策略
@@ -572,17 +720,18 @@ openclaw agent --agent main --local \
 
 ## 12. 下一项建议任务
 
-优先完成 active v2 控制面的运行时收敛和阶段 6 完整业务回合验收：
+当前优先执行 `0023 E2E Hardening`。0022 已完成本地根验收，阶段 6 的 OpenClaw 完整业务
+回合仍按其独立验收边界推进：
 
 1. 让 Python 实现、SQLite 状态、唯一入口 Skill 和契约测试完整采用
-   `mcp/education-resources/contracts/v2/`；教育资源 v1 已不再随工作区分发。
+   `mcp/education-resources/contracts/`；教育资源 v1 已不再随工作区分发。
 2. 通过默认 Agent `main` 跑通
    “澄清 -> 搜索 -> ResultSet -> 实际展示 -> 选择 -> 确认 -> 下载 -> 归档 -> 检索”，
    验证完整状态链
-   `FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> Asset -> Archive`。
-3. 增加真实模型 Tool 调用断言、11 个公开工具的发现断言、绑定字段失配测试和会话恢复
+   `FlowTask -> ResultSet -> Presentation -> Selection -> DownloadPlan -> Job -> AssetBundle -> Asset -> Archive`。
+3. 增加真实模型 Tool 调用断言、13 个公开工具的发现断言、绑定字段失配测试和会话恢复
    用例，确保失败可解释且不会绕过展示、选择或确认边界。
 4. 在后续独立契约设计中再引入 `direction_runs`、多方向搜索聚合、`filter_execution`、
-   完整硬过滤执行状态和候选证据模型；这些能力当前不属于 active v2。
+   完整硬过滤执行状态和候选证据模型；这些能力当前不属于 active 1.0.0。
 5. 如需常驻 Gateway，再在不记录凭据的前提下完成客户端认证和设备配对。
 6. 随后完成回滚演练和进程中断恢复，再扩大 Adapter 范围。

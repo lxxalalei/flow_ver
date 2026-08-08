@@ -1,0 +1,309 @@
+{
+  "$schema": "../schemas/platform-registry.schema.json",
+  "registry_version": "1.0.0",
+  "platforms": [
+    {
+      "platform_id": "generic",
+      "display_name": "通用 Web 搜索",
+      "resource_types": ["article", "book", "document", "video", "audio", "course", "dataset", "other"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": true, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "search_engine", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": [],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {
+          "remove_fragment": true,
+          "removable_query_parameters": ["fbclid", "gclid", "msclkid", "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term"]
+        }
+      }
+    },
+    {
+      "platform_id": "bilibili",
+      "display_name": "哔哩哔哩",
+      "resource_types": ["video"],
+      "capabilities": {"search": true, "browse_creator": true, "inspect": true, "acquire": true},
+      "auth_mode": "optional",
+      "auth_kind": "cookie",
+      "source_traits": ["web", "media", "video", "community", "creator"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["platform_video", "webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["bvid"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {
+          "remove_fragment": true,
+          "removable_query_parameters": ["from", "spm_id_from", "vd_source", "share_source", "share_medium"]
+        }
+      }
+    },
+    {
+      "platform_id": "douyin",
+      "display_name": "抖音",
+      "resource_types": ["video"],
+      "capabilities": {"search": true, "browse_creator": true, "inspect": false, "acquire": true},
+      "auth_mode": "required",
+      "auth_kind": "cookie",
+      "source_traits": ["web", "media", "video", "community", "creator"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["platform_video", "webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["aweme_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {
+          "remove_fragment": true,
+          "removable_query_parameters": ["from_tab", "previous_page", "mode", "enter_from", "share_token"]
+        }
+      }
+    },
+    {
+      "platform_id": "zhihu",
+      "display_name": "知乎",
+      "resource_types": ["article"],
+      "capabilities": {"search": true, "browse_creator": true, "inspect": true, "acquire": true},
+      "auth_mode": "optional",
+      "auth_kind": "cookie",
+      "source_traits": ["web", "community", "creator", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["answer_id", "article_id", "question_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {
+          "remove_fragment": true,
+          "removable_query_parameters": ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]
+        }
+      }
+    },
+    {
+      "platform_id": "smartedu",
+      "display_name": "国家中小学智慧教育平台",
+      "resource_types": ["document", "video", "audio", "course", "other"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": true, "acquire": true},
+      "auth_mode": "optional",
+      "auth_kind": "token",
+      "source_traits": ["web", "education", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["platform_resource", "webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["content_id", "course_id", "resource_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "ximalaya",
+      "display_name": "喜马拉雅",
+      "resource_types": ["audio"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": true, "acquire": true},
+      "auth_mode": "optional",
+      "auth_kind": "cookie",
+      "source_traits": ["web", "audio", "media", "community"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["platform_audio", "webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["album_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {
+          "remove_fragment": true,
+          "removable_query_parameters": ["from", "source", "utm_source"]
+        }
+      }
+    },
+    {
+      "platform_id": "cctv",
+      "display_name": "央视网",
+      "resource_types": ["video"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "video", "media", "government"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["video_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "yixi",
+      "display_name": "一席",
+      "resource_types": ["video"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "video", "education"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["speech_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "kepu",
+      "display_name": "科普中国",
+      "resource_types": ["article"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "education", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["article_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "baiduwenku",
+      "display_name": "百度文库",
+      "resource_types": ["document"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "document", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["document_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "runoob",
+      "display_name": "菜鸟教程",
+      "resource_types": ["article"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "education", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["article_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "nlc",
+      "display_name": "国家图书馆",
+      "resource_types": ["book"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": true, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "library", "archive", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["document_id"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "open163",
+      "display_name": "网易公开课",
+      "resource_types": ["course"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "video", "education", "open_course"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["pid"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "annas-archive",
+      "display_name": "Anna's Archive",
+      "resource_types": ["book"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": true, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "library", "archive", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["platform_book", "webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["md5"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "weibo",
+      "display_name": "微博",
+      "resource_types": ["article"],
+      "capabilities": {"search": true, "browse_creator": true, "inspect": false, "acquire": true},
+      "auth_mode": "required",
+      "auth_kind": "cookie",
+      "source_traits": ["web", "community", "creator"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["bid"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    },
+    {
+      "platform_id": "wechat",
+      "display_name": "微信公众号",
+      "resource_types": ["article"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": false, "acquire": true},
+      "auth_mode": "optional",
+      "auth_kind": "cookie",
+      "source_traits": ["web", "community", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": false},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": [],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
+    }
+  ]
+}
