@@ -62,3 +62,4 @@
 | [0032-skill-reference-compat-cleanup.md](0032-skill-reference-compat-cleanup.md) | completed | 删除旧 reference 兼容壳并保留历史路径迁移说明 |
 | [0033-project-governance-integration.md](0033-project-governance-integration.md) | completed | 融合最小修改、复杂度举证、scope checkpoint 与分级验证规则 |
 | [0034-skill-semantic-loss-audit.md](0034-skill-semantic-loss-audit.md) | completed | 对照 0031 前 Skill 语义，最小补回仍有效的对话/候选/Inspect/获取规则 |
+| [0035-deleted-skill-reference-complete-audit.md](0035-deleted-skill-reference-complete-audit.md) | completed | 对全部旧 Skill/reference 做逐文件语义守恒审计并补齐遗漏 |
