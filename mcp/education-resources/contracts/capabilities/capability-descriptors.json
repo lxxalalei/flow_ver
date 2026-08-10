@@ -1,0 +1,221 @@
+{
+  "$schema": "../schemas/capability-descriptors.schema.json",
+  "catalog_version": "1.1.0",
+  "registry_version": "1.1.0",
+  "descriptors": [
+    {
+      "descriptor_id": "cap_generic_document_primary_direct_v1",
+      "descriptor_version": "1.1.0",
+      "registry_version": "1.1.0",
+      "platform_id": "generic",
+      "resource_types": [
+        "article",
+        "book",
+        "course",
+        "dataset",
+        "document",
+        "other"
+      ],
+      "scope": "primary_resource",
+      "representation": {
+        "kind": "document",
+        "role": "primary",
+        "containers": [
+          "pdf",
+          "epub",
+          "doc",
+          "docx",
+          "ppt",
+          "pptx",
+          "txt",
+          "rtf",
+          "odt",
+          "zip"
+        ],
+        "mime_types": [
+          "application/pdf",
+          "application/epub+zip",
+          "application/msword",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/vnd.ms-powerpoint",
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "text/plain",
+          "application/rtf",
+          "application/vnd.oasis.opendocument.text",
+          "application/zip"
+        ],
+        "materializable": true
+      },
+      "strategy": "direct_file",
+      "provider": {
+        "provider_id": "generic-direct",
+        "version": "1.0.0",
+        "scope": "primary_resource"
+      },
+      "inspector": {
+        "inspector_id": "generic",
+        "version": "1.0.0"
+      },
+      "prerequisites": {
+        "required_fields": [],
+        "auth_mode": "none",
+        "network_policy": "public_http",
+        "max_bytes": 5368709120,
+        "max_retries": 2,
+        "requires_session": false
+      },
+      "policy_class": "public_direct_file",
+      "fallback": {
+        "allowed": false,
+        "max_scope": "primary_resource",
+        "allowed_scopes": [],
+        "on_errors": [],
+        "scope_preserving": true
+      },
+      "source": {
+        "kind": "built_in",
+        "name": "capability-registry:generic-document-primary-direct",
+        "published_at": "2026-08-08T00:00:00Z"
+      },
+      "compatibility": {
+        "read_min": "1.0.0",
+        "write_version": "1.1.0",
+        "breaking_major": 1
+      },
+      "deprecated": false,
+      "notes": "Executable only when Inspection proves a concrete primary document representation and canonical source fingerprint.",
+      "descriptor_digest": "sha256:a30ba16bf1b70ef81cc9f31003a122d0607eb3094a92de2b3fa864725f5c2421"
+    },
+    {
+      "descriptor_id": "cap_generic_webpage_landing_materialize_v1",
+      "descriptor_version": "1.1.0",
+      "registry_version": "1.1.0",
+      "platform_id": "generic",
+      "resource_types": [
+        "article",
+        "audio",
+        "book",
+        "course",
+        "dataset",
+        "document",
+        "other",
+        "video"
+      ],
+      "scope": "landing_page",
+      "representation": {
+        "kind": "webpage",
+        "role": "landing",
+        "containers": [
+          "html"
+        ],
+        "mime_types": [
+          "text/html"
+        ],
+        "materializable": true
+      },
+      "strategy": "web_materialize",
+      "provider": {
+        "provider_id": "generic-web-materializer",
+        "version": "1.0.0",
+        "scope": "landing_page"
+      },
+      "inspector": {
+        "inspector_id": "generic",
+        "version": "1.0.0"
+      },
+      "prerequisites": {
+        "required_fields": [],
+        "auth_mode": "none",
+        "network_policy": "public_http",
+        "max_bytes": 104857600,
+        "max_retries": 2,
+        "requires_session": false
+      },
+      "policy_class": "public_web_materialization",
+      "fallback": {
+        "allowed": false,
+        "max_scope": "landing_page",
+        "allowed_scopes": [],
+        "on_errors": [],
+        "scope_preserving": true
+      },
+      "source": {
+        "kind": "built_in",
+        "name": "capability-registry:generic-webpage-materialize",
+        "published_at": "2026-08-08T00:00:00Z"
+      },
+      "compatibility": {
+        "read_min": "1.0.0",
+        "write_version": "1.1.0",
+        "breaking_major": 1
+      },
+      "deprecated": false,
+      "notes": "An explicit materialize action may bind this landing-page representation; it is never upgraded to a primary-resource download.",
+      "descriptor_digest": "sha256:50f8d3f8ede4e260110bcb148ca2abb8dd75f87e95c1be328f85a4a5c0e0cfff"
+    },
+    {
+      "descriptor_id": "cap_smartedu_document_primary_direct_v1",
+      "descriptor_version": "1.1.0",
+      "registry_version": "1.1.0",
+      "platform_id": "smartedu",
+      "resource_types": [
+        "course",
+        "document",
+        "other"
+      ],
+      "scope": "primary_resource",
+      "representation": {
+        "kind": "document",
+        "role": "primary",
+        "containers": [
+          "pdf",
+          "zip"
+        ],
+        "mime_types": [
+          "application/pdf",
+          "application/zip"
+        ],
+        "materializable": true
+      },
+      "strategy": "direct_file",
+      "provider": {
+        "provider_id": "smartedu-resource",
+        "version": "1.0.0",
+        "scope": "primary_resource"
+      },
+      "inspector": {
+        "inspector_id": "smartedu",
+        "version": "1.0.0"
+      },
+      "prerequisites": {
+        "required_fields": [],
+        "auth_mode": "optional",
+        "network_policy": "platform_allowlist",
+        "max_bytes": 5368709120,
+        "max_retries": 2,
+        "requires_session": false
+      },
+      "policy_class": "smartedu_public_resource",
+      "fallback": {
+        "allowed": false,
+        "max_scope": "primary_resource",
+        "allowed_scopes": [],
+        "on_errors": [],
+        "scope_preserving": true
+      },
+      "source": {
+        "kind": "built_in",
+        "name": "capability-registry:smartedu-document-primary-direct",
+        "published_at": "2026-08-08T00:00:00Z"
+      },
+      "compatibility": {
+        "read_min": "1.0.0",
+        "write_version": "1.1.0",
+        "breaking_major": 1
+      },
+      "deprecated": false,
+      "notes": "Executable only when SmartEdu inspection binds a concrete primary document; platform support alone is insufficient.",
+      "descriptor_digest": "sha256:b847a01769bf6afeec3228b6853e1cb502e4062ae19010db7fcc225b733344de"
+    }
+  ]
+}

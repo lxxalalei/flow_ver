@@ -58,8 +58,7 @@ Gap 和 StopDecision 见 [`adaptive-retrieval.md`](adaptive-retrieval.md)。
 同一目标需要换方向时，改变搜索任务本身，例如从“获得原理图解”改为“获得可跟做实验以
 关闭实践缺口”，不要只替换近义词。新方向必须说明它要关闭的 Gap。
 
-未知年龄或年级不默认追问，也不因此减少搜索范围。只有教材同步、册次匹配或其他明确需要
-定位学段的硬范围缺失时才澄清年级/册次；其余情况使用通用儿童安全和理解门槛审查。
+只在缺失的硬条件会实质改变资源范围时澄清，例如教材同步或册次匹配任务缺少必要范围。
 
 ### 可信站点定向搜索
 
@@ -118,12 +117,22 @@ Gap 和 StopDecision 见 [`adaptive-retrieval.md`](adaptive-retrieval.md)。
 
 ### 平台路线按需选择
 
-规划或比较具体平台时，读取 [`platform-capabilities.md`](platform-capabilities.md)，并以其中引用的
-mcp/education-resources/contracts/platforms/platform-registry.json 作为能力、认证和
-获取策略的机器权威。平台选择仍由目标、resource_target 和显式 constraints 决定：
-先选与本轮学习结果直接相关的少量路线，只有确有互补价值时才增加平台；不要因为注册表
-列出 16 个平台就无差别全搜。平台能力和平台名称只说明检索或获取路径，不构成相关性、
-可信度、儿童适用性或内容质量证据。
+规划或比较具体平台时，读取 [`platform-capabilities.md`](platform-capabilities.md)。其中引用的
+[`platform-registry.json`](../../../mcp/education-resources/contracts/platforms/platform-registry.json)
+`1.0.0` 只作为平台身份、检索、会话路由和历史 inspect/acquire 声明的机器 Registry，不是
+当前 Tool catalog 1.5 的 acquisition 执行权威。静态执行声明来自独立的
+[`capability-descriptors.json`](../../../mcp/education-resources/contracts/capabilities/capability-descriptors.json)，
+其 `catalog_version`、`registry_version` 均为 `1.1.0`；实际执行仍必须同时满足当前 readiness、
+持久化 Resolution/Representation、Eligibility 和不可变 Plan/Execution binding。
+
+当前只有 `generic-direct`、`generic-web-materializer`、`smartedu-resource` 三条 exact route，
+且所有 fallback 都关闭。0021/0022 的 Bilibili、Ximalaya、Douyin、Anna Downloader 只属于
+历史实现与 Bundle 兼容事实；缺少 exact route 或任一运行时权威事实时必须保留结构化缺口，
+不得让 generic Provider 接管。
+
+平台选择仍由目标、resource_target 和显式 constraints 决定：先选与本轮学习结果直接相关的
+少量检索路线，只有确有互补价值时才增加平台；不要因为 Registry 列出 16 个平台就无差别
+全搜。平台声明和平台名称不构成相关性、可信度、儿童适用性、内容质量或可执行下载证据。
 
 ## 平台登录与搜索质量
 
@@ -139,9 +148,9 @@ MCP 搜索执行层会自动从 SessionStore 读取已保存的平台登录态�
 | optional / token | smartedu | 先按公开路线搜索；需要令牌时按结构化状态处理 |
 | required / cookie | douyin, weibo | 缺少合法会话时可能返回 AUTH_REQUIRED，按登录流程处理 |
 
-该分级只描述会话路由，不描述结果质量。平台的具体 resource types、creator browse 和
-专用 acquisition/webpage 回退按需查阅 platform-capabilities.md，不要在本节维护第二份
-平台能力清单。
+该分级只描述会话与检索路由，不描述结果质量。平台的 resource types、creator browse、
+Inspection 和历史 acquisition 声明按需查阅 platform-capabilities.md；当前 acquisition route
+仍以 capability catalog + 运行时 authority chain 为准，不要在本节维护第二份平台能力清单。
 
 ### 何时提醒
 

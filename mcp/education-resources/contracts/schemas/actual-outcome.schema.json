@@ -1,0 +1,562 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/actual-outcome.schema.json",
+  "title": "Education resource provider actual outcome",
+  "description": "A server-generated result of executing one capability-aware Plan item. It records planned-versus-actual scope and never accepts a client-selected provider, locator or path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "outcome_id",
+    "plan_item_id",
+    "resource_id",
+    "planned_scope",
+    "actual_scope",
+    "status",
+    "provider",
+    "strategy",
+    "observed_at",
+    "outcome_digest"
+  ],
+  "properties": {
+    "contract_version": {
+      "$ref": "common.schema.json#/$defs/contract_version"
+    },
+    "outcome_id": {
+      "$ref": "common.schema.json#/$defs/actual_outcome_id"
+    },
+    "plan_item_id": {
+      "$ref": "common.schema.json#/$defs/plan_item_id"
+    },
+    "resource_id": {
+      "$ref": "common.schema.json#/$defs/resource_id"
+    },
+    "planned_scope": {
+      "$ref": "common.schema.json#/$defs/capability_scope"
+    },
+    "actual_scope": {
+      "$ref": "common.schema.json#/$defs/capability_scope"
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/outcome_status"
+    },
+    "provider": {
+      "$ref": "common.schema.json#/$defs/provider_ref"
+    },
+    "strategy": {
+      "$ref": "common.schema.json#/$defs/capability_strategy"
+    },
+    "representation": {
+      "$ref": "#/$defs/representation"
+    },
+    "fallback_chain": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/fallback_step"
+      }
+    },
+    "validation": {
+      "$ref": "#/$defs/validation"
+    },
+    "asset_id": {
+      "$ref": "common.schema.json#/$defs/asset_id"
+    },
+    "bundle_id": {
+      "$ref": "common.schema.json#/$defs/bundle_id"
+    },
+    "failure": {
+      "$ref": "#/$defs/failure"
+    },
+    "observed_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "outcome_digest": {
+      "$ref": "common.schema.json#/$defs/canonical_digest"
+    }
+  },
+  "$defs": {
+    "representation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "representation_id",
+        "scope",
+        "kind",
+        "role"
+      ],
+      "properties": {
+        "representation_id": {
+          "$ref": "common.schema.json#/$defs/representation_id"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/capability_scope"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "webpage",
+            "document",
+            "video",
+            "audio",
+            "image",
+            "subtitle",
+            "other"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "landing",
+            "metadata",
+            "attachment",
+            "companion"
+          ]
+        },
+        "container": {
+          "$ref": "common.schema.json#/$defs/safe_container"
+        },
+        "mime_type": {
+          "$ref": "common.schema.json#/$defs/mime_type"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_fingerprint": {
+          "$ref": "common.schema.json#/$defs/source_fingerprint"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "primary"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "primary"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fallback_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "strategy",
+        "scope",
+        "reason"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "common.schema.json#/$defs/provider_ref"
+        },
+        "strategy": {
+          "$ref": "common.schema.json#/$defs/capability_strategy"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/capability_scope"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "reason_code": {
+          "$ref": "../error-codes.json#/$defs/error_code"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "properties": {
+                  "scope": {
+                    "const": "primary_resource"
+                  }
+                },
+                "required": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "representation"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "properties": {
+                  "scope": {
+                    "const": "representation"
+                  }
+                },
+                "required": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "landing_page"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "properties": {
+                  "scope": {
+                    "const": "landing_page"
+                  }
+                },
+                "required": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "properties": {
+                  "scope": {
+                    "const": "metadata"
+                  }
+                },
+                "required": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "validated",
+            "rejected",
+            "not_run"
+          ]
+        },
+        "mime_type": {
+          "$ref": "common.schema.json#/$defs/mime_type"
+        },
+        "magic_status": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "mismatched",
+            "not_checked"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "../error-codes.json#/$defs/error_code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "retriable": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "actual_scope": {
+            "const": "primary_resource"
+          }
+        },
+        "required": [
+          "actual_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "actual_scope": {
+            "const": "representation"
+          }
+        },
+        "required": [
+          "actual_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "representation"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "scope": {
+                "const": "representation"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "actual_scope": {
+            "const": "landing_page"
+          }
+        },
+        "required": [
+          "actual_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "landing_page"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "scope": {
+                "const": "landing_page"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "actual_scope": {
+            "const": "metadata"
+          }
+        },
+        "required": [
+          "actual_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "scope": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "succeeded"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "asset_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "failure"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "cancelled"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "failure"
+        ]
+      }
+    }
+  ]
+}

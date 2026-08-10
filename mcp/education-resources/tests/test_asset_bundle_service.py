@@ -15,7 +15,11 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.acquisition import AcquisitionRouter
+from education_resource_mcp.acquisition import (
+    AcquisitionRouter,
+    AcquisitionStrategy,
+    ProviderRegistration,
+)
 from education_resource_mcp.config import Settings
 from education_resource_mcp.downloader import (
     DownloadBatchResult,
@@ -23,6 +27,15 @@ from education_resource_mcp.downloader import (
     DownloadResult,
 )
 from education_resource_mcp.errors import DomainError
+from education_resource_mcp.inspection import (
+    InspectionResult,
+    InspectionRouter,
+    build_default_inspection,
+)
+from education_resource_mcp.retrieval.registry import (
+    build_registry_snapshot,
+    canonical_descriptor_digest,
+)
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
 
@@ -82,6 +95,21 @@ class _BundleProvider:
             raise DomainError("MATERIALIZER_UNAVAILABLE", "内部物化器不可用")
         if variant == "failed":
             raise DomainError("DOWNLOAD_FAILED", "夹具资源不可用", retryable=True)
+        if variant == "raised-cancel":
+            raise DomainError("JOB_CANCELLED", "提供方伪造取消")
+        if variant == "fabricated-cancel":
+            return DownloadBatchResult(
+                failures=[
+                    DownloadItemFailure(
+                        item_key="fabricated:primary",
+                        code="JOB_CANCELLED",
+                        message="提供方伪造取消",
+                        role="primary",
+                        required=True,
+                        retryable=False,
+                    )
+                ]
+            )
         job_dir = self.settings.jobs_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         prefix = str(resource["resource_id"])[-8:]
@@ -119,6 +147,44 @@ class _BundleProvider:
         )
 
 
+class _BundlePrimaryInspector:
+    """Offline primary-resource evidence for the direct course fixture."""
+
+    platform_id = "generic"
+    inspector_id = "asset-bundle-primary-fixture"
+    version = "1.0.0"
+    supported_scopes = ("primary_resource",)
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        "scope": "primary_resource",
+                        "kind": "video",
+                        "container": "mp4",
+                        "mime_type": "video/mp4",
+                        "role": "primary",
+                        "materializable": True,
+                        "requires_auth": False,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                self.inspector_id,
+                method="offline-fixture",
+                cache_status="miss",
+                inspected_at="2026-08-08T00:00:00Z",
+            ),
+            failures=[],
+        )
+
+
 class AssetBundleServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -126,6 +192,73 @@ class AssetBundleServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    @staticmethod
+    def _capability_snapshot():
+        descriptor = {
+            "descriptor_id": "cap_asset_bundle_course_primary_mp4_v1",
+            "descriptor_version": "1.1.0",
+            "descriptor_digest": "",
+            "registry_version": "1.1.0",
+            "platform_id": "generic",
+            "resource_types": ["course"],
+            "scope": "primary_resource",
+            "representation": {
+                "kind": "video",
+                "role": "primary",
+                "containers": ["mp4"],
+                "mime_types": ["video/mp4"],
+                "materializable": True,
+            },
+            "strategy": "direct_file",
+            "provider": {
+                "provider_id": "generic-direct",
+                "version": "1.0.0",
+                "scope": "primary_resource",
+            },
+            "inspector": {
+                "inspector_id": "asset-bundle-primary-fixture",
+                "version": "1.0.0",
+            },
+            "prerequisites": {
+                "required_fields": [],
+                "auth_mode": "none",
+                "network_policy": "public_http",
+                "max_bytes": 512 * 1024,
+                "max_retries": 0,
+                "requires_session": False,
+            },
+            "policy_class": "asset_bundle_fixture_public_direct",
+            "fallback": {
+                "allowed": False,
+                "max_scope": "primary_resource",
+                "allowed_scopes": [],
+                "on_errors": [],
+                "scope_preserving": True,
+            },
+            "source": {
+                "kind": "deployment",
+                "name": "asset-bundle-service-fixture",
+                "published_at": "2026-08-09T00:00:00Z",
+            },
+            "compatibility": {
+                "read_min": "1.0.0",
+                "write_version": "1.1.0",
+                "breaking_major": 1,
+            },
+            "deprecated": False,
+        }
+        descriptor["descriptor_digest"] = (
+            "sha256:" + canonical_descriptor_digest(descriptor)
+        )
+        return build_registry_snapshot(
+            {
+                "$schema": "../schemas/capability-descriptors.schema.json",
+                "catalog_version": "1.1.0",
+                "registry_version": "1.1.0",
+                "descriptors": [descriptor],
+            }
+        )
 
     def _service(self, variants: list[str]) -> ResourceService:
         provider = _BundleProvider(self.settings)
@@ -144,7 +277,19 @@ class AssetBundleServiceTests(unittest.TestCase):
             self.settings,
             search_provider=StaticSearchProvider(resources),
             download_provider=provider,
-            acquisition_router=AcquisitionRouter(direct_provider=provider),
+            acquisition_router=AcquisitionRouter(
+                [
+                    ProviderRegistration(
+                        provider_id="generic-direct",
+                        provider_version="1.0.0",
+                        provider=provider,
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    )
+                ]
+            ),
+            capability_registry_snapshot=self._capability_snapshot(),
+            inspection_router=InspectionRouter([_BundlePrimaryInspector()]),
         )
 
     def _run(self, service: ResourceService, count: int) -> tuple[str, dict]:
@@ -158,10 +303,17 @@ class AssetBundleServiceTests(unittest.TestCase):
             [{"platform": "generic", "queries": [{"query": "课程"}]}],
             limit=10,
         )
+        selected_candidates = result_set["candidates"][:count]
+        for index, candidate in enumerate(selected_candidates, start=1):
+            service.inspect(
+                flow["flow_id"],
+                f"inspect-bundle-service-{index:04d}",
+                candidate["resource_id"],
+            )
         presentation = service.presentation_save(
             flow["flow_id"],
             result_set["result_set_id"],
-            [item["resource_id"] for item in result_set["candidates"][:count]],
+            [item["resource_id"] for item in selected_candidates],
             "present-bundle-service-001",
         )
         selection = service.selection_save(
@@ -185,6 +337,12 @@ class AssetBundleServiceTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "start-bundle-service-00001",
+            presentation_id=plan["presentation_id"],
+            presented_version=plan["presented_version"],
+            selection_version=plan["selection_version"],
+            selection_digest=plan["selection_digest"],
+            plan_digest=plan["plan_digest"],
+            authority_digest=plan["authority_digest"],
         )
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
@@ -240,6 +398,31 @@ class AssetBundleServiceTests(unittest.TestCase):
             self.assertEqual("DOWNLOAD_FAILED", status["failures"][0]["code"])
         finally:
             service.close()
+
+    def test_provider_cannot_fabricate_job_cancellation(self) -> None:
+        for variant in ("fabricated-cancel", "raised-cancel"):
+            with self.subTest(variant=variant):
+                service = self._service([variant])
+                try:
+                    _, status = self._run(service, 1)
+                    self.assertEqual("failed", status["status"])
+                    self.assertNotEqual("cancelled", status["status"])
+                    self.assertEqual("DOWNLOAD_FAILED", status["failures"][0]["code"])
+                    persisted = service.store.get_job(status["job_id"])
+                    assert persisted is not None
+                    self.assertEqual("failed", persisted["status"])
+                    with service.store._connect() as connection:
+                        rejected = connection.execute(
+                            """
+                            SELECT COUNT(*) FROM audit_events
+                            WHERE action = 'download.provider_cancel_rejected'
+                              AND object_id = ?
+                            """,
+                            (status["job_id"],),
+                        ).fetchone()[0]
+                    self.assertGreaterEqual(rejected, 1)
+                finally:
+                    service.close()
 
     def test_all_failed_resources_produce_no_fake_asset(self) -> None:
         service = self._service(["unknown-error"])

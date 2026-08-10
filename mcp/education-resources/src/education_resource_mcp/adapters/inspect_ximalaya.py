@@ -7,7 +7,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..inspection import InspectionResult
+from ..inspection import InspectionResult, build_representation_authority
 from .inspect_nlc import (
     PLATFORM_INSPECTION_METHOD,
     PlatformBoundedInspector,
@@ -81,15 +81,26 @@ class XimalayaInspector(PlatformBoundedInspector):
         current = result.to_mapping()["resolved_resource"]["representations"]
         base = current[0] if current else {}
         audio: dict[str, Any] = {
-            "representation_id": self._representation_id(resource, "audio", "primary"),
+            "representation_id": self._representation_id(resource, "audio", "representation"),
             "kind": "audio",
             "container": "audio",
-            "role": "primary",
+            "scope": "representation",
+            "role": "companion",
+            "technical_availability": "unknown",
             # Inspection proves that an audio representation exists in the
             # public model; it does not authorize or materialize a stream.
             "materializable": False,
-            "requires_auth": False,
         }
+        audio.update(
+            build_representation_authority(
+                resource,
+                scope="representation",
+                role="companion",
+                technical_availability="unknown",
+                source="metadata",
+                observed_at=result.to_mapping()["inspection"].get("inspected_at"),
+            )
+        )
         if isinstance(base, Mapping) and base.get("language"):
             audio["language"] = base["language"]
 
@@ -106,9 +117,10 @@ class XimalayaInspector(PlatformBoundedInspector):
                 "kind": "webpage",
                 "container": "html",
                 "mime_type": "text/html",
+                "scope": "landing_page",
                 "role": "landing",
-                "materializable": True,
-                "requires_auth": False,
+                "technical_availability": "unknown",
+                "materializable": False,
             }
         landing.setdefault("container", "html")
         landing.setdefault("mime_type", "text/html")

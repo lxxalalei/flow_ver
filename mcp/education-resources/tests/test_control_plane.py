@@ -11,6 +11,11 @@ if str(SRC) not in sys.path:
 
 from education_resource_mcp.config import Settings
 from education_resource_mcp.errors import DomainError
+from education_resource_mcp.inspection import (
+    InspectionResult,
+    InspectionRouter,
+    build_default_inspection,
+)
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
 
@@ -35,6 +40,46 @@ RESOURCES = [
 ]
 
 
+class OfflineGenericInspector:
+    """Return exact built-in generic primary-document evidence without I/O."""
+
+    platform_id = "generic"
+    inspector_id = "generic"
+    version = "1.0.0"
+    supported_scopes = ("primary_resource",)
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        "scope": "primary_resource",
+                        "kind": "document",
+                        "container": "pdf",
+                        "mime_type": "application/pdf",
+                        "role": "primary",
+                        "materializable": True,
+                        "technical_availability": "available",
+                        "requires_auth": False,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                self.inspector_id,
+                version=self.version,
+                method="offline-fixture",
+                cache_status="miss",
+                inspected_at="2026-08-10T00:00:00Z",
+            ),
+            failures=[],
+        )
+
+
 class V2ControlPlaneTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -51,7 +96,9 @@ class V2ControlPlaneTests(unittest.TestCase):
 
     def _service(self) -> ResourceService:
         return ResourceService(
-            self.settings, search_provider=StaticSearchProvider(RESOURCES)
+            self.settings,
+            search_provider=StaticSearchProvider(RESOURCES),
+            inspection_router=InspectionRouter([OfflineGenericInspector()]),
         )
 
     def tearDown(self) -> None:
@@ -82,6 +129,25 @@ class V2ControlPlaneTests(unittest.TestCase):
             ids,
             f"presentation-{suffix}",
         )
+
+    def _inspect(self, flow: dict, resource_id: str, suffix: str) -> dict:
+        resolution = self.service.inspect(
+            flow["flow_id"],
+            f"inspect-{suffix}",
+            resource_id,
+        )
+        self.assertEqual(
+            ("generic", "1.0.0"),
+            (
+                resolution["inspection"]["inspector_id"],
+                resolution["inspection"]["version"],
+            ),
+        )
+        self.assertEqual(
+            "primary_resource",
+            resolution["resolved_resource"]["representations"][0]["scope"],
+        )
+        return resolution
 
     def test_hidden_candidate_and_cross_flow_result_set_are_rejected(self) -> None:
         flow_a, search_a = self._start_search("01")
@@ -139,6 +205,7 @@ class V2ControlPlaneTests(unittest.TestCase):
             first["presented_version"],
             [1],
         )
+        self._inspect(flow, ids[0], "prepare-00000001")
         plan = self.service.download_prepare(
             flow["flow_id"], "prepare-key-0001", selection["selection_version"]
         )
@@ -161,6 +228,12 @@ class V2ControlPlaneTests(unittest.TestCase):
                 plan["plan_id"],
                 plan["confirmation_token"],
                 "start-key-000001",
+                presentation_id=plan["presentation_id"],
+                presented_version=plan["presented_version"],
+                selection_version=plan["selection_version"],
+                selection_digest=plan["selection_digest"],
+                plan_digest=plan["plan_digest"],
+                authority_digest=plan["authority_digest"],
             )
         self.assertEqual(old_plan.exception.code, "SELECTION_VERSION_CONFLICT")
 
@@ -179,6 +252,7 @@ class V2ControlPlaneTests(unittest.TestCase):
             )
 
         first_a = select(1, "selection-key-004")
+        self._inspect(flow, ids[0], "prepare-00000002")
         old_plan = self.service.download_prepare(
             flow["flow_id"], "prepare-key-0002", first_a["selection_version"]
         )
@@ -199,6 +273,12 @@ class V2ControlPlaneTests(unittest.TestCase):
                 old_plan["plan_id"],
                 old_plan["confirmation_token"],
                 "start-key-000002",
+                presentation_id=old_plan["presentation_id"],
+                presented_version=old_plan["presented_version"],
+                selection_version=old_plan["selection_version"],
+                selection_digest=old_plan["selection_digest"],
+                plan_digest=old_plan["plan_digest"],
+                authority_digest=old_plan["authority_digest"],
             )
         self.assertEqual(old_plan_error.exception.code, "SELECTION_VERSION_CONFLICT")
 
@@ -242,6 +322,7 @@ class V2ControlPlaneTests(unittest.TestCase):
             presentation["presented_version"],
             [1],
         )
+        self._inspect(flow, resource_id, "prepare-00000003")
         plan = self.service.download_prepare(
             flow["flow_id"], "prepare-key-0003", selection["selection_version"]
         )

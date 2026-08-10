@@ -9,22 +9,42 @@
 Plan -> Search -> Evaluate -> Inspect? -> Gap -> Replan / Present / Clarify / StopWithGap
 ```
 
+生产链固定为：MCP 返回服务端 factual `coverage`，Skill 依据任务与这些事实生成私有
+`SemanticReview`、私有 `Gap`，并由 Skill 每轮唯一执行一个 `StopDecision`。本参考中的
+语义结论不得写回 MCP Schema、SQLite 或业务状态。
+
+公共控制面继续保持 `contract_version=1.0.0` 和 13 个 MCP 工具；历史 catalog 1.4.0 在既有
+`coverage` 中允许可选的 `kind="factual"`、`schema_version="factual-coverage-v1"` 元数据；
+当前 catalog 1.5.0 再增加与获取相关的 Capability Authority/Outcome 兼容投影。两者都不新增
+第二个 coverage 字段，也不暴露 `SemanticReview`、Skill `Gap` 或 `StopDecision`。
+
 术语严格采用仓库统一语言：
 
 | 术语 | 在循环中的含义 | 不要混同为 |
 |---|---|---|
 | `SearchDirection` | 为覆盖一个明确的学习目标、使用结果或决策缺口而选择的探索路线 | query、platform 或 resource type |
 | `SearchRound` | 在一次当前决策下，针对一个或多个 `SearchDirection` 完成并统一评估的一组有界检索 | 分页或单条 query |
-| `Coverage` | 当前候选与核验证据对任务必要维度的满足程度 | 结果数量、召回率或相关性分数 |
-| `Gap` | 尚未满足或尚未验证，且可能改变后续搜索、推荐或获取决策的必要条件 | 任意未知、任意失败或低分 |
-| `InformationGain` | 一轮实际新增的决策价值：关闭关键缺口、新增可展示候选或新增互补来源 | 新鲜度、关键词命中或去重数量本身 |
-| `StopDecision` | 评估后决定继续重规划、向用户澄清、进入展示或带缺口停止的结论 | “搜够了”或“没有更多结果” |
-| `Replan` | 根据 `Coverage`、`Gap` 和 `InformationGain` 调整后续方向或来源路线，同时保留原目标和显式约束 | 翻页、换近义词或重新理解用户 |
+| `FactualCoverageSummary` / public `coverage` | MCP 根据服务端观察到的候选、来源、身份、去重和失败事实生成的摘要 | 相关性、用途、目标适配、约束满足或推荐价值 |
+| `SemanticReview` | Skill 对候选的私有语义审查：`relevance`、`usefulness`、`target_fit`、`constraint_fit`、`substantive`、`evidence_level`、`reasons` | MCP 事实、公共字段或离线 oracle 结果 |
+| `Skill Gap` | Skill 根据任务、factual facts 和 `SemanticReview` 判定的必要未满足/未验证条件 | public `coverage.gaps`、任意未知、任意失败或低分 |
+| `StopDecision` | Skill 每轮唯一执行的下一步：重规划、澄清、展示或带缺口停止 | MCP 自动决定的“搜够了”或“没有更多结果” |
+| `Replan` | Skill 根据 factual `coverage`、私有 `Gap` 和服务端增量事实调整后续方向或来源路线，同时保留原目标和显式约束 | 翻页、换近义词或重新理解用户 |
 
-`SearchDirection` 要说明“本轮要获得的学习价值或证据，以及它要关闭的缺口”。例如：
+`SearchDirection` 要说明“本轮要获得的学习价值或证据，以及它要关闭的缺口”。它是 Skill 的
+搜索路线说明和可选 trace，不是 Coverage 维度、候选事实、语义证据或 Gap/StopDecision 输入
+事实；方向变化本身不增加 coverage、不关闭 Gap，也不能伪造候选计数、可用性或来源身份。
+例如：
 “获得一份能让孩子观察并记录现象的可跟做活动，弥补只有原理讲解的缺口”是方向；
 “Bilibili 视频”“实验 query”或“video 类型”都不是方向。查询、平台和资源类型只是该方向
 的执行参数或结果形态。
+
+### 离线 oracle 边界
+
+`mcp/education-resources/src/education_resource_mcp/retrieval/adaptive.py` 及其 fixture 只用于
+离线 oracle、benchmark 和回归校准。它可以读取样例候选并输出评估结果，但不得被生产
+`ResourceService`、MCP 工具或 Skill 运行时导入来决定 coverage、SemanticReview、Gap、
+StopDecision、搜索路线、业务 ID、SQLite 状态或任何副作用。oracle 中的 `Coverage`、`Gap` 和
+`StopDecision` 不是公共契约的第二权威；生产恢复也不能从 oracle 输出恢复语义结论。
 
 ## Plan：先确定决策，不先拼平台
 
@@ -37,8 +57,7 @@ Plan -> Search -> Evaluate -> Inspect? -> Gap -> Replan / Present / Clarify / St
 - `user_role` 只改变交互方式，例如称呼、解释深度、是否提示成人监督和确认语气；它不推导
   学科、内容方向、平台或资源类型。
 
-年龄和年级未知时不默认追问，也不把未知本身写成 `Gap`。只有教材同步、册次匹配或其他
-明确必须定位学段的硬范围缺失时，才提出一个最小澄清问题；详见
+缺失信息只有在会实质改变搜索方向或候选判断时才形成 Skill `Gap` 或触发澄清；详见
 [`intent-and-clarification.md`](intent-and-clarification.md)。
 
 ### 方向与首轮预算
@@ -60,13 +79,14 @@ Plan -> Search -> Evaluate -> Inspect? -> Gap -> Replan / Present / Clarify / St
 |---|---|
 | 方向说明 | 要获得的学习价值或证据 |
 | 服务目标 | 对应的 `goal`、`resource_target` 或显式 constraint |
-| 要关闭的 Gap | 已知且可能改变决策的缺口；首轮可以是待验证的决策假设 |
+| 要关闭的 Skill Gap | 已知且可能改变决策的缺口；首轮可以是待验证的决策假设 |
 | 路线预算 | 2–3 个平台、每平台 1–2 个 query、每 query 5–10 |
-| 成功信号 | 何种候选、表示或证据足以改变 Coverage/StopDecision |
+| 成功信号 | 何种服务端事实和私有审查足以改变 factual coverage/StopDecision |
 
 方向名称可以是模型内部的短标签，但不是 `flow_id`、`search_run_id`、`result_set_id` 或
 `resource_id`。若服务端返回 `direction_id`，只使用返回值；若当前契约没有该字段，不得
-自行补造 per-direction provenance。
+自行补造 per-direction provenance。若 `search_tasks[].direction` 或平台/query trace 被回显，
+它只用于解释路线，不得写入 public `coverage`、推导候选数量或替代 `SemanticReview`。
 
 ## Search：一轮只产生一个不可变 ResultSet
 
@@ -81,36 +101,60 @@ Plan -> Search -> Evaluate -> Inspect? -> Gap -> Replan / Present / Clarify / St
    新的不可变 ResultSet；它不修改 base，不由模型手工拼接候选。服务端返回新的
    `result_set_id`、版本和（如契约定义）新快照中的 opaque `resource_id`，只能使用这些返回值。
 5. `extend` 的 `limit` 表示新快照的总容量，不是模型可以声称的每个平台或每条 query 的实际
-   返回数。达到容量不等于 Coverage 已满足；查询和平台的真实计数以服务端 provenance 为准。
+   返回数。达到容量不等于 factual `coverage` 已满足；查询和平台的真实计数以服务端
+   provenance 为准。
 6. 每次新的搜索动作使用新的幂等键；同一个幂等键只接受服务端原响应 replay，不生成新的
    ID、候选、Coverage 或 provenance。旧 base、旧 Presentation 和旧 Selection 不得与新快照
    混合使用；要展示时只从当前 ResultSet 建立新的 Presentation。
 
 `resource_search` 的输入只能使用当前契约允许的字段，例如 `search_tasks` 中真实的
 `platform` 与 query、受支持的 filters、当前 `flow_id`/`task_version` 和服务端幂等键。
-不能把方向说明、Coverage、Gap、候选计数、URL、路径、Cookie、Token 或自造 ID 塞进工具
+不能把方向说明、coverage、Skill `Gap`、候选计数、URL、路径、Cookie、Token 或自造 ID 塞进工具
 请求。若服务端拒绝 `mode` 或 `base_result_set_id`，先按结构化错误恢复，不改用手工合并。
 
-## Evaluate：先读事实，再判断缺口
+## Evaluate：先读事实，再作私有语义判断
 
 搜索返回的是当前 ResultSet 的 Candidate。每轮统一评估：
 
 1. 用 [`candidate-judgment.md`](candidate-judgment.md) 过滤明显偏题、不安全、违反硬约束和
-   无实际价值的候选；不要把过滤数量写成 Coverage。
+   无实际价值的候选；不要把过滤数量写成 factual `coverage`，也不要把标题命中当作语义证据。
 2. 读取 MCP 返回的 `search_run_id`、ResultSet 版本、platform/query runs、候选数、失败数、
-   去重/身份事实和（契约提供时）`provenance`、`coverage`、`information_gain`。这些是审计
-   事实，不由模型重算后写回工具或用户可见的权威 JSON。
-3. Coverage 至少从任务必要维度判断：目标结果是否有候选支撑、显式 must 是否满足、
-   `resource_target` 是否被正确覆盖、是否有足够可信的来源线索、候选是否互补，以及可用
-   表示/获取是否会阻止下一步。不能用候选数量或相关性分数代替 Coverage。
+   去重/身份事实和（契约提供时）`provenance`、factual `coverage`、`information_gain`。这些
+   是服务端审计事实，不由模型重算后写回工具或用户可见的权威 JSON；public `coverage.gaps`
+   只描述服务端观察到的事实缺口，不能直接当作 Skill `Gap`。
+3. Skill 为准备比较或展示的候选生成私有 `SemanticReview`：
+
+   ```text
+   SemanticReview(resource_id):
+     relevance
+     usefulness
+     target_fit
+     constraint_fit
+     substantive
+     evidence_level
+     reasons
+   ```
+
+   所有维度都允许 `unknown`。`unknown` 不等于 `pass`；缺少正文、资源本体、目标适配、
+   硬约束或合法获取证据时，必须保留未知并安排 Inspect、Clarify、Replan 或
+   `StopWithGap`，不能因为候选存在、标题相关、平台数量或 `coverage.status` 而展示。
 4. 只把可能改变排序、推荐、可用性或下载计划的少量候选送入
    [`inspection-strategy.md`](inspection-strategy.md) 定义的 Inspection Gate；检查结果回来后
-   再评估 Coverage/Gap。Inspection 是证据增强，不是把候选或 ResultSet 改写成已核验。
+   重新读取 MCP factual facts 并重算私有 `SemanticReview`。Inspection 是证据增强，不是把
+   候选或 ResultSet 改写成已核验。
+5. Skill 根据 `goal`、`resource_target`、显式 `constraints`、factual `coverage`、
+   provenance、failures、Resolution 和 `SemanticReview` 形成私有 `Gap`，然后每轮只选择一个
+   `StopDecision`。MCP 不执行语义 Gap 或停止决策，也不把它们写入公共状态。
+
+搜索或 Inspection 事实也不能直接推导获取 Provider。进入 prepare/start 后必须另行遵守
+Capability Descriptor -> Runtime Readiness -> persisted Resolution/Representation -> Eligibility
+-> Plan/Execution binding -> exact Provider 的服务端 authority chain；平台 Registry、候选 URL、
+旧 options 或 generic fallback 都不能替代该链。
 
 ### Gap 判定
 
-把“未知”升级为 `Gap` 需要同时满足：它是当前任务的必要条件、目前没有足够证据满足或
-验证、并且补齐它可能改变下一次搜索、推荐或获取决策。典型 Gap 包括：
+把“未知”升级为 Skill `Gap` 需要同时满足：它是当前任务的必要条件、目前没有足够证据满足或
+验证、并且补齐它可能改变下一次搜索、推荐或获取决策。典型 Skill `Gap` 包括：
 
 - 只有讲解材料，目标还需要能实际操作或练习的资源形态。
 - 用户明确要求教材同步，但版本/册次/学段尚未定位。
@@ -118,22 +162,23 @@ Plan -> Search -> Evaluate -> Inspect? -> Gap -> Replan / Present / Clarify / St
 - 只有单一来源或高度重复候选，无法完成用户要求的比较或互补组合。
 - 关键来源路线失败，且该路线是当前目标的必要证据来源。
 
-下列情况单独不构成 Gap：年龄/年级未知但用户没有教材同步硬要求、单纯没有更多相似
-标题、重复候选、与当前决策无关的元数据缺失，或一次可重试的网络失败。失败只有在影响
-必要覆盖时才进入 Gap，并需在说明中保留失败原因。
+下列情况单独不构成 Skill `Gap`：与当前决策无关的可选背景或元数据缺失、单纯没有更多
+相似标题、重复候选，或一次可重试的网络失败。失败只有在影响必要覆盖时才进入 Skill
+`Gap`，并需在说明中保留失败原因。
 
-## Gap 后的 StopDecision
+## Skill Gap 后的唯一 StopDecision
 
-每个 `SearchRound` 结束时只选择一个下一步：
+每个 `SearchRound` 结束时只能由 Skill 根据 factual facts、私有 `SemanticReview` 和当前
+任务选择一个下一步。MCP 不自动生成、存储或执行 `StopDecision`：
 
 | `StopDecision` | 适用条件 | 下一步 |
 |---|---|---|
-| `Present` | Coverage 足以支持当前目标，关键 Gap 已关闭或不影响选择，且已有可解释候选 | 选择性 Inspection（如需要）后实际展示当前 ResultSet，立即保存同一快照的 Presentation |
-| `Clarify` | 缺少会实质改变方向的用户事实、资源对象或硬约束；搜索无法安全替用户决定 | 只问一个最小问题；教材同步等硬范围才问年级/册次，不为画像补问年龄 |
-| `StopWithGap` | 仍有 Gap，但在当前来源、轮次或安全边界内没有足够有价值的下一步 | 说明已覆盖内容、未闭合 Gap、真实失败/限制及其影响；安全地展示可用候选或明确没有可推荐项 |
-| `Replan` | Gap 很可能通过新的学习价值路线、互补来源或不同资源形态关闭，且仍未达到轮次上限 | 保留原 goal/resource_target/constraints，改变 SearchDirection 或来源路线，用 `extend` 继续 |
+| `Present` | factual `coverage` 足以提供必要事实，且至少有候选通过必要的私有 `SemanticReview`；关键 Skill Gap 已关闭或不影响选择 | 选择性 Inspection（如需要）后实际展示当前 ResultSet，立即保存同一快照的 Presentation |
+| `Clarify` | 缺少会实质改变方向的用户事实、资源对象或硬约束；搜索无法安全替用户决定 | 只问一个最小问题 |
+| `StopWithGap` | 仍有 Skill Gap，但在当前来源、轮次或安全边界内没有足够有价值的下一步 | 说明已覆盖内容、未闭合 Skill Gap、真实失败/限制及其影响；安全地展示可用候选或明确没有可推荐项 |
+| `Replan` | Skill Gap 很可能通过新的学习价值路线、互补来源或不同资源形态关闭，且仍未达到轮次上限 | 保留原 goal/resource_target/constraints，改变 SearchDirection 或来源路线，用 `extend` 继续 |
 
-`Replan` 不是把同一 query 换几个近义词，也不是翻页。新方向必须明确它要关闭的 Gap；
+`Replan` 不是把同一 query 换几个近义词，也不是翻页。新方向必须明确它要关闭的 Skill Gap；
 若只是 provider 暂时失败，可以在同一方向选择有决策价值的受支持替代路线，但必须在
 provenance/失败说明中区分重试和新方向。
 
@@ -141,11 +186,13 @@ provenance/失败说明中区分重试和新方向。
 
 - 常规任务最多 3 个 `SearchRound`；用户明确要求全面探索、横向比较或多种互补形态时，
   综合任务最多 4 个。上限是整个当前决策的上限，不是每个平台各自的上限。
-- 如果连续 2 轮 `new_unique=0` 且没有关闭任何 `Gap`，必须停止继续搜索。Coverage 足够时
-  选择 `Present`，仍有必要 Gap 时选择 `StopWithGap`；不得为了数量再发起一轮。
-- `new_unique`、duplicate、Gap closure 和失败计数必须来自 MCP 返回的 provenance/coverage
-  事实。没有这些字段时只能说“无法确认新增量/闭合量”，不能伪造满足停止条件。
-- 达到轮次上限时同样停止；Coverage 足够则 `Present`，否则 `StopWithGap` 或因必要事实
+- 如果连续 2 轮 `new_unique=0` 且 Skill 没有基于 MCP facts 关闭任何私有 `Gap`，必须停止
+  继续搜索。factual `coverage` 足够且候选通过必要的私有 `SemanticReview` 时选择 `Present`，
+  仍有必要 Skill Gap 时选择 `StopWithGap`；不得为了数量再发起一轮。
+- `new_unique`、duplicate 和失败计数必须来自 MCP 返回的 provenance/factual `coverage` 事实；
+  Skill `Gap` closure 和语义通过只能由 Skill 判断。没有这些字段时只能说“无法确认新增量/闭合量”，
+  不能伪造满足停止条件。
+- 达到轮次上限时同样停止；factual `coverage` 和私有语义判断都足够则 `Present`，否则 `StopWithGap` 或因必要事实
   缺失而 `Clarify`。硬安全边界、policy block 或无法合法获取时可提前 `StopWithGap`。
 - provider 返回 0 条但自身失败或需要认证时，不把“0”解释成“没有资源”；先解释失败，
   再决定 `Replan`、合法登录后重试或 `StopWithGap`。
@@ -158,29 +205,33 @@ provenance/失败说明中区分重试和新方向。
 | `FEATURE_NOT_SUPPORTED` | 当前平台或检查路线未接入，不等于资源不存在 | 保留未核验/不完整状态，换有决策价值的受支持路线或 `StopWithGap` |
 | `policy_blocked` | 当前安全策略不允许继续核验或获取 | 不绕过策略、重定向或访问控制；寻找公开替代或 `StopWithGap` |
 | `unavailable` | 当前检查显示入口/表示不可用 | 降低或撤下该候选，必要时用新方向寻找替代 |
-| timeout、transport 或 provider `failed` | 本轮来源失败，Coverage 只到失败前的事实 | 只在能关闭 Gap 且仍在上限内时换路线/重试；不要把失败写成零召回 |
+| timeout、transport 或 provider `failed` | 本轮来源失败，factual `coverage` 只到失败前的事实 | 只在能关闭 Skill Gap 且仍在上限内时换路线/重试；不要把失败写成零召回 |
 | `duplicate` | 结果与 base 或本轮已有候选相同，没有新增独立价值 | 不报为新候选；以服务端 `new_unique`/duplicate 事实评估信息增益 |
 | stale/invalid `base_result_set_id` 或 mode | 当前快照已变更或请求不符合契约 | 读 `resource_flow_status`，取得新的当前 ResultSet；不得猜 ID 或手工合并 |
 
-失败说明必须保留来源、状态和对 Coverage/Gap 的影响；不要用平台名、标题或模型常识
+失败说明必须保留来源、状态和对 factual coverage/Skill Gap 的影响；不要用平台名、标题或模型常识
 覆盖失败。结构化错误没有返回可支持的事实时，使用“本轮未能确认”，而不是“应该可用”。
 
 ## 权威状态与恢复
 
 以下值只能来自 MCP 或 `resource_flow_status`：`flow_id`、`task_version`、`search_run_id`、
 `result_set_id`、`result_version`、`resource_id`、`resolution_id`、`presentation_id`、实际
-候选计数、duplicate/new_unique、服务端返回的 Coverage、provenance 和 failures。`Gap` 和
-`StopDecision` 是当前循环基于 `goal`、`resource_target`、`constraints` 及上述事实作出的
-语义判断；若服务端返回规范化值则以它为准，否则不得把模型判断伪装成 MCP 字段。模型可以
-提出内部的方向假设和下一步判断，但不能创造这些 ID、计数或权威字段。
+候选计数、duplicate/new_unique、服务端 factual `coverage`、provenance 和 failures。
+`SemanticReview`、Skill `Gap` 和 `StopDecision` 是当前 Skill 基于 `goal`、
+`resource_target`、`constraints` 及上述事实作出的私有语义判断；不得把它们伪装成 MCP 字段、
+写回工具请求或持久化业务状态。`coverage.gaps` 仍只是 factual gaps，不是 Skill Gap。模型
+可以提出内部的方向假设和下一步判断，但不能创造这些 ID、计数或权威字段。
 
 上下文压缩、工具响应丢失或 MCP 重启后：
 
-1. 先调用 `resource_flow_status`，以当前 ResultSet、当前搜索运行摘要和当前 Resolution 为准。
-2. 若找不到当前 base 或 provenance，就不要重建 extend、Coverage 或 new_unique；回到
-   “未确认”状态并根据返回事实重新 Plan。
-3. 若已有 Presentation/Selection，不能为了继续检索把它与新 ResultSet 混用；新快照必须
-   重新审查、实际展示并保存新的 Presentation。
+1. 先调用 `resource_flow_status`，以当前 ResultSet、当前搜索运行摘要、factual `coverage`
+   和当前 Resolution 为准。
+2. 若找不到当前 base 或 provenance，就不要重建 extend、候选计数或 coverage；回到“未确认”
+   状态并根据返回事实重新 Plan。
+3. 不恢复缓存的 `SemanticReview`、Skill `Gap` 或 `StopDecision` 作为权威结论。重新读取
+   MCP facts 后，对缺失的语义审查按 `unknown` 重新计算；`unknown` 不得当作 pass。
+4. 若已有 Presentation/Selection，不能为了继续检索把它与新 ResultSet 混用；新快照必须
+   重新进行 SemanticReview、实际展示并保存新的 Presentation。
 
 最终展示和选择的绑定规则仍见 [`mcp-workflow.md`](mcp-workflow.md)：只有当前 ResultSet 的
 实际展示可以保存为 Presentation，只有当前 Presentation 的 positions 可以进入 Selection。

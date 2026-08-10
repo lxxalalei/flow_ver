@@ -2,8 +2,10 @@
 
 from .models import (
     ACQUISITION_STRATEGIES,
+    CAPABILITY_SCOPES,
     ARTIFACT_ROLES,
     ASSET_ROLES,
+    CapabilityScope,
     CompletionKind,
     FORMAL_ARTIFACT_ROLES,
     INTERNAL_ARTIFACT_ROLES,
@@ -22,12 +24,20 @@ from .models import (
     StrategyKind,
 )
 from ..downloader import DownloadBatchResult, DownloadItemFailure, DownloadResult
-from .router import AcquisitionRouter, BrowserCapture, DirectProvider, WebMaterializer
+from .router import (
+    AcquisitionRouter,
+    BrowserCapture,
+    DirectProvider,
+    ProviderRegistration,
+    WebMaterializer,
+)
 
 __all__ = [
     "ACQUISITION_STRATEGIES",
+    "CAPABILITY_SCOPES",
     "ARTIFACT_ROLES",
     "ASSET_ROLES",
+    "CapabilityScope",
     "CompletionKind",
     "FORMAL_ARTIFACT_ROLES",
     "INTERNAL_ARTIFACT_ROLES",
@@ -49,6 +59,7 @@ __all__ = [
     "DownloadItemFailure",
     "DownloadResult",
     "PreferredContainer",
+    "ProviderRegistration",
     "StrategyKind",
     "WebMaterializer",
 ]

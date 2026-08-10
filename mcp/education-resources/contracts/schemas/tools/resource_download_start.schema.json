@@ -58,6 +58,9 @@
         },
         "plan_digest": {
           "$ref": "../common.schema.json#/$defs/plan_digest"
+        },
+        "authority_digest": {
+          "$ref": "../common.schema.json#/$defs/authority_digest"
         }
       }
     },
@@ -117,6 +120,9 @@
         },
         "plan_digest": {
           "$ref": "../common.schema.json#/$defs/plan_digest"
+        },
+        "authority_digest": {
+          "$ref": "../common.schema.json#/$defs/authority_digest"
         }
       }
     },

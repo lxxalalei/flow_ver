@@ -15,7 +15,11 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..inspection import InspectionResult, source_fingerprint
+from ..inspection import (
+    InspectionResult,
+    build_representation_authority,
+    source_fingerprint,
+)
 from .inspect_generic import GenericWebInspector
 
 
@@ -235,17 +239,19 @@ class PlatformBoundedInspector(GenericWebInspector):
         *,
         kind: str | None = None,
         role: str,
+        scope: str | None = None,
+        source: str = "inspection",
     ) -> dict[str, Any]:
-        """Copy only already-public representation fields from Generic."""
+        """Copy public representation facts without upgrading capability scope."""
 
         allowed = (
             "container",
             "mime_type",
             "language",
-            "estimated_size_bytes",
+            "size_bytes",
             "materializable",
-            "requires_auth",
             "rights_hint",
+            "technical_availability",
         )
         copied: dict[str, Any] = {
             "representation_id": self._representation_id(
@@ -257,6 +263,36 @@ class PlatformBoundedInspector(GenericWebInspector):
         for key in allowed:
             if key in representation and representation[key] is not None:
                 copied[key] = representation[key]
+
+        old_role = representation.get("role")
+        old_scope = representation.get("scope")
+        if scope is None:
+            if role == old_role and isinstance(old_scope, str):
+                scope = old_scope
+            else:
+                scope = {
+                    "primary": "primary_resource",
+                    "landing": "landing_page",
+                    "metadata": "metadata",
+                }.get(role, "representation")
+        copied["scope"] = scope
+        if role == old_role and isinstance(representation.get("evidence"), Mapping):
+            copied["evidence"] = dict(representation["evidence"])
+        else:
+            authority = build_representation_authority(
+                resource,
+                scope=scope,
+                role=role,
+                technical_availability=str(
+                    copied.get("technical_availability") or "unknown"
+                ),
+                source=source,
+            )
+            copied.update(authority)
+        copied.setdefault(
+            "technical_availability",
+            "available" if copied.get("materializable") else "unknown",
+        )
         return copied
 
     def _rewrite_result(
@@ -273,7 +309,39 @@ class PlatformBoundedInspector(GenericWebInspector):
         resolved = mapping["resolved_resource"]
         resolved["resource_type"] = resource_type
         resolved["metadata"] = dict(metadata)
-        resolved["representations"] = [dict(item) for item in representations]
+        observed_at = mapping.get("inspection", {}).get("inspected_at")
+        availability = resolved.get("availability", {}).get("status", "unknown")
+        normalised_representations: list[dict[str, Any]] = []
+        for raw in representations:
+            item = dict(raw)
+            role = str(item.get("role") or "attachment")
+            scope = str(
+                item.get("scope")
+                or {
+                    "primary": "primary_resource",
+                    "landing": "landing_page",
+                    "metadata": "metadata",
+                }.get(role, "representation")
+            )
+            item["scope"] = scope
+            item.setdefault(
+                "technical_availability",
+                "available" if availability == "available" else "unknown",
+            )
+            evidence = item.get("evidence")
+            if not isinstance(evidence, Mapping):
+                item.update(
+                    build_representation_authority(
+                        resource,
+                        scope=scope,
+                        role=role,
+                        technical_availability=str(item["technical_availability"]),
+                        source="metadata",
+                        observed_at=observed_at if isinstance(observed_at, str) else None,
+                    )
+                )
+            normalised_representations.append(item)
+        resolved["representations"] = normalised_representations
         if creator:
             resolved["creator"] = creator
         mapping["inspection"]["method"] = PLATFORM_INSPECTION_METHOD
@@ -351,25 +419,42 @@ class NlcInspector(PlatformBoundedInspector):
         representations: list[dict[str, Any]] = []
         for representation in current:
             kind = representation.get("kind")
-            if kind in {"webpage", "document"}:
-                representations.append(
-                    self._copy_representation(
-                        resource,
-                        representation,
-                        kind=kind,
-                        role="primary" if not representations else "record",
-                    )
+            if kind not in {"webpage", "document"}:
+                continue
+            is_concrete_primary = (
+                representation.get("scope") == "primary_resource"
+                and representation.get("role") == "primary"
+                and representation.get("materializable") is True
+                and representation.get("technical_availability") == "available"
+            )
+            if kind == "webpage":
+                role, scope = "landing", "landing_page"
+            elif is_concrete_primary:
+                # A genuinely verified file outranks platform metadata; do
+                # not downgrade it merely because this is an NLC candidate.
+                role, scope = "primary", "primary_resource"
+            else:
+                role, scope = "metadata", "metadata"
+            representations.append(
+                self._copy_representation(
+                    resource,
+                    representation,
+                    kind=kind,
+                    role=role,
+                    scope=scope,
                 )
+            )
         if not representations:
             representations.append(
                 {
-                    "representation_id": self._representation_id(resource, "webpage", "primary"),
+                    "representation_id": self._representation_id(resource, "webpage", "landing"),
                     "kind": "webpage",
                     "container": "html",
                     "mime_type": "text/html",
-                    "role": "primary",
-                    "materializable": True,
-                    "requires_auth": False,
+                    "scope": "landing_page",
+                    "role": "landing",
+                    "technical_availability": "available",
+                    "materializable": False,
                 }
             )
 

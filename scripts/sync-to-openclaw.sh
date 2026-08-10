@@ -51,6 +51,23 @@ fail()    { echo -e "  \033[31m✗\033[0m $1"; exit 1; }
 
 winpath() { wslpath -w "$1"; }
 
+install_editable() {
+    local python_executable="$1"
+    local source_path="$2"
+    local package_name="$3"
+    local output status
+
+    if output="$("$python_executable" -m pip install -e "$source_path" 2>&1)"; then
+        printf '%s\n' "$output" | grep -E 'Successfully|error|ERROR|already satisfied' || true
+        return 0
+    else
+        status=$?
+        printf '%s\n' "$output" >&2
+        printf '  pip install -e failed for %s (exit status %s)\n' "$package_name" "$status" >&2
+        return "$status"
+    fi
+}
+
 check_exists() {
     for p in "$@"; do
         if [ ! -e "$p" ]; then fail "Path not found: $p"; fi
@@ -76,9 +93,13 @@ rsync -av --delete "${RSYNC_EXCLUDES[@]}" \
     | grep -v '/$' || true      # don't print directory lines
 ok "Source synced to $(winpath "$EDU_SRC")"
 
-"$EDU_PY" -m pip install -e "$(winpath "$EDU_SRC")" 2>&1 \
-    | grep -E 'Successfully|error|ERROR|already satisfied' || true
+install_editable "$EDU_PY" "$(winpath "$EDU_SRC")" "education-resources"
 ok "Package reinstalled in venv"
+
+"$EDU_PY" -m pip check
+ok "Dependency consistency check passed"
+"$EDU_PY" "$(winpath "$EDU_SRC/scripts/verify_runtime_environment.py")"
+ok "Runtime environment verification passed"
 
 # Smoke test — verify new adapters load
 "$EDU_PY" -c "
@@ -99,9 +120,11 @@ rsync -av --delete "${RSYNC_EXCLUDES[@]}" \
     | grep -v '/$' || true
 ok "Source synced to $(winpath "$SES_SRC")"
 
-"$SES_PY" -m pip install -e "$(winpath "$SES_SRC")" 2>&1 \
-    | grep -E 'Successfully|error|ERROR|already satisfied' || true
+install_editable "$SES_PY" "$(winpath "$SES_SRC")" "session-manager"
 ok "Package reinstalled in venv"
+
+"$SES_PY" -m pip check
+ok "Dependency consistency check passed"
 
 # Smoke test — verify douyin registration
 "$SES_PY" -c "

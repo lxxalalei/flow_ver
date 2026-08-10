@@ -25,12 +25,13 @@ from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
     build_default_inspection,
+    build_representation_authority,
     source_fingerprint,
 )
 from ..policy import Resolver, PolicyViolation, system_resolver, validate_public_http_url
 
 
-INSPECTOR_ID = "generic_web"
+INSPECTOR_ID = "generic"
 MAX_BYTES = 1024 * 1024
 INSPECTION_MAX_BYTES = MAX_BYTES
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -474,6 +475,10 @@ class GenericWebInspector:
     platform_id = "generic"
     inspector_id = INSPECTOR_ID
     version = INSPECTOR_VERSION
+    # Runtime capability inventory is derived from this implementation fact,
+    # not from the retrieval catalog. Platform wrappers inherit the same
+    # bounded scope set and may add non-primary companion representations.
+    supported_scopes = ("primary_resource", "representation", "landing_page", "metadata")
 
     def __init__(
         self,
@@ -610,6 +615,13 @@ class GenericWebInspector:
                     safe_metadata[key] = safe_value
         resolved["metadata"] = safe_metadata
 
+        inspection = build_default_inspection(
+            self.inspector_id,
+            method="bounded_get",
+            cache_status="miss",
+            warnings=list(warnings)[:32],
+            version=self.version,
+        )
         if representation is not None:
             rep = dict(representation)
             try:
@@ -620,15 +632,27 @@ class GenericWebInspector:
                 fingerprint = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
             seed = f"{fingerprint}:{rep.get('kind', 'other')}:{rep.get('mime_type', '')}"
             rep.setdefault("representation_id", "repr_" + hashlib.sha256(seed.encode()).hexdigest()[:32])
+            # Every adapter result carries explicit capability scope and
+            # bounded evidence.  Legacy role/materializable fields remain in
+            # the envelope for old consumers but are never used to infer a
+            # primary resource when the authority fields disagree.
+            scope = rep.get("scope")
+            role = rep.get("role")
+            if isinstance(scope, str) and isinstance(role, str):
+                authority = build_representation_authority(
+                    resource,
+                    scope=scope,
+                    role=role,
+                    technical_availability=str(
+                        rep.get("technical_availability") or availability
+                    ),
+                    source=str(rep.get("evidence", {}).get("source") or "inspection")
+                    if isinstance(rep.get("evidence"), Mapping)
+                    else "inspection",
+                    observed_at=inspection["inspected_at"],
+                )
+                rep.update(authority)
             resolved["representations"] = [rep]
-
-        inspection = build_default_inspection(
-            self.inspector_id,
-            method="bounded_get",
-            cache_status="miss",
-            warnings=list(warnings)[:32],
-            version=self.version,
-        )
         return InspectionResult(
             resolution_status=resolution_status,
             resolved_resource=resolved,
@@ -960,14 +984,51 @@ class GenericWebInspector:
             )
 
             representation_mime = selected_spec.mime_type or mime_type
+            format_conflict = _spec_conflicts(declared_spec, detected_spec)
+            concrete_evidence = (
+                detected_spec is not None
+                and detected_spec.kind != "webpage"
+                and not format_conflict
+                and mime_error is None
+                and read_error is None
+            )
+            page_evidence = (
+                selected_spec.kind == "webpage"
+                and not format_conflict
+                and mime_error is None
+                and read_error is None
+            )
+            if concrete_evidence:
+                scope = "primary_resource"
+                role = "primary"
+                materializable = True
+                technical_availability = "available"
+            elif page_evidence:
+                scope = "landing_page"
+                role = "landing"
+                # A successfully inspected public HTML response is concrete
+                # landing-page evidence.  It can be materialized by the exact
+                # web-materializer capability while remaining a landing page;
+                # this never upgrades it to a primary resource.
+                materializable = True
+                technical_availability = "available" if not failures else "unknown"
+            else:
+                # A declared file MIME without a matching magic signature, a
+                # MIME/magic conflict, or an unclassified body is only a
+                # representation fact.  It must not become a primary plan.
+                scope = "representation"
+                role = "attachment"
+                materializable = False
+                technical_availability = "unknown"
             representation: dict[str, Any] = {
                 "kind": selected_spec.kind,
                 "container": selected_spec.container,
                 "mime_type": representation_mime,
-                "role": "primary",
-                "estimated_size_bytes": len(body),
-                "materializable": True,
-                "requires_auth": False,
+                "scope": scope,
+                "role": role,
+                "technical_availability": technical_availability,
+                "size_bytes": len(body),
+                "materializable": materializable,
             }
             if language:
                 representation["language"] = language

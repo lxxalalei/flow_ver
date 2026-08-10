@@ -102,7 +102,7 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual("G624.3/42", resolved["metadata"]["call_number"])
         self.assertIn("webpage", {item["kind"] for item in resolved["representations"]})
 
-    def test_ximalaya_enrichment_has_audio_primary_and_landing_page(self) -> None:
+    def test_ximalaya_enrichment_has_audio_representation_and_landing_page(self) -> None:
         transport = QueueTransport(
             FakeResponse(final_url="https://www.ximalaya.com/album/7788")
         )
@@ -126,8 +126,11 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual(12, resolved["metadata"]["track_count"])
         self.assertEqual(9001, resolved["metadata"]["play_count"])
         self.assertEqual("audio", representations[0]["kind"])
-        self.assertEqual("primary", representations[0]["role"])
+        self.assertEqual("representation", representations[0]["scope"])
+        self.assertEqual("companion", representations[0]["role"])
+        self.assertFalse(representations[0]["materializable"])
         self.assertEqual("webpage", representations[1]["kind"])
+        self.assertEqual("landing_page", representations[1]["scope"])
         self.assertEqual("landing", representations[1]["role"])
         self.assertEqual("ximalaya", mapped["inspection"]["inspector_id"])
 

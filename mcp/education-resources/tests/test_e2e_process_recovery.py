@@ -94,6 +94,30 @@ def select_titles(
     return presentation, selection
 
 
+def inspect_titles(
+    client: RawMcpClient,
+    flow: dict,
+    search: dict,
+    titles: list[str],
+    key_prefix: str,
+) -> list[dict]:
+    """Persist the authoritative Resolution before prepare for these selections."""
+
+    candidates = {item["title"]: item["resource_id"] for item in search["candidates"]}
+    return [
+        call_ok(
+            client,
+            "resource_inspect",
+            {
+                "flow_id": flow["flow_id"],
+                "resource_id": candidates[title],
+                "idempotency_key": f"{key_prefix}-inspect-key-{index:02d}",
+            },
+        )
+        for index, title in enumerate(titles, start=1)
+    ]
+
+
 def prepare_and_start(
     client: RawMcpClient,
     flow: dict,
@@ -122,7 +146,14 @@ def prepare_and_start(
             },
         },
     )
-    return call_ok(
+    recovered = call_ok(
+        client,
+        "resource_flow_status",
+        {"flow_id": flow["flow_id"]},
+    )
+    if recovered.get("current_plan", {}).get("authority_digest") != plan["authority_digest"]:
+        raise AssertionError("resource_flow_status did not preserve plan authority_digest")
+    started = call_ok(
         client,
         "resource_download_start",
         {
@@ -130,10 +161,14 @@ def prepare_and_start(
             "plan_id": plan["plan_id"],
             **binding,
             "plan_digest": plan["plan_digest"],
+            "authority_digest": plan["authority_digest"],
             "confirmation_token": plan["confirmation_token"],
             "idempotency_key": f"{key_prefix}-start-key-0001",
         },
     )
+    if started.get("authority_digest") != plan["authority_digest"]:
+        raise AssertionError("resource_download_start did not preserve plan authority_digest")
+    return started
 
 
 def wait_job(client: RawMcpClient, flow_id: str, job_id: str, timeout: float = 5.0) -> dict:
@@ -159,13 +194,18 @@ class ProcessRecoveryE2ETests(unittest.TestCase):
             try:
                 self.assertEqual(EXPECTED_TOOLS, {tool["name"] for tool in client.list_tools()})
                 flow, search = begin_flow(client, "restart-e2e", topic="重启")
+                titles = ["重启前快速视频", "重启阻塞图书"]
                 presentation, selection = select_titles(
                     client,
                     flow,
                     search,
-                    ["重启前快速视频", "重启阻塞图书"],
+                    titles,
                     "restart-e2e",
                 )
+                inspected = inspect_titles(
+                    client, flow, search, titles, "restart-e2e"
+                )
+                self.assertTrue(all(item["resolution_status"] == "resolved" for item in inspected))
                 started = prepare_and_start(
                     client,
                     flow,
@@ -225,13 +265,16 @@ class ProcessRecoveryE2ETests(unittest.TestCase):
             data_dir = Path(raw_dir)
             with RawMcpClient(data_dir, mode="standard") as client:
                 flow, search = begin_flow(client, "auth-e2e")
+                titles = ["授权恐龙课程"]
                 presentation, selection = select_titles(
                     client,
                     flow,
                     search,
-                    ["授权恐龙课程"],
+                    titles,
                     "auth-e2e",
                 )
+                inspected = inspect_titles(client, flow, search, titles, "auth-e2e")
+                self.assertEqual("resolved", inspected[0]["resolution_status"])
                 first = prepare_and_start(
                     client,
                     flow,

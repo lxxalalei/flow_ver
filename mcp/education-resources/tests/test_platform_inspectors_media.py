@@ -94,7 +94,7 @@ def inspect_with(inspector_type, candidate: dict, response: FakeResponse):
 
 
 class PlatformInspectorMediaTests(unittest.TestCase):
-    def test_bilibili_enriches_allowlisted_metadata_and_adds_video_primary(self) -> None:
+    def test_bilibili_enriches_allowlisted_metadata_without_synthetic_primary(self) -> None:
         candidate = resource(
             platform="bilibili",
             source_url="https://www.bilibili.com/video/BV1public",
@@ -126,7 +126,15 @@ class PlatformInspectorMediaTests(unittest.TestCase):
         self.assertNotIn("unlisted_value", metadata)
         representations = mapped["resolved_resource"]["representations"]
         self.assertTrue(any(item["kind"] == "webpage" and item["role"] == "landing" for item in representations))
-        self.assertTrue(any(item["kind"] == "video" and item["role"] == "primary" for item in representations))
+        self.assertTrue(
+            any(
+                item["kind"] == "video"
+                and item["scope"] == "representation"
+                and item["role"] == "companion"
+                and item["materializable"] is False
+                for item in representations
+            )
+        )
 
     def test_zhihu_enriches_ids_and_keeps_article_as_webpage(self) -> None:
         candidate = resource(
@@ -157,7 +165,7 @@ class PlatformInspectorMediaTests(unittest.TestCase):
             any(item["kind"] == "webpage" for item in mapped["resolved_resource"]["representations"])
         )
 
-    def test_smartedu_keeps_native_resource_id_and_adds_document_primary(self) -> None:
+    def test_smartedu_keeps_native_resource_id_without_synthetic_primary(self) -> None:
         candidate = resource(
             platform="smartedu",
             source_url="https://basic.smartedu.cn/tchMaterial/detail?contentId=native-9",
@@ -188,13 +196,15 @@ class PlatformInspectorMediaTests(unittest.TestCase):
         self.assertTrue(
             any(
                 item["kind"] == "document"
-                and item["role"] == "primary"
+                and item["scope"] == "representation"
+                and item["role"] == "companion"
                 and item["mime_type"] == "application/pdf"
+                and item["materializable"] is False
                 for item in mapped["resolved_resource"]["representations"]
             )
         )
 
-    def test_smartedu_course_uses_course_webpage_representation(self) -> None:
+    def test_smartedu_course_uses_non_primary_course_webpage_representation(self) -> None:
         candidate = resource(
             platform="smartedu",
             source_url="https://basic.smartedu.cn/qualityCourse?courseId=course-9",
@@ -210,7 +220,9 @@ class PlatformInspectorMediaTests(unittest.TestCase):
             any(
                 item["kind"] == "webpage"
                 and item["container"] == "course"
-                and item["role"] == "primary"
+                and item["scope"] == "representation"
+                and item["role"] == "companion"
+                and item["materializable"] is False
                 for item in mapped["resolved_resource"]["representations"]
             )
         )

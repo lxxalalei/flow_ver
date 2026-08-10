@@ -55,4 +55,4 @@
   `compileall`、16 项 Skill 平台表一致性、22 条本地 Markdown 链接和 `git diff --check` 通过。
 - 未运行全量测试、真实平台网络测试或 OpenClaw doctor/probe；当前机器未发现 OpenClaw。
   这些不阻止 0018 内部架构完成，但平台生产可用性仍需逐平台合法授权与真实环境验收。
-- 未提交、未推送、未创建分支；下一阶段已在 `.agent/plans/0019-inspection-layer.md` 启动。
+- 未提交、未推送、未创建分支；下一阶段已在 `.agent/plans/archive/0019-inspection-layer.md` 启动。

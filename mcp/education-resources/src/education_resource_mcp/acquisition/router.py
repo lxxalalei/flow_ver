@@ -1,21 +1,30 @@
-"""Internal acquisition router and legacy downloader adapters."""
+"""Exact-provider acquisition router and bounded legacy provider adapters.
+
+The router is the enforcement point between a server-authored plan binding and
+an implementation provider.  It resolves exactly the ``provider_id`` and
+``provider_version`` attached to an :class:`AcquisitionRequest`; resource
+platform names never participate in routing and no second provider is tried.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import re
 import threading
+from types import MappingProxyType
 from typing import Any, Protocol
 
 from ..downloader import DownloadBatchResult, DownloadItemFailure, DownloadResult
 from ..errors import DomainError
 from ..policy import PolicyViolation, ensure_within_root
 from .models import (
+    CAPABILITY_SCOPES,
     MAX_ARTIFACTS,
-    AcquisitionRequest,
     AcquisitionItemFailure,
+    AcquisitionRequest,
     AcquisitionResult,
     AcquisitionStrategy,
     Artifact,
@@ -25,7 +34,7 @@ from .models import (
 
 
 class DirectProvider(Protocol):
-    """The existing downloader shape retained behind the acquisition seam."""
+    """The legacy bounded downloader shape used by direct/capture adapters."""
 
     def download(
         self,
@@ -47,8 +56,8 @@ class BrowserCapture(Protocol):
     def capture(self, request: AcquisitionRequest) -> AcquisitionResult:
         ...
 
-    # Existing RenderingDownloader instances may expose only the legacy
-    # DownloadProvider method.  The Router detects that shape at runtime.
+    # An explicitly registered legacy rendering downloader may use only this
+    # direct protocol for WEB_CAPTURE.  It remains the same exact provider.
     def download(
         self,
         resource: Mapping[str, Any],
@@ -60,6 +69,8 @@ class BrowserCapture(Protocol):
         ...
 
 
+_PROVIDER_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+_COMPONENT_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REDACTED_DETAIL_KEYS = {
     "path",
@@ -91,143 +102,366 @@ _REDACTED_DETAIL_PARTS = {
     "filepath",
     "destination",
 }
-_SAFE_DIRECT_FALLBACK_CODES = frozenset(
+# Provider-owned metadata cannot claim router authority facts.  The result
+# exposes authoritative values in dedicated top-level fields instead.
+_AUTHORITY_METADATA_KEYS = frozenset(
     {
-        "ACQUISITION_FAILED",
-        "DOWNLOAD_FAILED",
-        "FEATURE_NOT_SUPPORTED",
-        "PLATFORM_UNAVAILABLE",
-        "UPSTREAM_UNAVAILABLE",
+        "provider",
+        "provider_id",
+        "provider_version",
+        "planned_provider",
+        "planned_scope",
+        "actual_scope",
+        "representation_id",
+        "binding_digest",
+        "source_fingerprint",
+        "fallback",
+        "fallback_chain",
     }
 )
-_SAFE_CAPTURE_FALLBACK_CODES = frozenset(
-    {
-        "ACQUISITION_FAILED",
-        "BROWSER_CAPTURE_UNAVAILABLE",
-        "CAPTURE_EMPTY",
-        "RENDER_BROWSER_FAILED",
-        "RENDER_FAILED",
-    }
-)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRegistration:
+    """An explicitly deployable exact provider binding.
+
+    A registration declares every acquisition strategy and capability scope it
+    can execute.  The router will only select an entry by its exact immutable
+    ``(provider_id, provider_version)`` key; it never derives a provider from
+    ``resource.platform`` or substitutes another registration after failure.
+    """
+
+    provider_id: str
+    provider_version: str
+    provider: DirectProvider | WebMaterializer | BrowserCapture
+    strategies: Iterable[AcquisitionStrategy | str]
+    scopes: Iterable[str]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider_id, str) or not _PROVIDER_ID_PATTERN.fullmatch(
+            self.provider_id
+        ):
+            raise ValueError("provider_id must be a valid provider identifier")
+        if not isinstance(self.provider_version, str) or not _COMPONENT_VERSION_PATTERN.fullmatch(
+            self.provider_version
+        ):
+            raise ValueError("provider_version must be a valid component version")
+        if self.provider is None:
+            raise TypeError("provider registration requires a provider")
+        if isinstance(self.strategies, (str, bytes)):
+            raise TypeError("registration strategies must be an iterable of strategies")
+        try:
+            strategies = frozenset(
+                AcquisitionStrategy.from_value(strategy) for strategy in self.strategies
+            )
+        except TypeError as exc:
+            raise TypeError("registration strategies must be iterable") from exc
+        if not strategies:
+            raise ValueError("registration must declare at least one strategy")
+        if isinstance(self.scopes, (str, bytes)):
+            raise TypeError("registration scopes must be an iterable of capability scopes")
+        try:
+            scopes = frozenset(self.scopes)
+        except TypeError as exc:
+            raise TypeError("registration scopes must be iterable") from exc
+        if not scopes or any(not isinstance(scope, str) or scope not in CAPABILITY_SCOPES for scope in scopes):
+            raise ValueError("registration scopes must contain declared capability scopes")
+        object.__setattr__(self, "strategies", strategies)
+        object.__setattr__(self, "scopes", scopes)
+
+        if AcquisitionStrategy.DIRECT_FILE in strategies and not callable(
+            getattr(self.provider, "download", None)
+        ):
+            raise TypeError("direct_file registration provider must implement download")
+        if AcquisitionStrategy.WEB_MATERIALIZE in strategies and not callable(
+            getattr(self.provider, "materialize", None)
+        ):
+            raise TypeError("web_materialize registration provider must implement materialize")
+        if AcquisitionStrategy.WEB_CAPTURE in strategies and not (
+            callable(getattr(self.provider, "capture", None))
+            or callable(getattr(self.provider, "download", None))
+        ):
+            raise TypeError("web_capture registration provider must implement capture or download")
 
 
 class AcquisitionRouter:
-    """Choose a private acquisition provider and enforce output boundaries.
-
-    The router accepts the legacy ``DownloadResult`` protocol for direct and
-    platform downloaders.  Static materialization and browser capture return
-    an ``AcquisitionResult`` directly.  Browser capture is never inferred by
-    this class; it is reached only when the request's strategy is explicitly
-    ``web_capture``.
-    """
+    """Route one authority-bound request to its exact registered provider."""
 
     def __init__(
         self,
-        direct_provider: DirectProvider,
-        platform_providers: Mapping[str, DirectProvider] | None = None,
-        web_materializer: WebMaterializer | None = None,
-        browser_capture: BrowserCapture | None = None,
+        provider_registry: Mapping[tuple[str, str], ProviderRegistration]
+        | Iterable[ProviderRegistration],
     ) -> None:
-        if direct_provider is None:
-            raise TypeError("direct_provider is required")
-        self.direct_provider = direct_provider
-        self.platform_providers = dict(platform_providers or {})
-        self.web_materializer = web_materializer
-        self.browser_capture = browser_capture
+        registry: dict[tuple[str, str], ProviderRegistration] = {}
+        if isinstance(provider_registry, Mapping):
+            entries = provider_registry.items()
+            for raw_key, registration in entries:
+                if (
+                    not isinstance(raw_key, tuple)
+                    or len(raw_key) != 2
+                    or not all(isinstance(part, str) for part in raw_key)
+                ):
+                    raise TypeError("provider registry keys must be (provider_id, provider_version)")
+                self._add_registration(
+                    registry,
+                    registration,
+                    expected_key=(raw_key[0], raw_key[1]),
+                )
+        else:
+            if isinstance(provider_registry, (str, bytes)):
+                raise TypeError("provider_registry must be a mapping or registration iterable")
+            try:
+                for registration in provider_registry:
+                    self._add_registration(registry, registration)
+            except TypeError as exc:
+                if str(exc).startswith("provider registry") or str(exc).startswith("registration"):
+                    raise
+                raise TypeError("provider_registry must be a mapping or registration iterable") from exc
+        self._provider_registry: Mapping[tuple[str, str], ProviderRegistration] = MappingProxyType(
+            dict(registry)
+        )
+
+    @staticmethod
+    def _add_registration(
+        registry: dict[tuple[str, str], ProviderRegistration],
+        registration: ProviderRegistration,
+        *,
+        expected_key: tuple[str, str] | None = None,
+    ) -> None:
+        if not isinstance(registration, ProviderRegistration):
+            raise TypeError("provider registry values must be ProviderRegistration")
+        key = (registration.provider_id, registration.provider_version)
+        if expected_key is not None and expected_key != key:
+            raise ValueError("provider registry key must match registration provider_id and provider_version")
+        if key in registry:
+            raise ValueError("provider registry contains duplicate exact provider registration")
+        registry[key] = registration
+
+    @property
+    def provider_registry(self) -> Mapping[tuple[str, str], ProviderRegistration]:
+        """Read-only view of exact registrations, useful for diagnostics only."""
+
+        return self._provider_registry
 
     @staticmethod
     def select_strategy(
         value: AcquisitionStrategy | str | None,
         resource: Mapping[str, Any] | None = None,
     ) -> AcquisitionStrategy:
-        """Resolve a plan value without ever auto-selecting browser capture."""
+        """Translate an explicit plan value; routing itself uses request.strategy only."""
 
-        return AcquisitionStrategy.from_plan(value, resource)
+        # Preserve the legacy argument shape without allowing resource type to
+        # infer an executable strategy.
+        del resource
+        return AcquisitionStrategy.from_plan(value)
 
     def acquire(self, request: AcquisitionRequest) -> AcquisitionResult:
         if not isinstance(request, AcquisitionRequest):
             raise TypeError("router.acquire expects AcquisitionRequest")
         if request.cancel_event.is_set():
-            return AcquisitionResult.failed(
-                request.strategy,
+            return self._planned_failure(
+                request,
                 "JOB_CANCELLED",
                 "获取任务已取消",
             )
-        strategy = request.strategy
-        if strategy is AcquisitionStrategy.DIRECT_FILE:
-            return self._acquire_direct(request)
-        if strategy is AcquisitionStrategy.WEB_MATERIALIZE:
-            return self._acquire_materialized(request)
-        if strategy is AcquisitionStrategy.WEB_CAPTURE:
-            return self._acquire_captured(request)
-        # The enum makes this unreachable, but retaining a structured result
-        # keeps this seam safe if another strategy is added incorrectly.
-        return AcquisitionResult.failed(
-            strategy,
-            "UNSUPPORTED_ACQUISITION_STRATEGY",
-            "不支持的获取策略",
-        )
 
-    def _acquire_direct(self, request: AcquisitionRequest) -> AcquisitionResult:
-        platform = str(request.resource.get("platform") or "")
-        provider = self.platform_providers.get(platform, self.direct_provider)
-        provider_name = platform if provider is not self.direct_provider else "direct"
-        result = self._call_download_provider(
-            request, provider, provider_name=provider_name
-        )
-        if (
-            result.ok
-            or not request.allow_safe_fallback
-            or provider is self.direct_provider
-            or result.failure is None
-            or result.failure.code not in _SAFE_DIRECT_FALLBACK_CODES
-            or self._no_fallback_code(result.failure.code)
-        ):
-            return result
+        registration, failure = self._resolve_registration(request)
+        if failure is not None:
+            return failure
+        assert registration is not None  # narrowed by _resolve_registration
 
-        fallback = self._call_download_provider(
-            request,
-            self.direct_provider,
-            provider_name="direct-fallback",
-        )
-        if fallback.ok:
-            return AcquisitionResult.success(
-                fallback.strategy,
-                fallback.bundle,  # type: ignore[arg-type]
-                warnings=(
-                    "platform provider failed; safe direct provider fallback used",
-                ),
-                metadata={"fallback": "direct_file"},
-                item_failures=fallback.item_failures,
-                completion=fallback.completion,
+        provider = registration.provider
+        if request.strategy is AcquisitionStrategy.DIRECT_FILE:
+            result = self._call_download_provider(
+                request,
+                provider,  # type: ignore[arg-type]
+                provider_strategy="direct",
+                result_strategy=AcquisitionStrategy.DIRECT_FILE,
+                provider_id=registration.provider_id,
             )
-        return result
+        elif request.strategy is AcquisitionStrategy.WEB_MATERIALIZE:
+            result = self._call_result_provider(
+                request,
+                provider,  # type: ignore[arg-type]
+                strategy=AcquisitionStrategy.WEB_MATERIALIZE,
+                method_name="materialize",
+                provider_id=registration.provider_id,
+            )
+        elif request.strategy is AcquisitionStrategy.WEB_CAPTURE:
+            if callable(getattr(provider, "capture", None)):
+                result = self._call_result_provider(
+                    request,
+                    provider,  # type: ignore[arg-type]
+                    strategy=AcquisitionStrategy.WEB_CAPTURE,
+                    method_name="capture",
+                    provider_id=registration.provider_id,
+                )
+            elif callable(getattr(provider, "download", None)):
+                # Legacy rendering providers are allowed only when this exact
+                # registration explicitly declares WEB_CAPTURE.
+                result = self._call_download_provider(
+                    request,
+                    provider,  # type: ignore[arg-type]
+                    provider_strategy="webpage",
+                    result_strategy=AcquisitionStrategy.WEB_CAPTURE,
+                    provider_id=registration.provider_id,
+                )
+            else:  # pragma: no cover - ProviderRegistration prevents this
+                result = AcquisitionResult.failed(
+                    request.strategy,
+                    "PROVIDER_UNAVAILABLE",
+                    "已绑定的网页捕获器不可用",
+                )
+        else:  # pragma: no cover - AcquisitionRequest validates the enum
+            result = AcquisitionResult.failed(
+                request.strategy,
+                "UNSUPPORTED_ACQUISITION_STRATEGY",
+                "不支持的获取策略",
+            )
+        return self._bind_result(request, registration, result)
+
+    def _resolve_registration(
+        self, request: AcquisitionRequest
+    ) -> tuple[ProviderRegistration | None, AcquisitionResult | None]:
+        key = (request.provider_id, request.provider_version)
+        registration = self._provider_registry.get(key)
+        if registration is None:
+            versions = sorted(
+                version
+                for provider_id, version in self._provider_registry
+                if provider_id == request.provider_id
+            )
+            if versions:
+                return None, self._planned_failure(
+                    request,
+                    "CAPABILITY_VERSION_CONFLICT",
+                    "已绑定的提供方版本未部署",
+                    details={
+                        "provider_id": request.provider_id,
+                        "provider_version": request.provider_version,
+                        "reason": "provider_version_not_registered",
+                    },
+                )
+            return None, self._planned_failure(
+                request,
+                "PROVIDER_UNAVAILABLE",
+                "已绑定的提供方未部署",
+                details={
+                    "provider_id": request.provider_id,
+                    "provider_version": request.provider_version,
+                    "reason": "provider_not_registered",
+                },
+            )
+        if request.strategy not in registration.strategies or request.planned_scope not in registration.scopes:
+            return None, self._planned_failure(
+                request,
+                "PROVIDER_SCOPE_MISMATCH",
+                "已绑定的提供方不支持该策略或资源范围",
+                details={
+                    "provider_id": registration.provider_id,
+                    "provider_version": registration.provider_version,
+                    "requested_strategy": request.strategy.kind,
+                    "requested_scope": request.planned_scope,
+                },
+            )
+        return registration, None
+
+    @staticmethod
+    def _authority_kwargs(
+        request: AcquisitionRequest,
+        registration: ProviderRegistration | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "planned_provider_id": request.provider_id,
+            "planned_provider_version": request.provider_version,
+            "provider_id": registration.provider_id if registration is not None else None,
+            "provider_version": registration.provider_version if registration is not None else None,
+            "planned_scope": request.planned_scope,
+            "actual_scope": request.planned_scope if registration is not None else None,
+            "representation_id": request.representation_id,
+            "binding_digest": request.binding_digest,
+            "source_fingerprint": request.source_fingerprint,
+        }
+
+    def _planned_failure(
+        self,
+        request: AcquisitionRequest,
+        code: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        details: Mapping[str, Any] | None = None,
+    ) -> AcquisitionResult:
+        return AcquisitionResult.failed(
+            request.strategy,
+            code,
+            message,
+            retryable=retryable,
+            details=details,
+            **self._authority_kwargs(request),
+        )
+
+    def _bind_result(
+        self,
+        request: AcquisitionRequest,
+        registration: ProviderRegistration,
+        result: AcquisitionResult,
+    ) -> AcquisitionResult:
+        if result.strategy is not request.strategy:
+            return self._planned_failure(
+                request,
+                "PROVIDER_SCOPE_MISMATCH",
+                "提供方返回了未绑定的获取策略",
+                details={
+                    "provider_id": registration.provider_id,
+                    "provider_version": registration.provider_version,
+                    "expected_strategy": request.strategy.kind,
+                    "returned_strategy": result.strategy.kind,
+                },
+            )
+        metadata = self._without_authority_metadata(result.metadata)
+        return AcquisitionResult(
+            request.strategy,
+            bundle=result.bundle,
+            failure=result.failure,
+            warnings=result.warnings,
+            metadata=metadata,
+            item_failures=result.item_failures,
+            completion=result.completion,
+            **self._authority_kwargs(request, registration),
+        )
+
+    @staticmethod
+    def _without_authority_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(metadata, Mapping):  # defensive provider boundary
+            raise TypeError("provider result metadata must be a mapping")
+        return {
+            str(key): value
+            for key, value in metadata.items()
+            if str(key).strip().lower() not in _AUTHORITY_METADATA_KEYS
+        }
 
     def _call_download_provider(
         self,
         request: AcquisitionRequest,
         provider: DirectProvider,
         *,
-        provider_name: str,
-        provider_strategy: str = "direct",
-        result_strategy: AcquisitionStrategy = AcquisitionStrategy.DIRECT_FILE,
+        provider_strategy: str,
+        result_strategy: AcquisitionStrategy,
+        provider_id: str,
     ) -> AcquisitionResult:
         item_failures: tuple[AcquisitionItemFailure, ...] = ()
         results: list[DownloadResult] = []
         try:
-            if request.cancel_event.is_set():
-                raise DomainError("JOB_CANCELLED", "获取任务已取消")
+            self._raise_if_cancelled(request.cancel_event)
             raw = provider.download(
                 request.mutable_resource(),
                 request.job_id,
-                # Existing providers use ``direct``.  Browser compatibility
-                # callers explicitly override this with legacy ``webpage``.
                 provider_strategy,
                 request.max_bytes,
                 request.cancel_event,
             )
-            if request.cancel_event.is_set():
-                raise DomainError("JOB_CANCELLED", "获取任务已取消")
+            self._raise_if_cancelled(request.cancel_event)
             results, item_failures = self._normalise_download_envelope(raw)
             if not results:
                 if item_failures:
@@ -241,19 +475,15 @@ class AcquisitionRouter:
                         item_failures=item_failures,
                     )
                 raise ValueError("download provider returned no artifacts")
-            bundle = self._bundle_from_downloads(
-                request, results, provider_name
-            )
+            bundle = self._bundle_from_downloads(request, results)
+            self._raise_if_cancelled(request.cancel_event)
             return AcquisitionResult.success(
                 result_strategy,
                 bundle,
-                metadata={"provider": provider_name},
                 item_failures=item_failures,
             )
         except DomainError as exc:
-            return self._failure_from_domain_error(
-                result_strategy, exc
-            )
+            return self._failure_from_domain_error(result_strategy, exc)
         except (OSError, PolicyViolation, ValueError, TypeError) as exc:
             primary_failure = next(
                 (item for item in item_failures if item.role == "primary"), None
@@ -276,7 +506,7 @@ class AcquisitionRouter:
                 result_strategy,
                 "ACQUISITION_OUTPUT_INVALID",
                 "直接获取结果未通过安全校验",
-                details={"provider": provider_name, "reason": type(exc).__name__},
+                details={"provider_id": provider_id, "reason": type(exc).__name__},
                 item_failures=item_failures,
             )
         except Exception as exc:  # providers are a plugin boundary
@@ -285,88 +515,9 @@ class AcquisitionRouter:
                 "ACQUISITION_FAILED",
                 "直接获取失败",
                 retryable=True,
-                details={"provider": provider_name, "reason": type(exc).__name__},
+                details={"provider_id": provider_id, "reason": type(exc).__name__},
                 item_failures=item_failures,
             )
-
-    def _acquire_materialized(self, request: AcquisitionRequest) -> AcquisitionResult:
-        if self.web_materializer is None:
-            return AcquisitionResult.failed(
-                AcquisitionStrategy.WEB_MATERIALIZE,
-                "MATERIALIZER_UNAVAILABLE",
-                "静态网页物化器不可用",
-            )
-        return self._call_result_provider(
-            request,
-            self.web_materializer,
-            strategy=AcquisitionStrategy.WEB_MATERIALIZE,
-            method_name="materialize",
-        )
-
-    def _acquire_captured(self, request: AcquisitionRequest) -> AcquisitionResult:
-        if self.browser_capture is not None:
-            if callable(getattr(self.browser_capture, "capture", None)):
-                result = self._call_result_provider(
-                    request,
-                    self.browser_capture,
-                    strategy=AcquisitionStrategy.WEB_CAPTURE,
-                    method_name="capture",
-                )
-            elif callable(getattr(self.browser_capture, "download", None)):
-                # RenderingDownloader is a legacy DownloadProvider.  Explicit
-                # WEB_CAPTURE receives its old strategy value, then the
-                # resulting files go through the same bounded conversion.
-                result = self._call_download_provider(
-                    request,
-                    self.browser_capture,  # type: ignore[arg-type]
-                    provider_name="browser-capture-legacy",
-                    provider_strategy="webpage",
-                    result_strategy=AcquisitionStrategy.WEB_CAPTURE,
-                )
-            else:
-                result = AcquisitionResult.failed(
-                    AcquisitionStrategy.WEB_CAPTURE,
-                    "BROWSER_CAPTURE_UNAVAILABLE",
-                    "浏览器网页捕获器没有可用接口",
-                )
-            if (
-                result.ok
-                or not request.allow_safe_fallback
-                or result.failure is None
-                or result.failure.code not in _SAFE_CAPTURE_FALLBACK_CODES
-                or self._no_fallback_code(result.failure.code)
-            ):
-                return result
-        else:
-            result = AcquisitionResult.failed(
-                AcquisitionStrategy.WEB_CAPTURE,
-                "BROWSER_CAPTURE_UNAVAILABLE",
-                "浏览器网页捕获器不可用",
-            )
-
-        # Static materialization is a safe fallback for an explicitly
-        # requested browser capture.  The inverse fallback is intentionally
-        # absent because raw HTML is not a safe substitute for materialized
-        # content.
-        if request.allow_safe_fallback and self.web_materializer is not None:
-            fallback = self._call_result_provider(
-                request,
-                self.web_materializer,
-                strategy=AcquisitionStrategy.WEB_MATERIALIZE,
-                method_name="materialize",
-            )
-            if fallback.ok:
-                return AcquisitionResult.success(
-                    fallback.strategy,
-                    fallback.bundle,  # type: ignore[arg-type]
-                    warnings=(
-                        "browser capture unavailable or failed; static materialization fallback used",
-                    ),
-                    metadata={"fallback": "web_materialize"},
-                    item_failures=fallback.item_failures,
-                    completion=fallback.completion,
-                )
-        return result
 
     def _call_result_provider(
         self,
@@ -375,19 +526,32 @@ class AcquisitionRouter:
         *,
         strategy: AcquisitionStrategy,
         method_name: str,
+        provider_id: str,
     ) -> AcquisitionResult:
         try:
-            if request.cancel_event.is_set():
-                raise DomainError("JOB_CANCELLED", "获取任务已取消")
+            self._raise_if_cancelled(request.cancel_event)
             method = getattr(provider, method_name)
             result = method(request)
+            self._raise_if_cancelled(request.cancel_event)
             if not isinstance(result, AcquisitionResult):
                 raise TypeError("provider must return AcquisitionResult")
+            if result.strategy is not strategy:
+                return AcquisitionResult.failed(
+                    strategy,
+                    "PROVIDER_SCOPE_MISMATCH",
+                    "提供方返回了未绑定的获取策略",
+                    details={
+                        "provider_id": provider_id,
+                        "expected_strategy": strategy.kind,
+                        "returned_strategy": result.strategy.kind,
+                    },
+                )
             if not result.ok:
                 return self._sanitise_result(result)
             if result.bundle is None:  # pragma: no cover - guarded by model
                 raise ValueError("successful result has no bundle")
             bundle = self._validate_bundle(request, result.bundle)
+            self._raise_if_cancelled(request.cancel_event)
             return AcquisitionResult.success(
                 strategy,
                 bundle,
@@ -403,7 +567,7 @@ class AcquisitionRouter:
                 strategy,
                 "ACQUISITION_OUTPUT_INVALID",
                 "物化结果未通过安全校验",
-                details={"reason": type(exc).__name__},
+                details={"provider_id": provider_id, "reason": type(exc).__name__},
             )
         except Exception as exc:  # provider/plugin boundary
             return AcquisitionResult.failed(
@@ -411,14 +575,13 @@ class AcquisitionRouter:
                 "ACQUISITION_FAILED",
                 "物化任务失败",
                 retryable=True,
-                details={"reason": type(exc).__name__},
+                details={"provider_id": provider_id, "reason": type(exc).__name__},
             )
 
     def _bundle_from_downloads(
         self,
         request: AcquisitionRequest,
         results: Sequence[DownloadResult],
-        provider_name: str,
     ) -> ArtifactBundle:
         if not results:
             raise ValueError("download provider returned no artifacts")
@@ -456,13 +619,14 @@ class AcquisitionRouter:
 
         artifacts: list[Artifact] = []
         for index, result in enumerate(results):
+            self._raise_if_cancelled(request.cancel_event)
             path = self._checked_path(result.path, request.jobs_root)
             actual_size = path.stat().st_size
             if actual_size != result.byte_size:
                 raise ValueError("download result byte_size does not match the file")
             if actual_size > request.max_bytes:
                 raise ValueError("artifact exceeds max_bytes")
-            digest = self._sha256(path, request.max_bytes)
+            digest = self._sha256(path, request.max_bytes, request.cancel_event)
             if not isinstance(result.sha256, str) or not _SHA256.fullmatch(result.sha256.lower()):
                 raise ValueError("download result sha256 is invalid")
             if digest != result.sha256.lower():
@@ -471,7 +635,6 @@ class AcquisitionRouter:
             role = roles[index]
             required = bool(result.required)
             metadata = self._sanitise_mapping(result.metadata)
-            metadata.setdefault("provider", provider_name)
             metadata.setdefault("source", "download_result")
             artifacts.append(
                 Artifact(
@@ -498,13 +661,14 @@ class AcquisitionRouter:
         validated: list[Artifact] = []
         total = 0
         for item in bundle.artifacts:
+            self._raise_if_cancelled(request.cancel_event)
             path = self._checked_path(item.path, request.jobs_root)
             actual_size = path.stat().st_size
             if actual_size != item.byte_size:
                 raise ValueError("artifact byte_size does not match the file")
             if actual_size > request.max_bytes:
                 raise ValueError("artifact exceeds max_bytes")
-            digest = self._sha256(path, request.max_bytes)
+            digest = self._sha256(path, request.max_bytes, request.cancel_event)
             if digest != item.sha256:
                 raise ValueError("artifact sha256 does not match the file")
             validated.append(
@@ -655,28 +819,30 @@ class AcquisitionRouter:
         return resolved
 
     @staticmethod
-    def _sha256(path: Path, max_bytes: int) -> str:
+    def _raise_if_cancelled(cancel_event: threading.Event) -> None:
+        if cancel_event.is_set():
+            raise DomainError("JOB_CANCELLED", "获取任务已取消")
+
+    @classmethod
+    def _sha256(
+        cls,
+        path: Path,
+        max_bytes: int,
+        cancel_event: threading.Event,
+    ) -> str:
         digest = hashlib.sha256()
         total = 0
         with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            while True:
+                cls._raise_if_cancelled(cancel_event)
+                chunk = handle.read(64 * 1024)
+                if not chunk:
+                    break
                 total += len(chunk)
                 if total > max_bytes:
                     raise ValueError("artifact exceeds max_bytes")
                 digest.update(chunk)
         return digest.hexdigest()
-
-    @staticmethod
-    def _no_fallback_code(code: str) -> bool:
-        """Authorization, policy and cancellation failures are terminal."""
-
-        normalized = str(code).upper()
-        return (
-            normalized.startswith("AUTH")
-            or normalized.startswith("POLICY")
-            or normalized in {"CANCEL", "CANCELLED", "JOB_CANCELLED", "JOB_CANCELLING"}
-            or "CANCEL" in normalized
-        )
 
     @classmethod
     def _failure_from_domain_error(
@@ -695,5 +861,6 @@ __all__ = [
     "AcquisitionRouter",
     "BrowserCapture",
     "DirectProvider",
+    "ProviderRegistration",
     "WebMaterializer",
 ]

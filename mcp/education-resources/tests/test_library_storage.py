@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -30,25 +32,6 @@ class LibraryStorageTests(unittest.TestCase):
                 """,
                 (NOW, NOW),
             )
-            connection.execute(
-                """
-                INSERT INTO download_plans(
-                    plan_id, flow_id, presented_version, resource_ids_json, options_json,
-                    confirmation_token, confirmation_hash, expires_at, used, created_at,
-                    selection_version, selection_digest, plan_digest
-                ) VALUES ('plan_test', 'flow_test', 1, '[]', '{}', 'token', 'hash', ?, 1, ?, 1, 'selection', 'plan')
-                """,
-                ("2099-01-01T00:00:00+00:00", NOW),
-            )
-            connection.execute(
-                """
-                INSERT INTO jobs(
-                    job_id, flow_id, plan_id, status, progress, asset_ids_json,
-                    created_at, updated_at
-                ) VALUES ('job_test', 'flow_test', 'plan_test', 'succeeded', 100, '[]', ?, ?)
-                """,
-                (NOW, NOW),
-            )
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -64,7 +47,23 @@ class LibraryStorageTests(unittest.TestCase):
         title: str | None = None,
     ) -> str:
         resource_id = f"res_{suffix}"
-        asset_id = f"asset_{suffix}"
+        plan_id = f"plan_{suffix}"
+        job_id = f"job_{suffix}"
+        snapshot_id = f"readiness_{suffix}"
+        eligibility_id = f"eligibility_{suffix}"
+        representation_id = f"representation_{suffix}"
+        capability_id = f"capability_{suffix}"
+        authority_digest = "sha256:" + hashlib.sha256(
+            f"library-authority:{suffix}".encode("utf-8")
+        ).hexdigest()
+        plan_binding_digest = hashlib.sha256(
+            f"library-plan:{suffix}".encode("utf-8")
+        ).hexdigest()
+        execution_binding_digest = hashlib.sha256(
+            f"library-execution:{suffix}".encode("utf-8")
+        ).hexdigest()
+        filename = f"{suffix}.mp4" if resource_type == "video" else f"{suffix}.pdf"
+        media_type = "video/mp4" if resource_type == "video" else "application/pdf"
         with self.store.transaction() as connection:
             connection.execute(
                 """
@@ -84,21 +83,166 @@ class LibraryStorageTests(unittest.TestCase):
             )
             connection.execute(
                 """
-                INSERT INTO assets(
-                    asset_id, job_id, resource_id, status, local_path, byte_size,
-                    media_type, sha256, filename, created_at
-                ) VALUES (?, 'job_test', ?, 'ready', ?, ?, 'application/pdf', ?, ?, ?)
+                INSERT INTO download_plans(
+                    plan_id, flow_id, presented_version, resource_ids_json, options_json,
+                    confirmation_token, confirmation_hash, expires_at, used, created_at,
+                    selection_version, selection_digest, plan_digest
+                ) VALUES (?, 'flow_test', 1, ?, '{}', 'token', 'hash', ?, 1, ?, 1, ?, ?)
                 """,
                 (
-                    asset_id,
+                    plan_id,
+                    json.dumps([resource_id]),
+                    "2099-01-01T00:00:00+00:00",
+                    NOW,
+                    plan_binding_digest,
+                    plan_binding_digest,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO jobs(
+                    job_id, flow_id, plan_id, status, progress, asset_ids_json,
+                    created_at, updated_at
+                ) VALUES (?, 'flow_test', ?, 'running', 0, '[]', ?, ?)
+                """,
+                (job_id, plan_id, NOW, NOW),
+            )
+            connection.execute(
+                """
+                INSERT INTO capability_readiness_snapshots(
+                    snapshot_id, capability_id, descriptor_version,
+                    descriptor_digest, registry_version, registry_digest,
+                    platform_id, capability_scope, strategy, provider_id,
+                    provider_version, inspector_id, inspector_version, status,
+                    issues_json, observed_at, expires_at, snapshot_digest
+                ) VALUES (?, ?, '1.0.0', ?, '1.0.0', ?, ?,
+                          'primary_resource', 'direct_file', 'generic-direct',
+                          '1.0.0', 'generic', '1.0.0', 'ready', '[]', ?, ?, ?)
+                """,
+                (
+                    snapshot_id,
+                    capability_id,
+                    authority_digest,
+                    authority_digest,
+                    platform,
+                    NOW,
+                    "2099-01-01T00:00:00+00:00",
+                    authority_digest,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO eligibility_decisions(
+                    eligibility_id, flow_id, resource_id, resolution_id,
+                    representation_id, action, status, policy_class,
+                    reason_codes_json, source_fingerprint, capability_id,
+                    descriptor_digest, readiness_snapshot_id, evaluated_at,
+                    expires_at, decision_digest
+                ) VALUES (?, 'flow_test', ?, NULL, ?, 'download', 'eligible',
+                          'public', '[]', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    eligibility_id,
                     resource_id,
-                    f"/internal/jobs/{suffix}.pdf",
-                    byte_size,
-                    sha256,
-                    f"{suffix}.pdf",
+                    representation_id,
+                    authority_digest,
+                    capability_id,
+                    authority_digest,
+                    snapshot_id,
+                    NOW,
+                    "2099-01-01T00:00:00+00:00",
+                    authority_digest,
+                ),
+            )
+            common = (
+                plan_id,
+                resource_id,
+                representation_id,
+                capability_id,
+                authority_digest,
+                authority_digest,
+                snapshot_id,
+                authority_digest,
+                eligibility_id,
+                authority_digest,
+                authority_digest,
+                json.dumps({"scope": "primary_resource"}),
+            )
+            connection.execute(
+                """
+                INSERT INTO download_plan_items(
+                    plan_id, position, resource_id, resolution_id,
+                    representation_id, capability_scope, strategy, provider_id,
+                    provider_version, capability_id, descriptor_version,
+                    descriptor_digest, registry_version, registry_digest,
+                    readiness_snapshot_id, readiness_digest, eligibility_id,
+                    eligibility_digest, source_fingerprint, representation_json,
+                    binding_digest
+                ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
+                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
+                          ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (*common, plan_binding_digest),
+            )
+            connection.execute(
+                """
+                INSERT INTO job_execution_items(
+                    job_id, plan_id, position, resource_id, resolution_id,
+                    representation_id, capability_scope, strategy, provider_id,
+                    provider_version, capability_id, descriptor_version,
+                    descriptor_digest, registry_version, registry_digest,
+                    readiness_snapshot_id, readiness_digest, eligibility_id,
+                    eligibility_digest, source_fingerprint, representation_json,
+                    plan_binding_digest, execution_binding_digest, revalidated_at
+                ) VALUES (?, ?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
+                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    *common,
+                    plan_binding_digest,
+                    execution_binding_digest,
                     NOW,
                 ),
             )
+
+        outcome_metadata = {"fixture": "library-storage"}
+        self.store.start_acquisition_outcome(
+            job_id, resource_id, metadata=outcome_metadata
+        )
+        bundle = self.store.persist_asset_bundle(
+            job_id,
+            resource_id,
+            [
+                {
+                    "role": "primary",
+                    "position": 0,
+                    "status": "ready",
+                    "required": True,
+                    "metadata": {},
+                    "local_path": f"/internal/jobs/{job_id}/{filename}",
+                    "byte_size": byte_size,
+                    "media_type": media_type,
+                    "sha256": sha256,
+                    "filename": filename,
+                }
+            ],
+        )
+        asset_id = str(bundle["items"][0]["asset_id"])
+        self.store.complete_acquisition_outcome(
+            job_id,
+            resource_id,
+            status="succeeded",
+            actual_scope="primary_resource",
+            actual_strategy="direct_file",
+            actual_provider_id="generic-direct",
+            actual_provider_version="1.0.0",
+            bundle_id=str(bundle["bundle_id"]),
+            asset_ids=[asset_id],
+            metadata=outcome_metadata,
+        )
+        self.store.finalize_job_success(job_id)
         return asset_id
 
     @staticmethod

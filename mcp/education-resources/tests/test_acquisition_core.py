@@ -19,6 +19,7 @@ from education_resource_mcp.acquisition import (  # noqa: E402
     AcquisitionStrategy,
     Artifact,
     ArtifactBundle,
+    ProviderRegistration,
 )
 from education_resource_mcp.downloader import DownloadResult  # noqa: E402
 from education_resource_mcp.errors import DomainError  # noqa: E402
@@ -32,6 +33,23 @@ def _download_result(path: Path, media_type: str = "text/plain") -> DownloadResu
         media_type=media_type,
         sha256=hashlib.sha256(payload).hexdigest(),
         filename=path.name,
+    )
+
+
+def _registration(
+    provider: object,
+    *,
+    provider_id: str = "test-provider",
+    version: str = "1.0.0",
+    strategies: tuple[AcquisitionStrategy, ...] = (AcquisitionStrategy.DIRECT_FILE,),
+    scopes: tuple[str, ...] = ("primary_resource",),
+) -> ProviderRegistration:
+    return ProviderRegistration(
+        provider_id=provider_id,
+        provider_version=version,
+        provider=provider,  # type: ignore[arg-type]
+        strategies=strategies,
+        scopes=scopes,
     )
 
 
@@ -54,7 +72,11 @@ class _DirectProvider:
 
 
 class _FailingProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+        self.calls += 1
         raise DomainError("UPSTREAM_UNAVAILABLE", "platform unavailable", retryable=True)
 
 
@@ -91,16 +113,47 @@ class _Materializer:
             media_type=result.media_type,
             sha256=result.sha256,
             filename=result.filename,
-            metadata={"renderer": "test"},
+            metadata={"renderer": "test", "provider": "untrusted"},
         )
         return AcquisitionResult.success(
             AcquisitionStrategy.WEB_MATERIALIZE,
             ArtifactBundle((artifact,), request.max_bytes),
+            metadata={
+                "provider": "untrusted",
+                "renderer": "test",
+                "source_fingerprint": "sha256:" + "f" * 64,
+            },
         )
 
 
+class _CancellingMaterializer(_Materializer):
+    def materialize(self, request: AcquisitionRequest) -> AcquisitionResult:
+        result = super().materialize(request)
+        request.cancel_event.set()
+        return result
+
+
+class _CancelAfterChecks(threading.Event):
+    """Deterministically request cancellation at a validation boundary."""
+
+    def __init__(self, threshold: int) -> None:
+        super().__init__()
+        self.threshold = threshold
+        self.checks = 0
+
+    def is_set(self) -> bool:
+        self.checks += 1
+        if self.checks >= self.threshold:
+            self.set()
+        return super().is_set()
+
+
 class _BrowserCapture:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def capture(self, request: AcquisitionRequest) -> AcquisitionResult:
+        self.calls += 1
         return AcquisitionResult.failed(
             AcquisitionStrategy.WEB_CAPTURE,
             "CAPTURE_EMPTY",
@@ -153,62 +206,103 @@ class AcquisitionCoreTests(unittest.TestCase):
         strategy: AcquisitionStrategy | str,
         *,
         max_bytes: int = 1024,
-        allow_safe_fallback: bool = True,
         resource: dict | None = None,
+        provider_id: str = "test-provider",
+        provider_version: str = "1.0.0",
+        planned_scope: str = "primary_resource",
+        source_fingerprint: str = "sha256:" + "e" * 64,
+        cancel_event: threading.Event | None = None,
     ) -> AcquisitionRequest:
         return AcquisitionRequest(
             job_id="job-001",
             resource=resource or self.resource,
             strategy=strategy,
+            provider_id=provider_id,
+            provider_version=provider_version,
+            planned_scope=planned_scope,
+            representation_id="repr_acquisition_core_0001",
+            binding_digest="a" * 64,
+            source_fingerprint=source_fingerprint,
+            capability_id="cap_acquisition_core_v1",
+            descriptor_version="1.0.0",
+            descriptor_digest="sha256:" + "b" * 64,
+            readiness_snapshot_id="ready_acquisition_core_v1",
+            readiness_digest="sha256:" + "c" * 64,
+            eligibility_id="elig_acquisition_core_v1",
+            eligibility_digest="sha256:" + "d" * 64,
             preferred_container="html",
             max_bytes=max_bytes,
-            allow_safe_fallback=allow_safe_fallback,
-            cancel_event=threading.Event(),
+            cancel_event=cancel_event or threading.Event(),
             jobs_root=self.root,
         )
 
-    def test_strategy_enum_maps_legacy_plan_values_without_browser_inference(self) -> None:
+    def test_strategy_enum_requires_explicit_plan_value(self) -> None:
         self.assertIs(AcquisitionStrategy.from_plan("direct"), AcquisitionStrategy.DIRECT_FILE)
         self.assertIs(AcquisitionStrategy.from_plan("webpage"), AcquisitionStrategy.WEB_MATERIALIZE)
-        self.assertIs(
-            AcquisitionStrategy.from_plan(None, {"resource_type": "article"}),
-            AcquisitionStrategy.WEB_MATERIALIZE,
-        )
-        self.assertIs(
-            AcquisitionStrategy.from_plan(None, {"resource_type": "video"}),
-            AcquisitionStrategy.DIRECT_FILE,
-        )
-        self.assertIs(
-            AcquisitionRouter.select_strategy(None, {"resource_type": "article"}),
-            AcquisitionStrategy.WEB_MATERIALIZE,
-        )
-        self.assertNotEqual(
-            AcquisitionRouter.select_strategy(None, {"resource_type": "article"}),
-            AcquisitionStrategy.WEB_CAPTURE,
-        )
+        with self.assertRaisesRegex(ValueError, "explicitly planned"):
+            AcquisitionStrategy.from_plan(None, {"resource_type": "article"})
+        with self.assertRaisesRegex(ValueError, "explicitly planned"):
+            AcquisitionStrategy.from_plan(None, {"resource_type": "video"})
+        with self.assertRaisesRegex(ValueError, "explicitly planned"):
+            AcquisitionRouter.select_strategy(None, {"resource_type": "article"})
 
-    def test_request_freezes_resource_and_requires_server_root(self) -> None:
+    def test_request_freezes_resource_requires_server_root_and_authority_refs(self) -> None:
         request = self._request("direct")
         self.resource["metadata"]["topics"].append("mutated")
         self.assertEqual(request.resource["metadata"]["topics"], ("safe",))
         with self.assertRaises((TypeError, AttributeError)):
             request.resource["title"] = "changed"  # type: ignore[index]
         self.assertEqual(request.jobs_root, self.root)
+        self.assertEqual(request.to_dict()["planned_provider"], {
+            "provider_id": "test-provider", "version": "1.0.0"
+        })
+        self.assertEqual(request.to_dict()["planned_scope"], "primary_resource")
+        self.assertEqual(request.to_dict()["source_fingerprint"], "sha256:" + "e" * 64)
+        with self.assertRaises(TypeError):
+            AcquisitionRequest(
+                job_id="job-001",
+                resource={"resource_id": "r"},
+                strategy="direct",
+                provider_id="test-provider",
+                provider_version="1.0.0",
+                planned_scope="primary_resource",
+                representation_id="repr_acquisition_core_0001",
+                binding_digest="a" * 64,
+                capability_id="cap_acquisition_core_v1",
+                descriptor_version="1.0.0",
+                descriptor_digest="sha256:" + "b" * 64,
+                readiness_snapshot_id="ready_acquisition_core_v1",
+                readiness_digest="sha256:" + "c" * 64,
+                eligibility_id="elig_acquisition_core_v1",
+                eligibility_digest="sha256:" + "d" * 64,
+                jobs_root=Path("/tmp/jobs"),
+            )
+        with self.assertRaisesRegex(ValueError, "source_fingerprint"):
+            self._request("direct", source_fingerprint="sha256:" + "F" * 64)
         with self.assertRaises(ValueError):
             AcquisitionRequest(
-                "job-001",
-                {"resource_id": "r"},
-                "direct",
-                "html",
-                100,
-                True,
-                threading.Event(),
+                job_id="job-001",
+                resource={"resource_id": "r"},
+                strategy="direct",
+                provider_id="test-provider",
+                provider_version="1.0.0",
+                planned_scope="primary_resource",
+                representation_id="repr_acquisition_core_0001",
+                binding_digest="a" * 64,
+                source_fingerprint="sha256:" + "e" * 64,
+                capability_id="cap_acquisition_core_v1",
+                descriptor_version="1.0.0",
+                descriptor_digest="sha256:" + "b" * 64,
+                readiness_snapshot_id="ready_acquisition_core_v1",
+                readiness_digest="sha256:" + "c" * 64,
+                eligibility_id="elig_acquisition_core_v1",
+                eligibility_digest="sha256:" + "d" * 64,
                 jobs_root=Path("relative-root"),
             )
 
     def test_direct_provider_single_and_list_results_become_bounded_artifacts(self) -> None:
         provider = _DirectProvider(self.root, count=2)
-        router = AcquisitionRouter(provider)
+        router = AcquisitionRouter([_registration(provider)])
         result = router.acquire(self._request("direct_file", max_bytes=1024))
         self.assertTrue(result.ok)
         self.assertIsNotNone(result.bundle)
@@ -218,61 +312,120 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertEqual(result.bundle.artifacts[0].role, "primary")
         self.assertFalse(result.bundle.artifacts[1].primary)
         self.assertEqual(provider.calls, [("测试资源", "direct")])
+        facts = result.to_dict()
+        self.assertEqual(facts["planned_provider"], {
+            "provider_id": "test-provider", "version": "1.0.0"
+        })
+        self.assertEqual(facts["provider"], facts["planned_provider"])
+        self.assertEqual(facts["planned_scope"], "primary_resource")
+        self.assertEqual(facts["actual_scope"], "primary_resource")
+        self.assertEqual(facts["representation_id"], "repr_acquisition_core_0001")
+        self.assertEqual(facts["binding_digest"], "a" * 64)
+        self.assertEqual(facts["source_fingerprint"], "sha256:" + "e" * 64)
         self.assertTrue(result.to_json() == result.to_json())
         self.assertNotIn(str(self.root), result.to_json())
 
-    def test_platform_provider_failure_uses_direct_provider_only_when_allowed(self) -> None:
-        direct = _DirectProvider(self.root)
-        router = AcquisitionRouter(
-            direct,
-            platform_providers={"generic": _FailingProvider()},
+    def test_cancellation_is_polled_during_direct_artifact_hashing(self) -> None:
+        provider = _DirectProvider(self.root)
+        cancel_event = _CancelAfterChecks(threshold=5)
+        result = AcquisitionRouter([_registration(provider)]).acquire(
+            self._request(
+                "direct_file",
+                max_bytes=1024,
+                cancel_event=cancel_event,
+            )
         )
-        result = router.acquire(self._request("direct"))
-        self.assertTrue(result.ok)
-        self.assertEqual(result.metadata["fallback"], "direct_file")
-        self.assertEqual(direct.calls, [("测试资源", "direct")])
+        self.assertFalse(result.ok)
+        self.assertEqual("JOB_CANCELLED", result.failure.code)  # type: ignore[union-attr]
+        self.assertEqual([("测试资源", "direct")], provider.calls)
+        self.assertGreaterEqual(cancel_event.checks, 5)
 
-        no_fallback = router.acquire(
-            self._request("direct", allow_safe_fallback=False)
+    def test_result_provider_cancellation_wins_before_bundle_validation(self) -> None:
+        provider = _CancellingMaterializer(self.root)
+        result = AcquisitionRouter([
+            _registration(
+                provider,
+                provider_id="static-cancelling",
+                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+            )
+        ]).acquire(
+            self._request("web_materialize", provider_id="static-cancelling")
         )
-        self.assertFalse(no_fallback.ok)
-        self.assertEqual(no_fallback.failure.code, "UPSTREAM_UNAVAILABLE")  # type: ignore[union-attr]
-        self.assertEqual(len(direct.calls), 1)
+        self.assertFalse(result.ok)
+        self.assertEqual("JOB_CANCELLED", result.failure.code)  # type: ignore[union-attr]
+        self.assertEqual(1, provider.calls)
+
+    def test_exact_provider_failure_never_falls_back_to_generic_direct(self) -> None:
+        direct = _DirectProvider(self.root)
+        failing = _FailingProvider()
+        router = AcquisitionRouter([
+            _registration(direct, provider_id="generic-direct"),
+            _registration(failing, provider_id="platform-exact"),
+        ])
+        result = router.acquire(self._request("direct", provider_id="platform-exact"))
+        self.assertFalse(result.ok)
+        self.assertEqual(result.failure.code, "UPSTREAM_UNAVAILABLE")  # type: ignore[union-attr]
+        self.assertEqual(failing.calls, 1)
+        self.assertEqual(direct.calls, [])
+        self.assertEqual(result.provider_id, "platform-exact")
+        self.assertEqual(result.provider_version, "1.0.0")
+        self.assertEqual(result.actual_scope, "primary_resource")
+        self.assertEqual(result.source_fingerprint, "sha256:" + "e" * 64)
 
     def test_auth_failure_never_falls_back_to_direct_provider(self) -> None:
         direct = _DirectProvider(self.root)
-        router = AcquisitionRouter(
-            direct,
-            platform_providers={"generic": _AuthProvider()},
-        )
-        result = router.acquire(self._request("direct", allow_safe_fallback=True))
+        router = AcquisitionRouter([
+            _registration(direct, provider_id="generic-direct"),
+            _registration(_AuthProvider(), provider_id="auth-exact"),
+        ])
+        result = router.acquire(self._request("direct", provider_id="auth-exact"))
         self.assertFalse(result.ok)
         self.assertEqual(result.failure.code, "AUTH_REQUIRED")  # type: ignore[union-attr]
         self.assertEqual(direct.calls, [])
 
-    def test_static_materializer_and_explicit_browser_safe_fallback(self) -> None:
+    def test_static_materializer_and_capture_failure_stay_with_exact_provider(self) -> None:
         materializer = _Materializer(self.root)
-        router = AcquisitionRouter(
-            _DirectProvider(self.root),
-            web_materializer=materializer,
-            browser_capture=_BrowserCapture(),
-        )
-        result = router.acquire(self._request("webpage"))
+        browser = _BrowserCapture()
+        router = AcquisitionRouter([
+            _registration(
+                materializer,
+                provider_id="static-exact",
+                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+            ),
+            _registration(
+                browser,
+                provider_id="capture-exact",
+                strategies=(AcquisitionStrategy.WEB_CAPTURE,),
+            ),
+        ])
+        request = self._request("webpage", provider_id="static-exact")
+        result = router.acquire(request)
         self.assertTrue(result.ok)
         self.assertEqual(result.strategy, AcquisitionStrategy.WEB_MATERIALIZE)
         self.assertEqual(result.bundle.artifacts[0].role, "bundle")  # type: ignore[union-attr]
+        self.assertEqual(result.metadata, {"renderer": "test"})
+        self.assertEqual(result.source_fingerprint, request.source_fingerprint)
+        self.assertEqual(result.to_dict()["source_fingerprint"], request.source_fingerprint)
+        self.assertNotIn("source_fingerprint", result.metadata)
 
-        captured = router.acquire(self._request("web_capture"))
-        self.assertTrue(captured.ok)
-        self.assertEqual(captured.strategy, AcquisitionStrategy.WEB_MATERIALIZE)
-        self.assertEqual(materializer.calls, 2)
-        self.assertTrue(captured.warnings)
+        captured = router.acquire(self._request("web_capture", provider_id="capture-exact"))
+        self.assertFalse(captured.ok)
+        self.assertEqual(captured.strategy, AcquisitionStrategy.WEB_CAPTURE)
+        self.assertEqual(captured.failure.code, "CAPTURE_EMPTY")  # type: ignore[union-attr]
+        self.assertEqual(captured.source_fingerprint, "sha256:" + "e" * 64)
+        self.assertEqual(materializer.calls, 1)
+        self.assertEqual(browser.calls, 1)
+        self.assertEqual(captured.provider_id, "capture-exact")
 
     def test_explicit_browser_capture_adapts_legacy_download_provider(self) -> None:
         legacy = _LegacyBrowser(self.root)
-        result = AcquisitionRouter(
-            _DirectProvider(self.root), browser_capture=legacy
-        ).acquire(self._request("web_capture"))
+        result = AcquisitionRouter([
+            _registration(
+                legacy,
+                provider_id="legacy-capture",
+                strategies=(AcquisitionStrategy.WEB_CAPTURE,),
+            )
+        ]).acquire(self._request("web_capture", provider_id="legacy-capture"))
         self.assertTrue(result.ok)
         self.assertEqual(result.strategy, AcquisitionStrategy.WEB_CAPTURE)
         self.assertEqual(legacy.calls, ["webpage"])
@@ -280,14 +433,19 @@ class AcquisitionCoreTests(unittest.TestCase):
 
     def test_browser_auth_failure_never_falls_back_to_static_fetch(self) -> None:
         materializer = _Materializer(self.root)
-        router = AcquisitionRouter(
-            _DirectProvider(self.root),
-            web_materializer=materializer,
-            browser_capture=_AuthBrowserCapture(),
-        )
-        result = router.acquire(
-            self._request("web_capture", allow_safe_fallback=True)
-        )
+        router = AcquisitionRouter([
+            _registration(
+                materializer,
+                provider_id="static-exact",
+                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+            ),
+            _registration(
+                _AuthBrowserCapture(),
+                provider_id="capture-auth",
+                strategies=(AcquisitionStrategy.WEB_CAPTURE,),
+            ),
+        ])
+        result = router.acquire(self._request("web_capture", provider_id="capture-auth"))
         self.assertFalse(result.ok)
         self.assertEqual(result.failure.code, "AUTH_REQUIRED")  # type: ignore[union-attr]
         self.assertEqual(materializer.calls, 0)
@@ -295,15 +453,77 @@ class AcquisitionCoreTests(unittest.TestCase):
     def test_browser_capture_is_not_automatically_selected_or_raw_fallback(self) -> None:
         materializer = _Materializer(self.root, fail=True)
         browser = _BrowserCapture()
-        router = AcquisitionRouter(
-            _DirectProvider(self.root),
-            web_materializer=materializer,
-            browser_capture=browser,
-        )
-        result = router.acquire(self._request("web_materialize"))
+        router = AcquisitionRouter([
+            _registration(
+                materializer,
+                provider_id="static-exact",
+                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+            ),
+            _registration(
+                browser,
+                provider_id="capture-exact",
+                strategies=(AcquisitionStrategy.WEB_CAPTURE,),
+            ),
+        ])
+        result = router.acquire(self._request("web_materialize", provider_id="static-exact"))
         self.assertFalse(result.ok)
         self.assertEqual(result.failure.code, "MATERIALIZE_FAILED")  # type: ignore[union-attr]
         self.assertEqual(materializer.calls, 1)
+        self.assertEqual(browser.calls, 0)
+
+    def test_registry_gates_unknown_version_and_scope_without_provider_calls(self) -> None:
+        provider = _DirectProvider(self.root)
+        router = AcquisitionRouter([
+            _registration(provider, provider_id="registered-exact", version="1.0.0"),
+        ])
+        unknown = router.acquire(self._request("direct", provider_id="missing-exact"))
+        self.assertEqual(unknown.failure.code, "PROVIDER_UNAVAILABLE")  # type: ignore[union-attr]
+        self.assertIsNone(unknown.provider_id)
+        self.assertEqual(unknown.source_fingerprint, "sha256:" + "e" * 64)
+
+        drifted = router.acquire(
+            self._request(
+                "direct",
+                provider_id="registered-exact",
+                provider_version="2.0.0",
+            )
+        )
+        self.assertEqual(drifted.failure.code, "CAPABILITY_VERSION_CONFLICT")  # type: ignore[union-attr]
+        self.assertIsNone(drifted.provider_id)
+
+        scope = router.acquire(
+            self._request(
+                "direct",
+                provider_id="registered-exact",
+                planned_scope="landing_page",
+            )
+        )
+        self.assertEqual(scope.failure.code, "PROVIDER_SCOPE_MISMATCH")  # type: ignore[union-attr]
+        self.assertIsNone(scope.provider_id)
+        self.assertEqual(provider.calls, [])
+
+    def test_resource_platform_cannot_change_exact_provider_routing(self) -> None:
+        provider = _DirectProvider(self.root)
+        router = AcquisitionRouter([
+            _registration(provider, provider_id="bound-exact"),
+        ])
+        foreign_platform = dict(self.resource, platform="totally-unregistered-platform")
+        result = router.acquire(
+            self._request("direct", resource=foreign_platform, provider_id="bound-exact")
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(provider.calls, [("测试资源", "direct")])
+
+    def test_registry_rejects_mismatched_or_nonexplicit_registration(self) -> None:
+        provider = _DirectProvider(self.root)
+        registration = _registration(provider, provider_id="bound-exact")
+        with self.assertRaises(ValueError):
+            AcquisitionRouter({("other-provider", "1.0.0"): registration})
+        empty = AcquisitionRouter([])
+        unavailable = empty.acquire(self._request("direct", provider_id="unregistered-exact"))
+        self.assertEqual(unavailable.failure.code, "PROVIDER_UNAVAILABLE")  # type: ignore[union-attr]
+        with self.assertRaises(TypeError):
+            AcquisitionRouter([provider])  # type: ignore[list-item]
 
     def test_provider_output_outside_jobs_root_is_structured_failure(self) -> None:
         outside = self.root.parent / "outside-acquisition-test.txt"
@@ -313,7 +533,9 @@ class AcquisitionCoreTests(unittest.TestCase):
             def download(self, resource, job_id, strategy, max_bytes, cancel_event):
                 return _download_result(outside)
 
-        result = AcquisitionRouter(OutsideProvider()).acquire(self._request("direct"))
+        result = AcquisitionRouter([
+            _registration(OutsideProvider()),
+        ]).acquire(self._request("direct"))
         self.assertFalse(result.ok)
         self.assertEqual(result.failure.code, "ACQUISITION_OUTPUT_INVALID")  # type: ignore[union-attr]
         outside.unlink(missing_ok=True)

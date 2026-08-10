@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import sqlite3
 import sys
 import tempfile
@@ -23,10 +24,10 @@ class AssetBundleStorageTests(unittest.TestCase):
         self.database = Path(self.temp.name) / "database.sqlite"
         self.store = Store(self.database)
         self._insert_flow()
-        self._insert_job("job_a", "plan_a")
         self._insert_resource("resource_a")
-        self._insert_job("job_b", "plan_b")
+        self._insert_job("job_a", "plan_a", "resource_a")
         self._insert_resource("resource_b")
+        self._insert_job("job_b", "plan_b", "resource_b")
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -43,7 +44,13 @@ class AssetBundleStorageTests(unittest.TestCase):
                 (NOW, NOW),
             )
 
-    def _insert_job(self, job_id: str, plan_id: str) -> None:
+    def _insert_job(self, job_id: str, plan_id: str, resource_id: str) -> None:
+        marker = "a" if job_id.endswith("a") else "b"
+        canonical = "sha256:" + marker * 64
+        snapshot_id = f"readiness_{job_id}"
+        eligibility_id = f"eligibility_{job_id}"
+        representation_id = f"representation_{job_id}"
+        capability_id = f"capability_{job_id}"
         with self.store.transaction() as connection:
             connection.execute(
                 """
@@ -51,9 +58,14 @@ class AssetBundleStorageTests(unittest.TestCase):
                     plan_id, flow_id, presented_version, resource_ids_json, options_json,
                     confirmation_token, confirmation_hash, expires_at, used, created_at,
                     selection_version, selection_digest, plan_digest
-                ) VALUES (?, 'flow_a', 1, '[]', '{}', 'token', 'hash', ?, 1, ?, 1, 'selection', 'plan')
+                ) VALUES (?, 'flow_a', 1, ?, '{}', 'token', 'hash', ?, 1, ?, 1, 'selection', 'plan')
                 """,
-                (plan_id, "2099-01-01T00:00:00+00:00", NOW),
+                (
+                    plan_id,
+                    json.dumps([resource_id]),
+                    "2099-01-01T00:00:00+00:00",
+                    NOW,
+                ),
             )
             connection.execute(
                 """
@@ -64,6 +76,107 @@ class AssetBundleStorageTests(unittest.TestCase):
                 """,
                 (job_id, plan_id, NOW, NOW),
             )
+            connection.execute(
+                """
+                INSERT INTO capability_readiness_snapshots(
+                    snapshot_id, capability_id, descriptor_version,
+                    descriptor_digest, registry_version, registry_digest,
+                    platform_id, capability_scope, strategy, provider_id,
+                    provider_version, inspector_id, inspector_version, status,
+                    issues_json, observed_at, expires_at, snapshot_digest
+                ) VALUES (?, ?, '1.0.0', ?, '1.0.0', ?, 'generic',
+                          'primary_resource', 'direct_file', 'generic-direct',
+                          '1.0.0', 'generic', '1.0.0', 'ready', '[]', ?, ?, ?)
+                """,
+                (
+                    snapshot_id,
+                    capability_id,
+                    canonical,
+                    canonical,
+                    NOW,
+                    "2099-01-01T00:00:00+00:00",
+                    canonical,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO eligibility_decisions(
+                    eligibility_id, flow_id, resource_id, resolution_id,
+                    representation_id, action, status, policy_class,
+                    reason_codes_json, source_fingerprint, capability_id,
+                    descriptor_digest, readiness_snapshot_id, evaluated_at,
+                    expires_at, decision_digest
+                ) VALUES (?, 'flow_a', ?, NULL, ?, 'download', 'eligible',
+                          'public', '[]', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    eligibility_id,
+                    resource_id,
+                    representation_id,
+                    canonical,
+                    capability_id,
+                    canonical,
+                    snapshot_id,
+                    NOW,
+                    "2099-01-01T00:00:00+00:00",
+                    canonical,
+                ),
+            )
+            common = (
+                plan_id,
+                resource_id,
+                representation_id,
+                capability_id,
+                canonical,
+                canonical,
+                snapshot_id,
+                canonical,
+                eligibility_id,
+                canonical,
+                canonical,
+                json.dumps({"scope": "primary_resource"}),
+            )
+            connection.execute(
+                """
+                INSERT INTO download_plan_items(
+                    plan_id, position, resource_id, resolution_id,
+                    representation_id, capability_scope, strategy, provider_id,
+                    provider_version, capability_id, descriptor_version,
+                    descriptor_digest, registry_version, registry_digest,
+                    readiness_snapshot_id, readiness_digest, eligibility_id,
+                    eligibility_digest, source_fingerprint, representation_json,
+                    binding_digest
+                ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
+                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
+                          ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (*common, marker * 64),
+            )
+            connection.execute(
+                """
+                INSERT INTO job_execution_items(
+                    job_id, plan_id, position, resource_id, resolution_id,
+                    representation_id, capability_scope, strategy, provider_id,
+                    provider_version, capability_id, descriptor_version,
+                    descriptor_digest, registry_version, registry_digest,
+                    readiness_snapshot_id, readiness_digest, eligibility_id,
+                    eligibility_digest, source_fingerprint, representation_json,
+                    plan_binding_digest, execution_binding_digest, revalidated_at
+                ) VALUES (?, ?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
+                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    *common,
+                    marker * 64,
+                    ("c" if marker == "a" else "d") * 64,
+                    NOW,
+                ),
+            )
+        self.store.start_acquisition_outcome(
+            job_id, resource_id, metadata={"attempt": 1}
+        )
 
     def _insert_resource(self, resource_id: str) -> None:
         with self.store.transaction() as connection:
@@ -76,6 +189,25 @@ class AssetBundleStorageTests(unittest.TestCase):
                 """,
                 (resource_id, resource_id, f"https://example.com/{resource_id}", NOW),
             )
+
+    def _complete_outcome(self, job_id: str, resource_id: str, bundle: dict) -> dict:
+        ready_asset_ids = [
+            str(item["asset_id"])
+            for item in bundle["items"]
+            if item["status"] == "ready" and item.get("asset_id")
+        ]
+        return self.store.complete_acquisition_outcome(
+            job_id,
+            resource_id,
+            status="succeeded" if bundle["status"] == "succeeded" else "partial",
+            actual_scope="primary_resource",
+            actual_strategy="direct_file",
+            actual_provider_id="generic-direct",
+            actual_provider_version="1.0.0",
+            bundle_id=str(bundle["bundle_id"]),
+            asset_ids=ready_asset_ids,
+            metadata={"attempt": 1},
+        )
 
     @staticmethod
     def item(
@@ -266,6 +398,11 @@ class AssetBundleStorageTests(unittest.TestCase):
             self.store.persist_asset_bundle(
                 "job_a", "resource_a", [self.item("unknown", 0)]
             )
+        self._insert_resource("resource_unplanned")
+        with self.assertRaisesRegex(RuntimeError, "execution_binding_missing"):
+            self.store.persist_asset_bundle(
+                "job_a", "resource_unplanned", [self.item("primary", 0)]
+            )
         with self.assertRaisesRegex(ValueError, "job_resource_flow_mismatch"):
             with self.store.transaction() as connection:
                 connection.execute(
@@ -316,6 +453,63 @@ class AssetBundleStorageTests(unittest.TestCase):
                 [{"role": "primary", "position": 0, "status": "ready", "asset_id": asset}],
             )
 
+    def test_create_asset_compatibility_wrapper_persists_singleton_bundle(self) -> None:
+        asset = self.store.create_asset(
+            "job_a",
+            "resource_a",
+            Path("/controlled/compat.pdf"),
+            17,
+            "application/pdf",
+            "f" * 64,
+            "compat.pdf",
+        )
+        bundle = self.store.get_asset_bundle_for_asset(asset["asset_id"])
+        assert bundle is not None
+        self.assertEqual("job_a", bundle["job_id"])
+        self.assertEqual("resource_a", bundle["resource_id"])
+        self.assertEqual("complete", bundle["completion"])
+        self.assertEqual(1, len(bundle["items"]))
+        self.assertEqual("primary", bundle["items"][0]["role"])
+        self.assertEqual(asset["asset_id"], bundle["items"][0]["asset_id"])
+
+        replay = self.store.create_asset(
+            "job_a",
+            "resource_a",
+            Path("/controlled/compat.pdf"),
+            17,
+            "application/pdf",
+            "f" * 64,
+            "compat.pdf",
+        )
+        self.assertEqual(asset["asset_id"], replay["asset_id"])
+
+    def test_create_asset_rejects_non_running_or_cancelling_job(self) -> None:
+        with self.store.transaction() as connection:
+            connection.execute("UPDATE jobs SET status = 'queued' WHERE job_id = 'job_a'")
+        with self.assertRaisesRegex(ValueError, "asset_bundle_job_not_running"):
+            self.store.create_asset(
+                "job_a",
+                "resource_a",
+                Path("/controlled/queued.pdf"),
+                1,
+                "application/pdf",
+                "e" * 64,
+                "queued.pdf",
+            )
+
+        with self.store.transaction() as connection:
+            connection.execute("UPDATE jobs SET status = 'cancelling' WHERE job_id = 'job_b'")
+        with self.assertRaisesRegex(ValueError, "job_cancelling"):
+            self.store.create_asset(
+                "job_b",
+                "resource_b",
+                Path("/controlled/cancelled.pdf"),
+                1,
+                "application/pdf",
+                "d" * 64,
+                "cancelled.pdf",
+            )
+
     def test_quarantine_synchronizes_asset_item_and_cancelled_bundle(self) -> None:
         bundle = self.store.persist_asset_bundle(
             "job_a", "resource_a", [self.item("primary", 0)]
@@ -333,11 +527,11 @@ class AssetBundleStorageTests(unittest.TestCase):
         interrupted = self.store.persist_asset_bundle(
             "job_a", "resource_a", [self.item("primary", 0)]
         )
-        with self.store.transaction() as connection:
-            connection.execute("UPDATE jobs SET status = 'succeeded' WHERE job_id = 'job_b'")
         completed = self.store.persist_asset_bundle(
             "job_b", "resource_b", [self.item("primary", 0, filename="done.pdf")]
         )
+        with self.store.transaction() as connection:
+            connection.execute("UPDATE jobs SET status = 'succeeded' WHERE job_id = 'job_b'")
         self.assertEqual(1, self.store.mark_incomplete_jobs_failed())
         failed = self.store.get_asset_bundle(interrupted["bundle_id"])
         still_complete = self.store.get_asset_bundle(completed["bundle_id"])
@@ -349,20 +543,133 @@ class AssetBundleStorageTests(unittest.TestCase):
         self.assertEqual("failed", self.store.get_job("job_a")["status"])
         self.assertEqual("succeeded", self.store.get_job("job_b")["status"])
 
+    def test_running_reopen_quarantines_removed_asset_and_rebuilds_job_projection(self) -> None:
+        partial = self.store.persist_asset_bundle(
+            "job_a",
+            "resource_a",
+            [self.item("primary", 0), self.item("subtitle", 1, status="failed")],
+            failures=[{"position": 1, "code": "SUBTITLE_MISSING", "message": "字幕缺失"}],
+        )
+        removed_asset_id = str(partial["items"][0]["asset_id"])
+        replacement = self.store.persist_asset_bundle(
+            "job_a",
+            "resource_a",
+            [
+                self.item(
+                    "primary",
+                    0,
+                    filename="replacement.pdf",
+                    sha256="e" * 64,
+                )
+            ],
+        )
+        replacement_id = str(replacement["items"][0]["asset_id"])
+        self.assertEqual(partial["bundle_id"], replacement["bundle_id"])
+        self.assertNotEqual(removed_asset_id, replacement_id)
+        self.assertEqual("quarantined", self.store.get_asset(removed_asset_id)["status"])
+        self.assertIsNone(self.store.get_asset_bundle_for_asset(removed_asset_id))
+        self.assertEqual([replacement_id], self.store.get_job("job_a")["asset_ids"])
+
+    def test_running_reopen_rolls_back_the_entire_graph_on_quarantine_failure(self) -> None:
+        partial = self.store.persist_asset_bundle(
+            "job_a",
+            "resource_a",
+            [self.item("primary", 0), self.item("subtitle", 1, status="failed")],
+            failures=[{"position": 1, "code": "SUBTITLE_MISSING", "message": "字幕缺失"}],
+        )
+        removed_asset_id = str(partial["items"][0]["asset_id"])
+
+        def graph_snapshot() -> tuple:
+            with self.store._connect() as connection:
+                return (
+                    tuple(connection.execute(
+                        "SELECT * FROM asset_bundles WHERE bundle_id = ?",
+                        (partial["bundle_id"],),
+                    ).fetchone()),
+                    [tuple(row) for row in connection.execute(
+                        "SELECT * FROM asset_bundle_items WHERE bundle_id = ? ORDER BY position",
+                        (partial["bundle_id"],),
+                    ).fetchall()],
+                    [tuple(row) for row in connection.execute(
+                        "SELECT * FROM asset_bundle_failures WHERE bundle_id = ? ORDER BY failure_id",
+                        (partial["bundle_id"],),
+                    ).fetchall()],
+                    [tuple(row) for row in connection.execute(
+                        "SELECT * FROM assets WHERE job_id = 'job_a' ORDER BY asset_id"
+                    ).fetchall()],
+                    tuple(connection.execute(
+                        "SELECT status, asset_ids_json, updated_at FROM jobs WHERE job_id = 'job_a'"
+                    ).fetchone()),
+                )
+
+        before = graph_snapshot()
+        with self.store.transaction(immediate=True) as connection:
+            connection.execute(
+                f"""
+                CREATE TRIGGER abort_bundle_reopen_quarantine
+                BEFORE UPDATE OF status ON assets
+                WHEN OLD.asset_id = '{removed_asset_id}'
+                 AND NEW.status = 'quarantined'
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected reopen quarantine failure');
+                END
+                """
+            )
+
+        with self.assertRaisesRegex(
+            sqlite3.IntegrityError, "injected reopen quarantine failure"
+        ):
+            self.store.persist_asset_bundle(
+                "job_a",
+                "resource_a",
+                [
+                    self.item(
+                        "primary",
+                        0,
+                        filename="replacement.pdf",
+                        sha256="e" * 64,
+                    )
+                ],
+            )
+
+        self.assertEqual(before, graph_snapshot())
+
+    def test_bundle_mutation_requires_running_outcome(self) -> None:
+        with self.store.transaction(immediate=True) as connection:
+            connection.execute(
+                "DELETE FROM acquisition_outcomes WHERE job_id = 'job_a'"
+            )
+        with self.assertRaisesRegex(LookupError, "acquisition_outcome_not_started"):
+            self.store.persist_asset_bundle(
+                "job_a", "resource_a", [self.item("primary", 0)]
+            )
+        self.store.start_acquisition_outcome(
+            "job_a", "resource_a", metadata={"attempt": 1}
+        )
+        bundle = self.store.persist_asset_bundle(
+            "job_a", "resource_a", [self.item("primary", 0)]
+        )
+        self.assertEqual("succeeded", bundle["status"])
+
     def test_library_search_attaches_bundle_relation_without_archive_columns(self) -> None:
         bundle = self.store.persist_asset_bundle(
             "job_a", "resource_a", [self.item("primary", 0, filename="lesson.pdf")]
         )
         asset_id = bundle["items"][0]["asset_id"]
-        self.store.create_archive(
+        self._complete_outcome("job_a", "resource_a", bundle)
+        self.store.finalize_job_success("job_a")
+        reservation = self.store.reserve_archive(
             asset_id,
-            Path("04-science/lesson.pdf"),
             {
                 "classification": {
                     "primary_domain": "natural_science",
                     "topics": ["天文与宇宙"],
                 }
             },
+            "04-science/lesson.pdf",
+        )
+        self.store.mark_archive_ready(
+            reservation["archive_id"], relative_path="04-science/lesson.pdf"
         )
         page = self.store.search_library(None, 10)
         self.assertEqual(1, len(page["items"]))

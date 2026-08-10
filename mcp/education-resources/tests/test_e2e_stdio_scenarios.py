@@ -80,6 +80,7 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         **binding,
                         "selection_digest": "0" * 64,
                         "plan_digest": plan["plan_digest"],
+                        "authority_digest": plan["authority_digest"],
                         "confirmation_token": plan["confirmation_token"],
                         "idempotency_key": "multi-e2e-wrong-start-1",
                     },
@@ -104,10 +105,12 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         "plan_id": plan["plan_id"],
                         **binding,
                         "plan_digest": plan["plan_digest"],
+                        "authority_digest": plan["authority_digest"],
                         "confirmation_token": plan["confirmation_token"],
                         "idempotency_key": "multi-e2e-start-key-001",
                     },
                 )
+                self.assertEqual(started["authority_digest"], plan["authority_digest"])
                 job = wait_job(client, flow["flow_id"], started["job_id"])
                 self.assertEqual("succeeded", job["status"])
                 self.assertEqual("partial", job["completion"])
@@ -220,10 +223,12 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         "plan_id": plan["plan_id"],
                         **binding,
                         "plan_digest": plan["plan_digest"],
+                        "authority_digest": plan["authority_digest"],
                         "confirmation_token": plan["confirmation_token"],
                         "idempotency_key": "web-e2e-start-key-0001",
                     },
                 )
+                self.assertEqual(started["authority_digest"], plan["authority_digest"])
                 job = wait_job(client, flow["flow_id"], started["job_id"])
                 self.assertEqual("succeeded", job["status"])
                 self.assertEqual("complete", job["completion"])

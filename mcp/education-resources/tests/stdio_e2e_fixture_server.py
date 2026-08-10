@@ -15,7 +15,11 @@ SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.acquisition import AcquisitionRouter
+from education_resource_mcp.acquisition import (
+    AcquisitionRouter,
+    AcquisitionStrategy,
+    ProviderRegistration,
+)
 from education_resource_mcp.acquisition.web_fetch import FetchResult
 from education_resource_mcp.acquisition.web_materializer import WebMaterializer
 from education_resource_mcp.config import Settings
@@ -30,15 +34,168 @@ from education_resource_mcp.inspection import (
     InspectionRouter,
     build_default_inspection,
 )
+from education_resource_mcp.retrieval.registry import (
+    build_registry_snapshot,
+    canonical_descriptor_digest,
+)
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.server import create_server
 from education_resource_mcp.service import ResourceService
+
+
+_CAPABILITY_VERSION = "1.1.0"
+_FIXTURE_SOURCE = {
+    "kind": "deployment",
+    "name": "stdio-e2e-fixture",
+    "published_at": "2026-08-08T00:00:00Z",
+}
+_FIXTURE_COMPATIBILITY = {
+    "read_min": "1.0.0",
+    "write_version": _CAPABILITY_VERSION,
+    "breaking_major": 1,
+}
+_FIXTURE_PREREQUISITES = {
+    "required_fields": [],
+    "auth_mode": "none",
+    "network_policy": "public_http",
+    "max_bytes": 512 * 1024,
+    "max_retries": 0,
+    "requires_session": False,
+}
+
+
+def _fixture_descriptor(
+    *,
+    descriptor_id: str,
+    resource_type: str,
+    scope: str,
+    kind: str,
+    role: str,
+    container: str,
+    mime_type: str,
+    strategy: str,
+    provider_id: str,
+    policy_class: str,
+) -> dict:
+    """Build one isolated E2E deployment route and bind its canonical digest."""
+
+    descriptor = {
+        "descriptor_id": descriptor_id,
+        "descriptor_version": _CAPABILITY_VERSION,
+        "descriptor_digest": "",
+        "registry_version": _CAPABILITY_VERSION,
+        "platform_id": "generic",
+        "resource_types": [resource_type],
+        "scope": scope,
+        "representation": {
+            "kind": kind,
+            "role": role,
+            "containers": [container],
+            "mime_types": [mime_type],
+            "materializable": True,
+        },
+        "strategy": strategy,
+        "provider": {
+            "provider_id": provider_id,
+            "version": "1.0.0",
+            "scope": scope,
+        },
+        "inspector": {
+            "inspector_id": "e2e-fixture-inspector",
+            "version": "1.0.0",
+        },
+        "prerequisites": dict(_FIXTURE_PREREQUISITES),
+        "policy_class": policy_class,
+        "fallback": {
+            "allowed": False,
+            "max_scope": scope,
+            "allowed_scopes": [],
+            "on_errors": [],
+            "scope_preserving": True,
+        },
+        "source": dict(_FIXTURE_SOURCE),
+        "compatibility": dict(_FIXTURE_COMPATIBILITY),
+        "deprecated": False,
+    }
+    descriptor["descriptor_digest"] = (
+        "sha256:" + canonical_descriptor_digest(descriptor)
+    )
+    return descriptor
+
+
+def fixture_capability_registry_snapshot():
+    """Return the exact deployment truth for the isolated E2E fixture.
+
+    The fixture uses a specialized offline inspector and executes video, book,
+    course, and landing-page routes.  It therefore must not impersonate the
+    built-in generic deployment catalog, whose inspector identity and supported
+    representations are intentionally different.
+    """
+
+    return build_registry_snapshot(
+        {
+            "$schema": "../schemas/capability-descriptors.schema.json",
+            "catalog_version": _CAPABILITY_VERSION,
+            "registry_version": _CAPABILITY_VERSION,
+            "descriptors": [
+                _fixture_descriptor(
+                    descriptor_id="cap_e2e_video_primary_mp4_v1",
+                    resource_type="video",
+                    scope="primary_resource",
+                    kind="video",
+                    role="primary",
+                    container="mp4",
+                    mime_type="video/mp4",
+                    strategy="direct_file",
+                    provider_id="generic-direct",
+                    policy_class="e2e_public_direct_file",
+                ),
+                _fixture_descriptor(
+                    descriptor_id="cap_e2e_book_primary_pdf_v1",
+                    resource_type="book",
+                    scope="primary_resource",
+                    kind="document",
+                    role="primary",
+                    container="pdf",
+                    mime_type="application/pdf",
+                    strategy="direct_file",
+                    provider_id="generic-direct",
+                    policy_class="e2e_public_direct_file",
+                ),
+                _fixture_descriptor(
+                    descriptor_id="cap_e2e_course_primary_mp4_v1",
+                    resource_type="course",
+                    scope="primary_resource",
+                    kind="video",
+                    role="primary",
+                    container="mp4",
+                    mime_type="video/mp4",
+                    strategy="direct_file",
+                    provider_id="generic-direct",
+                    policy_class="e2e_public_direct_file",
+                ),
+                _fixture_descriptor(
+                    descriptor_id="cap_e2e_article_landing_html_v1",
+                    resource_type="article",
+                    scope="landing_page",
+                    kind="webpage",
+                    role="landing",
+                    container="html",
+                    mime_type="text/html",
+                    strategy="web_materialize",
+                    provider_id="generic-web-materializer",
+                    policy_class="e2e_public_web_materialization",
+                ),
+            ],
+        }
+    )
 
 
 class FixtureInspector:
     platform_id = "generic"
     inspector_id = "e2e-fixture-inspector"
     version = "1.0.0"
+    supported_scopes = ("primary_resource", "landing_page", "representation")
 
     def inspect(self, resource: dict) -> InspectionResult:
         resource_type = str(resource["resource_type"])
@@ -46,6 +203,7 @@ class FixtureInspector:
         if resource_type == "video":
             representations.append(
                 {
+                    "scope": "primary_resource",
                     "kind": "video",
                     "container": "mp4",
                     "mime_type": "video/mp4",
@@ -57,10 +215,11 @@ class FixtureInspector:
         elif resource_type == "article":
             representations.append(
                 {
+                    "scope": "landing_page",
                     "kind": "webpage",
                     "container": "html",
                     "mime_type": "text/html",
-                    "role": "primary",
+                    "role": "landing",
                     "materializable": True,
                     "requires_auth": False,
                 }
@@ -68,6 +227,7 @@ class FixtureInspector:
         elif resource_type == "book":
             representations.append(
                 {
+                    "scope": "primary_resource",
                     "kind": "document",
                     "container": "pdf",
                     "mime_type": "application/pdf",
@@ -80,6 +240,7 @@ class FixtureInspector:
             representations.extend(
                 [
                     {
+                        "scope": "primary_resource",
                         "kind": "video",
                         "container": "mp4",
                         "mime_type": "video/mp4",
@@ -88,6 +249,7 @@ class FixtureInspector:
                         "requires_auth": False,
                     },
                     {
+                        "scope": "representation",
                         "kind": "document",
                         "container": "pdf",
                         "mime_type": "application/pdf",
@@ -302,17 +464,33 @@ def main() -> None:
     if mode not in {"standard", "restart"}:
         raise ValueError("EDUCATION_RESOURCE_E2E_MODE must be standard or restart")
     downloader = FixtureDownloader(settings)
+    acquisition_router = AcquisitionRouter(
+        [
+            ProviderRegistration(
+                provider_id="generic-direct",
+                provider_version="1.0.0",
+                provider=downloader,
+                strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                scopes=("primary_resource",),
+            ),
+            ProviderRegistration(
+                provider_id="generic-web-materializer",
+                provider_version="1.0.0",
+                provider=WebMaterializer(fetcher=FixtureFetcher()),
+                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+                scopes=("landing_page",),
+            ),
+        ]
+    )
+    inspection_router = InspectionRouter([FixtureInspector()])
     service = ResourceService(
         settings,
         search_provider=StaticSearchProvider(
             RESTART_RESOURCES if mode == "restart" else STANDARD_RESOURCES
         ),
-        download_provider=downloader,
-        acquisition_router=AcquisitionRouter(
-            direct_provider=downloader,
-            web_materializer=WebMaterializer(fetcher=FixtureFetcher()),
-        ),
-        inspection_router=InspectionRouter([FixtureInspector()]),
+        acquisition_router=acquisition_router,
+        inspection_router=inspection_router,
+        capability_registry_snapshot=fixture_capability_registry_snapshot(),
     )
     try:
         create_server(service).run("stdio")

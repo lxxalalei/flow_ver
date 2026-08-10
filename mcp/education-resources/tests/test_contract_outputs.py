@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
 import re
 import sys
@@ -15,6 +13,8 @@ import unittest
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
+
+from e2e_stdio_client import build_fixture_subprocess_environment
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,7 @@ SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-EXPECTED_CATALOG_VERSION = "1.3.0"
+EXPECTED_CATALOG_VERSION = "1.5.0"
 EXPECTED_CONTRACT_VERSION = "1.0.0"
 EXPECTED_TOOL_NAMES = (
     "resource_flow_start",
@@ -93,9 +93,20 @@ MCP_MISSING_MODULES = tuple(
 MCP_AVAILABLE = not MCP_MISSING_MODULES
 
 try:
+    from education_resource_mcp.acquisition import (
+        AcquisitionRouter,
+        AcquisitionStrategy,
+        ProviderRegistration,
+    )
+    from education_resource_mcp.acquisition.web_fetch import FetchResult
+    from education_resource_mcp.acquisition.web_materializer import WebMaterializer
     from education_resource_mcp.config import Settings
-    from education_resource_mcp.downloader import DownloadResult
     from education_resource_mcp.errors import DomainError, failure, ok
+    from education_resource_mcp.inspection import (
+        InspectionResult,
+        InspectionRouter,
+        build_default_inspection,
+    )
     from education_resource_mcp.models import FlowTask
     from education_resource_mcp.search import StaticSearchProvider
     from education_resource_mcp.service import ResourceService
@@ -122,6 +133,15 @@ BINDING_FIELDS = {
     "presented_version",
     "selection_version",
     "selection_digest",
+}
+PLAN_ITEM_AUTHORITY_FIELDS = {
+    "representation_id",
+    "planned_scope",
+    "planned_strategy",
+    "planned_provider",
+    "capability",
+    "eligibility",
+    "binding_digest",
 }
 
 
@@ -191,19 +211,11 @@ def resolve_local_schema_reference(
 def stdio_parameters(data_dir: str):
     from mcp.client.stdio import StdioServerParameters
 
-    environment = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(
-            [str(SERVICE_ROOT / "src"), str(SERVICE_ROOT / "tests")]
-        ),
-        "EDUCATION_RESOURCE_MCP_DATA_DIR": data_dir,
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
     return StdioServerParameters(
         command=sys.executable,
         args=[str(SERVICE_ROOT / "tests" / "stdio_fixture_server.py")],
         cwd=SERVICE_ROOT,
-        env=environment,
+        env=build_fixture_subprocess_environment(data_dir),
     )
 
 
@@ -377,25 +389,66 @@ class ContractCatalogConsistencyTests(unittest.TestCase):
         anyio.run(run)
 
 
-class ContractDownloader:
-    def __init__(self, jobs_dir: Path, wait_for_cancel: bool = False) -> None:
-        self.jobs_dir = jobs_dir
-        self.wait_for_cancel = wait_for_cancel
+class ContractLandingFixtureFetcher:
+    """Offline HTML source used by the real generic web materializer."""
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
-        if self.wait_for_cancel and cancel_event.wait(2):
+    def __init__(self, *, wait_for_cancel: bool = False) -> None:
+        self.wait_for_cancel = wait_for_cancel
+        self.started = threading.Event()
+
+    def fetch_html(self, url: str, *, cancel_event=None) -> FetchResult:
+        self.started.set()
+        if self.wait_for_cancel:
+            if cancel_event is None:
+                raise AssertionError("materializer must provide a cancellation event")
+            if not cancel_event.wait(2):
+                raise AssertionError("fixture materializer did not receive cancellation")
             raise DomainError("JOB_CANCELLED", "cancelled")
-        payload = b"<html>contract fixture</html>"
-        directory = self.jobs_dir / job_id
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / "fixture.html"
-        path.write_bytes(payload)
-        return DownloadResult(
-            path,
-            len(payload),
-            "text/html",
-            hashlib.sha256(payload).hexdigest(),
-            path.name,
+        html_bytes = (
+            "<html><body><article><h1>儿童恐龙资料</h1>"
+            "<p>这是一份静态、可读的恐龙入门资料。</p>"
+            "</article></body></html>"
+        ).encode("utf-8")
+        return FetchResult(url, 200, "text/html", html_bytes, {})
+
+
+class ContractLandingFixtureInspector:
+    """Offline evidence matching the deployed generic landing capability."""
+
+    platform_id = "generic"
+    inspector_id = "generic"
+    version = "1.0.0"
+    supported_scopes = ("landing_page",)
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        "scope": "landing_page",
+                        "kind": "webpage",
+                        "container": "html",
+                        "mime_type": "text/html",
+                        "role": "landing",
+                        "materializable": True,
+                        "technical_availability": "available",
+                        "requires_auth": False,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                "generic",
+                version="1.0.0",
+                method="offline-fixture",
+                cache_status="miss",
+                inspected_at="2026-08-09T00:00:00Z",
+            ),
+            failures=[],
         )
 
 
@@ -484,10 +537,29 @@ class ContractOutputTests(unittest.TestCase):
                 },
             ]
         )
-        self.service = ResourceService(
+        self.service = self._build_service(self.provider)
+
+    def _build_service(
+        self, search_provider, *, wait_for_cancel: bool = False
+    ) -> ResourceService:
+        self.fixture_fetcher = ContractLandingFixtureFetcher(
+            wait_for_cancel=wait_for_cancel
+        )
+        return ResourceService(
             self.settings,
-            search_provider=self.provider,
-            download_provider=ContractDownloader(self.settings.jobs_dir),
+            search_provider=search_provider,
+            acquisition_router=AcquisitionRouter(
+                [
+                    ProviderRegistration(
+                        provider_id="generic-web-materializer",
+                        provider_version="1.0.0",
+                        provider=WebMaterializer(fetcher=self.fixture_fetcher),
+                        strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+                        scopes=("landing_page",),
+                    ),
+                ]
+            ),
+            inspection_router=InspectionRouter([ContractLandingFixtureInspector()]),
         )
 
     def tearDown(self) -> None:
@@ -533,7 +605,7 @@ class ContractOutputTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("job timeout")
 
-    def _prepare_flow(self, key_suffix: str) -> dict[str, dict]:
+    def _prepare_flow(self, key_suffix: str) -> dict[str, object]:
         flow = self.service.flow_start(
             f"contract-flow-{key_suffix}-0001", self._flow_task()
         )
@@ -551,6 +623,14 @@ class ContractOutputTests(unittest.TestCase):
         displayed = [
             search["candidates"][1]["resource_id"],
             search["candidates"][0]["resource_id"],
+        ]
+        inspections = [
+            self.service.inspect(
+                flow["flow_id"],
+                f"contract-inspect-{key_suffix}-{position:03d}",
+                resource_id,
+            )
+            for position, resource_id in enumerate(displayed, start=1)
         ]
         presentation = self.service.presentation_save(
             flow["flow_id"],
@@ -583,6 +663,8 @@ class ContractOutputTests(unittest.TestCase):
         return {
             "flow": flow,
             "search": search,
+            "displayed": displayed,
+            "inspections": inspections,
             "presentation": presentation,
             "selection": selection,
             "binding": binding,
@@ -593,6 +675,7 @@ class ContractOutputTests(unittest.TestCase):
         state = self._prepare_flow("success")
         flow = state["flow"]
         search = state["search"]
+        inspections = state["inspections"]
         presentation = state["presentation"]
         selection = state["selection"]
         binding = state["binding"]
@@ -601,14 +684,44 @@ class ContractOutputTests(unittest.TestCase):
         with self.subTest(public_shape="search"):
             self.assertIn("candidates", search)
             self.assertEqual(flow["task_version"], search["task_version"])
+        with self.subTest(public_shape="resource_inspect"):
+            self.assertEqual(2, len(inspections))
+            for inspection in inspections:
+                self.assertEqual("generic", inspection["inspection"]["inspector_id"])
+                self.assertEqual("1.0.0", inspection["inspection"]["version"])
+                self.assertEqual(
+                    "landing_page",
+                    inspection["resolved_resource"]["representations"][0]["scope"],
+                )
+                self.assert_contract("resource_inspect", ok(inspection))
         with self.subTest(public_shape="presentation"):
             self.assertIn("items", presentation)
             self.assertIn("empty", presentation)
             self.assertNotIn("displayed_items", presentation)
         with self.subTest(public_shape="prepare"):
             self.assertIn("plan_digest", plan)
+            self.assertIn("authority_digest", plan)
+            self.assertEqual(
+                "capability-binding-v1", plan["capability_binding_version"]
+            )
             self.assertEqual(
                 {field: plan[field] for field in BINDING_FIELDS}, binding
+            )
+            item = plan["items"][0]
+            self.assertTrue(PLAN_ITEM_AUTHORITY_FIELDS.issubset(item))
+            self.assertEqual("landing_page", item["planned_scope"])
+            self.assertEqual("web_materialize", item["planned_strategy"])
+            self.assertEqual(
+                {
+                    "provider_id": "generic-web-materializer",
+                    "version": "1.0.0",
+                    "scope": "landing_page",
+                },
+                item["planned_provider"],
+            )
+            self.assertEqual(
+                "cap_generic_webpage_landing_materialize_v1",
+                item["capability"]["capability_id"],
             )
 
         status_before_start = self.service.flow_status(flow["flow_id"])
@@ -618,6 +731,10 @@ class ContractOutputTests(unittest.TestCase):
             self.assertEqual(
                 status_before_start["current_plan"]["plan_digest"],
                 plan["plan_digest"],
+            )
+            self.assertEqual(
+                status_before_start["current_plan"]["authority_digest"],
+                plan["authority_digest"],
             )
             self.assertNotIn(
                 "confirmation_token", status_before_start["current_plan"]
@@ -629,6 +746,8 @@ class ContractOutputTests(unittest.TestCase):
             plan["confirmation_token"],
             "contract-start-success-001",
             **binding,
+            plan_digest=plan["plan_digest"],
+            authority_digest=plan["authority_digest"],
         )
         status = self._wait(flow["flow_id"], started["job_id"])
         self.assertEqual("succeeded", status["status"])
@@ -637,6 +756,7 @@ class ContractOutputTests(unittest.TestCase):
                 {field: started[field] for field in BINDING_FIELDS}, binding
             )
             self.assertEqual(started["plan_digest"], plan["plan_digest"])
+            self.assertEqual(started["authority_digest"], plan["authority_digest"])
         with self.subTest(public_shape="job_status"):
             self.assertEqual(status["plan_id"], plan["plan_id"])
             self.assertEqual(
@@ -649,6 +769,10 @@ class ContractOutputTests(unittest.TestCase):
             self.assertTrue(EXPECTED_FLOW_STATUS_FIELDS.issubset(status_after_start))
             self.assertEqual(
                 status_after_start["current_job"]["job_id"], started["job_id"]
+            )
+            self.assertEqual(
+                status_after_start["current_job"]["authority_digest"],
+                plan["authority_digest"],
             )
 
         archived = self.service.archive(
@@ -678,15 +802,38 @@ class ContractOutputTests(unittest.TestCase):
             with self.subTest(contract=tool_name):
                 self.assert_contract(tool_name, ok(output))
 
+        with self.service.store.transaction(immediate=True) as connection:
+            outcome_row = connection.execute(
+                "SELECT * FROM acquisition_outcomes WHERE job_id = ?",
+                (started["job_id"],),
+            ).fetchone()
+            assert outcome_row is not None
+            legacy_outcome = self.service.store._decode_acquisition_outcome(outcome_row)
+            legacy_outcome["execution_binding_digest"] = None
+            legacy_outcome.pop("outcome_digest", None)
+            connection.execute(
+                """
+                UPDATE acquisition_outcomes
+                SET execution_binding_digest = NULL, outcome_digest = ?
+                WHERE outcome_id = ?
+                """,
+                (
+                    self.service.store._request_digest(legacy_outcome),
+                    outcome_row["outcome_id"],
+                ),
+            )
+            connection.execute(
+                "DELETE FROM job_execution_items WHERE job_id = ?",
+                (started["job_id"],),
+            )
+        legacy_status = self.service.job_status(flow["flow_id"], started["job_id"])
+        self.assertTrue(legacy_status["outcomes"])
+        self.assertNotIn("execution", legacy_status["outcomes"][0])
+        self.assert_contract("resource_job_status", ok(legacy_status))
+
     def test_job_cancel_success_output_matches_contract(self) -> None:
         self.service.close()
-        self.service = ResourceService(
-            self.settings,
-            search_provider=self.provider,
-            download_provider=ContractDownloader(
-                self.settings.jobs_dir, wait_for_cancel=True
-            ),
-        )
+        self.service = self._build_service(self.provider, wait_for_cancel=True)
         state = self._prepare_flow("cancel")
         flow = state["flow"]
         plan = state["plan"]
@@ -697,6 +844,12 @@ class ContractOutputTests(unittest.TestCase):
             plan["confirmation_token"],
             "contract-start-cancel-0001",
             **binding,
+            plan_digest=plan["plan_digest"],
+            authority_digest=plan["authority_digest"],
+        )
+        self.assertTrue(
+            self.fixture_fetcher.started.wait(1),
+            "fixture materializer did not start before cancellation",
         )
         cancelled = self.service.job_cancel(
             flow["flow_id"],
@@ -722,11 +875,7 @@ class ContractOutputTests(unittest.TestCase):
 
     def test_browse_creator_success_output_matches_contract(self) -> None:
         self.service.close()
-        self.service = ResourceService(
-            self.settings,
-            search_provider=CreatorSearchProvider(),
-            download_provider=ContractDownloader(self.settings.jobs_dir),
-        )
+        self.service = self._build_service(CreatorSearchProvider())
         flow = self.service.flow_start(
             "contract-browse-flow-0001", self._flow_task()
         )

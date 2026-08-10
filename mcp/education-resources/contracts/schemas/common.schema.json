@@ -649,7 +649,11 @@
     },
     "classification_status": {
       "type": "string",
-      "enum": ["classified", "needs_review", "unclassified"]
+      "enum": [
+        "classified",
+        "needs_review",
+        "unclassified"
+      ]
     },
     "material_purpose": {
       "type": "string",
@@ -666,11 +670,21 @@
     },
     "difficulty": {
       "type": "string",
-      "enum": ["introductory", "intermediate", "advanced", "competition"]
+      "enum": [
+        "introductory",
+        "intermediate",
+        "advanced",
+        "competition"
+      ]
     },
     "resource_format": {
       "type": "string",
-      "enum": ["video", "document", "audio", "other"]
+      "enum": [
+        "video",
+        "document",
+        "audio",
+        "other"
+      ]
     },
     "safe_topic": {
       "type": "string",
@@ -755,23 +769,37 @@
         {
           "if": {
             "properties": {
-              "classification_status": {"const": "classified"}
+              "classification_status": {
+                "const": "classified"
+              }
             },
-            "required": ["classification_status"]
+            "required": [
+              "classification_status"
+            ]
           },
           "then": {
-            "required": ["primary_domain"]
+            "required": [
+              "primary_domain"
+            ]
           }
         },
         {
           "if": {
             "properties": {
-              "classification_status": {"const": "unclassified"}
+              "classification_status": {
+                "const": "unclassified"
+              }
             },
-            "required": ["classification_status"]
+            "required": [
+              "classification_status"
+            ]
           },
           "then": {
-            "not": {"required": ["primary_domain"]}
+            "not": {
+              "required": [
+                "primary_domain"
+              ]
+            }
           }
         }
       ]
@@ -799,6 +827,233 @@
     "plan_digest": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "canonical_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "Canonical SHA-256 digest. Hash the UTF-8 JSON form with recursively sorted object keys, compact separators, no insignificant whitespace, and the digest field omitted from the preimage."
+    },
+    "descriptor_id": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 128,
+      "pattern": "^cap_[A-Za-z0-9][A-Za-z0-9_.-]{7,123}$"
+    },
+    "capability_id": {
+      "$ref": "#/$defs/descriptor_id"
+    },
+    "eligibility_id": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 128,
+      "pattern": "^elig_[A-Za-z0-9][A-Za-z0-9_.-]{7,123}$"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^decision_[A-Za-z0-9][A-Za-z0-9_.-]{7,115}$"
+    },
+    "plan_item_id": {
+      "type": "string",
+      "minLength": 13,
+      "maxLength": 128,
+      "pattern": "^pitem_[A-Za-z0-9][A-Za-z0-9_.-]{7,122}$"
+    },
+    "actual_outcome_id": {
+      "type": "string",
+      "minLength": 14,
+      "maxLength": 128,
+      "pattern": "^outcome_[A-Za-z0-9][A-Za-z0-9_.-]{7,121}$"
+    },
+    "capability_scope": {
+      "type": "string",
+      "enum": [
+        "primary_resource",
+        "representation",
+        "landing_page",
+        "metadata"
+      ]
+    },
+    "capability_strategy": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "inspector_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "component_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9+_.-]*$"
+    },
+    "readiness_status": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "degraded",
+        "blocked",
+        "experimental",
+        "unsupported",
+        "unavailable",
+        "auth_required",
+        "policy_blocked",
+        "feature_not_supported",
+        "unknown"
+      ]
+    },
+    "load_status": {
+      "type": "string",
+      "enum": [
+        "loaded",
+        "partially_loaded",
+        "not_loaded",
+        "failed"
+      ]
+    },
+    "eligibility_action": {
+      "type": "string",
+      "enum": [
+        "inspect",
+        "materialize",
+        "download",
+        "archive"
+      ]
+    },
+    "eligibility_status": {
+      "type": "string",
+      "enum": [
+        "eligible",
+        "ineligible",
+        "unknown",
+        "auth_required",
+        "policy_blocked",
+        "unsupported",
+        "manual_review"
+      ]
+    },
+    "outcome_status": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed",
+        "partial",
+        "cancelled",
+        "blocked"
+      ]
+    },
+    "source_fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "mime_type": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 127,
+      "pattern": "^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$"
+    },
+    "safe_container": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+    },
+    "provider_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_id",
+        "version"
+      ],
+      "properties": {
+        "provider_id": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "version": {
+          "$ref": "#/$defs/component_version"
+        },
+        "scope": {
+          "$ref": "#/$defs/capability_scope"
+        }
+      }
+    },
+    "inspector_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inspector_id",
+        "version"
+      ],
+      "properties": {
+        "inspector_id": {
+          "$ref": "#/$defs/inspector_id"
+        },
+        "version": {
+          "$ref": "#/$defs/component_version"
+        }
+      }
+    },
+    "capability_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_id",
+        "descriptor_digest",
+        "readiness_snapshot_id"
+      ],
+      "properties": {
+        "capability_id": {
+          "$ref": "#/$defs/capability_id"
+        },
+        "descriptor_digest": {
+          "$ref": "#/$defs/canonical_digest"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider_ref"
+        },
+        "strategy": {
+          "$ref": "#/$defs/capability_strategy"
+        },
+        "scope": {
+          "$ref": "#/$defs/capability_scope"
+        },
+        "readiness_snapshot_id": {
+          "$ref": "#/$defs/readiness_snapshot_id"
+        }
+      }
+    },
+    "readiness_snapshot_id": {
+      "type": "string",
+      "minLength": 13,
+      "maxLength": 128,
+      "pattern": "^ready_[A-Za-z0-9][A-Za-z0-9_.-]{7,122}$",
+      "description": "Server-generated immutable deployment-readiness snapshot identifier."
+    },
+    "binding_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Digest of one immutable per-resource capability binding."
+    },
+    "authority_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Digest of the ordered capability authority projection bound into a Plan."
+    },
+    "capability_binding_version": {
+      "type": "string",
+      "const": "capability-binding-v1"
     }
   }
 }

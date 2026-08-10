@@ -10,11 +10,11 @@
 
 # 执行进度（根智能体维护）
 
-- 总体状态：`blocked`
+- 总体状态：`in_progress`
 - 执行开始：2026-08-08
 - 当前分支：`codex/growth-resource-taxonomy-rework`
-- 当前基线：`bfc4a1230e08ddc07eb05027fd6cbe92b8e952f6`
-- 当前阶段：`0023-retrieval-e2e-hardening`
+- 当前审计起始 HEAD：`09d8eebbe37e76c6f298492c90214544f8a4667a`
+- 当前阶段：`0024-retrieval-authority-and-quality-calibration`
 - 编排方式：根智能体负责架构决策、整合和验收；并行子智能体使用 `gpt-5.6-luna`、`reasoning_effort=max`
 
 | 计划 | 状态 | 当前结果 / 下一步 |
@@ -25,7 +25,18 @@
 | 0020 Adaptive Retrieval Loop | `completed` | SearchDirection/Gap/Stop、migration 4、immutable extend、provenance/coverage、Skill 与 18 个 golden cases 已验收；MCP 回归 279/279 通过 |
 | 0021 Acquisition Core + Web Materializer | `completed` | Acquisition Router、静态 Web Fetch/Block IR/Materializer、ZIP primary、Job/Archive 接入已验收；全量本地回归 317/317 通过 |
 | 0022 Multimodal Asset Bundle | `completed` | catalog 1.3.0、migration 5、多资产 Job/Bundle、SmartEdu partial、Archive/Library 关系已验收；全量本地回归 348/348 通过 |
-| 0023 E2E Hardening | `blocked` | 4/4 真实 stdio 子进程 E2E 与全量 352/352 通过；本机缺少 `openclaw`，doctor/probe 和默认 Agent 完整对话待外部环境 |
+| 0023 E2E Hardening | `blocked` | 历史 4/4 stdio 与 352/352 已留证；当前 OpenClaw config/status/doctor/probe 已串行通过，剩余默认 Agent 完整业务回合与真实平台 readiness |
+| 0024 Retrieval Authority and Quality Calibration | `in_progress` | 当前 catalog 已为 1.4.0：coverage 仅标明 MCP factual summary；继续稳定测试基线、校准 semantic/StopDecision 与 premature Present |
+
+### 当前稳定复验（0024，2026-08-08）
+
+0023 的 4/4 stdio 与 352/352 是历史隔离环境快照；当时本机缺少 `openclaw`，真实 OpenClaw
+doctor/probe 与默认 Agent 完整回合 blocked。0024 当前稳定复验已通过源码与测试
+`compileall`、8/8 进程级 stdio E2E、374/374 education-resources 全量回归和 39/39 retrieval
+calibration。OpenClaw `2026.7.1-2` 的 `config validate`、`mcp doctor education-resources --probe`
+和 `mcp probe education-resources --json` 均通过，probe 精确发现 13 个 Tool 且
+`diagnostics=[]`。这些结果只证明本地配置、MCP 协议、工具发现和校准基线稳定；默认 Agent
+完整自然语言业务回合、真实平台网络和合法会话 readiness 仍属于后续验收。
 
 当前 0017 的仓库执行记录位于 `.agent/plans/0017-current-contract-and-doc-alignment.md`。
 当前 0018 的仓库执行记录位于 `.agent/plans/0018-resource-model-and-platform-registry.md`。
@@ -34,6 +45,7 @@
 当前 0021 的仓库执行记录位于 `.agent/plans/0021-acquisition-core-and-web-materializer.md`。
 当前 0022 的仓库执行记录位于 `.agent/plans/0022-multimodal-asset-bundle.md`。
 当前 0023 的仓库执行记录位于 `.agent/plans/0023-retrieval-e2e-hardening.md`。
+当前 0024 的仓库执行记录位于 `.agent/plans/0024-retrieval-authority-and-quality-calibration.md`。
 
 ## 0017 执行日志
 
@@ -100,7 +112,8 @@
 - 0023 本地 E2E 已完成：测试 harness 直接启动 MCP stdio 子进程并发送原始 JSON-RPC，精确发现 13 tools；多资源 Inspect/确认/partial Bundle、书籍 edition、网页 ZIP、逐 Asset Archive/Library、绑定失配和幂等冲突均通过。
 - 0023 恢复验收已完成：下载第一个资源后第二个资源阻塞时强杀 MCP 进程，同 SQLite 启动新进程后 Job 明确终结为 failed、ready Asset 被 quarantine、Bundle 关系保留且文件数不增长；没有自动重放网络副作用。
 - 0023 认证恢复验收已完成：首个 Job 返回 AUTH_REQUIRED 且无 Asset；外部无秘密 marker 模拟合法 session-manager 会话就绪后，同 Selection 创建新 Plan/Job 并成功归档检索。4/4 E2E 与全量本地回归 352/352、`compileall` 和差异检查通过。
-- 0023 当前阻塞：本机 `command -v openclaw` 无结果，常见用户级路径也未发现可执行文件；因此未运行 doctor/probe 和默认 Agent 完整对话，不使用历史 WSL 结果或本地 stdio fixture 冒充真实 OpenClaw 验收。未提交、未推送。
+- 0023 当时阻塞（历史快照）：本机 `command -v openclaw` 无结果，常见用户级路径也未发现可执行文件；因此未运行 doctor/probe 和默认 Agent 完整对话，不使用历史 WSL 结果或本地 stdio fixture 冒充真实 OpenClaw 验收。未提交、未推送。
+- 0024 当前稳定复验（2026-08-08）：`compileall`、8/8 进程级 stdio E2E、374/374 全量回归、39/39 retrieval calibration，以及 OpenClaw `2026.7.1-2` 的 config validate/doctor/probe 均通过；probe 精确发现 13 个 Tool，`diagnostics=[]`。默认 Agent 完整自然语言业务回合与真实平台 readiness 仍未验收。
 
 ---
 
@@ -225,7 +238,7 @@ mcp/
 
 ```text
 contract_version = 1.0.0
-catalog_version  = 1.2.0
+catalog_version  = 1.4.0
 ```
 
 共 13 个 Tool：
@@ -247,8 +260,16 @@ resource_inspect
 ```
 
 0017 已完成原有文档漂移修复；0019 新增 `resource_inspect`，0020 以兼容字段扩展
-`resource_search` 并把 catalog 升至 `1.2.0`。以后工具事实必须以
-`contracts/tool-catalog.json` 为单一来源。
+`resource_search` 并把 catalog 升至 `1.2.0`，0022 的 AssetBundle 可选输出字段升至
+`1.3.0`；当前 `1.4.0` 仅为 `resource_search.coverage` 追加可选
+`kind="factual"` 与 `schema_version="factual-coverage-v1"`，不新增 Tool。
+
+coverage 是 MCP 服务端持久化、可恢复的事实摘要，不是语义充分性、推荐、`SemanticReview`、
+Gap 或 StopDecision；旧 coverage 缺少这两个可选标记时仍按既有 factual 语义读取，不能从
+缺失推断语义满足。按 [Retrieval Authority](../RETRIEVAL_AUTHORITY.md)，Skill 私有地完成语义
+审查、Gap 和唯一生产停止决策。`retrieval/adaptive.py` 是离线 oracle / calibration helper，
+不搜索、Inspect、下载、持久化、生成公共 ID 或写入 MCP 公共状态，也不构成第二套 production
+coverage。以后工具事实必须以 `contracts/tool-catalog.json` 为单一来源。
 
 ## 1.4 当前系统本来就是多资源类型
 

@@ -1,6 +1,8 @@
 # 产品级重置与 Fit-Gap 审计
 
 - 状态：blocked
+- 处置：superseded
+- 接替说明：归档领域由 [0016 Learning Resource Archive Foundation](0016-learning-resource-archive-foundation.md) 接替；其余审计和闭环工作已拆分到后续独立计划，本计划不再继续推进。
 - 创建日期：2026-08-04
 - 完成日期：未完成
 - 范围：`skills/learning-resource-flow/`、`mcp/education-resources/`、`legacy/skill-pipeline-v1/`、目标资料库架构与后续开发路线
@@ -17,7 +19,7 @@
 
 - 检查引用的文件与行号存在。
 - 检查计划与 `docs/DEVELOPMENT_PLAN.md`、active v2 契约和实现事实一致。
-- 运行 `git diff --check -- .agent/plans/0014-product-reset-fit-gap.md`。
+- 运行 `git diff --check -- .agent/plans/archive/0014-product-reset-fit-gap.md`。
 
 ## 结果
 

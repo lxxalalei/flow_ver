@@ -122,6 +122,8 @@ def adaptive_success() -> dict:
             "new_displayable_count": 10000,
         },
         "coverage": {
+            "kind": "factual",
+            "schema_version": "factual-coverage-v1",
             "status": "partial",
             "candidate_count": 0,
             "platform_count": 1,
@@ -235,6 +237,11 @@ class AdaptiveSearchOutputContractTests(unittest.TestCase):
         payload = adaptive_success()
         self.assert_valid(payload)
 
+        legacy_coverage = copy.deepcopy(payload)
+        legacy_coverage["coverage"].pop("kind")
+        legacy_coverage["coverage"].pop("schema_version")
+        self.assert_valid(legacy_coverage)
+
         for field in payload["provenance"]:
             invalid = copy.deepcopy(payload)
             invalid["provenance"][field] = -1
@@ -253,6 +260,28 @@ class AdaptiveSearchOutputContractTests(unittest.TestCase):
         invalid_status = copy.deepcopy(payload)
         invalid_status["coverage"]["status"] = "unknown"
         self.assert_invalid(invalid_status)
+
+        invalid_kind = copy.deepcopy(payload)
+        invalid_kind["coverage"]["kind"] = "semantic"
+        self.assert_invalid(invalid_kind)
+
+        invalid_version = copy.deepcopy(payload)
+        invalid_version["coverage"]["schema_version"] = "oracle-v2"
+        self.assert_invalid(invalid_version)
+
+        for forbidden_field in (
+            "factual_coverage",
+            "semantic_review",
+            "stop_decision",
+            "model_version",
+        ):
+            invalid_projection = copy.deepcopy(payload)
+            invalid_projection["coverage"][forbidden_field] = {}
+            self.assert_invalid(invalid_projection)
+
+        legacy_semantic_dimension = copy.deepcopy(payload)
+        legacy_semantic_dimension["coverage"]["gaps"][0]["dimension"] = "target"
+        self.assert_valid(legacy_semantic_dimension)
 
     def test_flow_status_result_set_snapshot_mirrors_optional_fields(self) -> None:
         status_schema = load_json(FLOW_STATUS_SCHEMA_PATH)

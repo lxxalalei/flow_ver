@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+
+from e2e_stdio_client import build_fixture_subprocess_environment
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -302,26 +303,11 @@ class ToolsListNestedSchemaTests(unittest.TestCase):
 
         async def run() -> None:
             with tempfile.TemporaryDirectory() as data_dir:
-                environment = {
-                    **os.environ,
-                    "PYTHONPATH": os.pathsep.join(
-                        filter(
-                            None,
-                            [
-                                str(SRC),
-                                str(SERVICE_ROOT / "tests"),
-                                os.environ.get("PYTHONPATH"),
-                            ],
-                        )
-                    ),
-                    "EDUCATION_RESOURCE_MCP_DATA_DIR": data_dir,
-                    "PYTHONDONTWRITEBYTECODE": "1",
-                }
                 parameters = StdioServerParameters(
                     command=sys.executable,
                     args=[str(SERVICE_ROOT / "tests" / "stdio_fixture_server.py")],
                     cwd=SERVICE_ROOT,
-                    env=environment,
+                    env=build_fixture_subprocess_environment(data_dir),
                 )
                 async with stdio_client(parameters) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:

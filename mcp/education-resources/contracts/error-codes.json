@@ -11,6 +11,11 @@
         "ASSET_NOT_ARCHIVABLE",
         "ASSET_NOT_FOUND",
         "AUTH_REQUIRED",
+        "CAPABILITY_DESCRIPTOR_INVALID",
+        "CAPABILITY_NOT_DECLARED",
+        "CAPABILITY_NOT_READY",
+        "CAPABILITY_SCOPE_MISMATCH",
+        "CAPABILITY_VERSION_CONFLICT",
         "CONFIRMATION_INVALID",
         "CONFIRMATION_REQUIRED",
         "CONTENT_TYPE_REJECTED",
@@ -18,6 +23,8 @@
         "CONTRACT_VERSION_UNSUPPORTED",
         "DOWNLOAD_FAILED",
         "DOWNLOAD_TOO_LARGE",
+        "ELIGIBILITY_EXPIRED",
+        "ELIGIBILITY_REQUIRED",
         "FEATURE_NOT_SUPPORTED",
         "FLOW_NOT_FOUND",
         "FLOW_STATE_CONFLICT",
@@ -34,12 +41,17 @@
         "PLAN_EXPIRED",
         "PLAN_NOT_FOUND",
         "PLATFORM_UNAVAILABLE",
+        "POLICY_BLOCKED",
         "POLICY_DENIED",
+        "PROVIDER_SCOPE_MISMATCH",
+        "PROVIDER_UNAVAILABLE",
         "POSITION_NOT_PRESENTED",
         "PRESENTATION_NOT_FOUND",
         "PRESENTATION_VERSION_CONFLICT",
         "RATE_LIMITED",
         "REDIRECT_BLOCKED",
+        "REPRESENTATION_NOT_PRIMARY",
+        "RESOLUTION_STALE",
         "RESOURCE_NOT_FOUND",
         "RESOURCE_NOT_PRESENTED",
         "RESOURCE_NOT_SELECTED",
@@ -49,7 +61,30 @@
         "SELECTION_VERSION_CONFLICT",
         "SIGN_FAILED",
         "STORAGE_UNAVAILABLE",
-        "TASK_VERSION_CONFLICT"
+        "TASK_VERSION_CONFLICT",
+        "OUTCOME_MISMATCH",
+        "VALIDATION_ERROR",
+        "CAPABILITY_BINDING_CONFLICT",
+        "CAPABILITY_DESCRIPTOR_AMBIGUOUS",
+        "CAPABILITY_DESCRIPTOR_DRIFT",
+        "CAPABILITY_REGISTRY_DRIFT",
+        "CAPABILITY_STRATEGY_MISMATCH",
+        "CAPABILITY_STRATEGY_REQUIRED",
+        "ELIGIBILITY_CONTEXT_REQUIRED",
+        "ELIGIBILITY_DRIFT",
+        "PROVIDER_DRIFT",
+        "READINESS_DRIFT",
+        "READINESS_EXPIRED",
+        "READINESS_UNBOUND",
+        "REPRESENTATION_AMBIGUOUS",
+        "REPRESENTATION_DRIFT",
+        "REPRESENTATION_NOT_FOUND",
+        "REPRESENTATION_NOT_MATERIALIZABLE",
+        "REPRESENTATION_REQUIRED",
+        "SCOPE_DRIFT",
+        "SOURCE_DRIFT",
+        "STRATEGY_DRIFT",
+        "SOURCE_FINGERPRINT_UNAVAILABLE"
       ]
     }
   },
@@ -301,6 +336,228 @@
       "category": "state",
       "retriable": false,
       "meaning": "The download Job stopped because cancellation was requested."
+    },
+    {
+      "code": "CAPABILITY_DESCRIPTOR_INVALID",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "A static capability descriptor failed schema, digest, or compatibility validation."
+    },
+    {
+      "code": "CAPABILITY_NOT_DECLARED",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "No declared capability covers the requested platform, resource type, scope, or representation."
+    },
+    {
+      "code": "CAPABILITY_NOT_READY",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The declared capability is not loaded, healthy, authorized, or otherwise ready in the current deployment."
+    },
+    {
+      "code": "CAPABILITY_SCOPE_MISMATCH",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The selected representation or provider scope does not match the capability bound to the Plan."
+    },
+    {
+      "code": "CAPABILITY_VERSION_CONFLICT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The descriptor, provider, inspector, or readiness version changed and requires re-resolution."
+    },
+    {
+      "code": "ELIGIBILITY_EXPIRED",
+      "category": "policy",
+      "retriable": true,
+      "meaning": "The policy or rights eligibility decision expired before the action was executed."
+    },
+    {
+      "code": "ELIGIBILITY_REQUIRED",
+      "category": "policy",
+      "retriable": false,
+      "meaning": "A current eligibility decision is required before the requested action."
+    },
+    {
+      "code": "POLICY_BLOCKED",
+      "category": "policy",
+      "retriable": false,
+      "meaning": "The current policy profile blocks the capability, source, representation, or action."
+    },
+    {
+      "code": "PROVIDER_SCOPE_MISMATCH",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The selected Provider cannot execute the scope or representation bound to the Plan."
+    },
+    {
+      "code": "PROVIDER_UNAVAILABLE",
+      "category": "upstream",
+      "retriable": true,
+      "meaning": "The declared Provider is unavailable or failed its readiness check."
+    },
+    {
+      "code": "REPRESENTATION_NOT_PRIMARY",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "A landing, metadata, or other non-primary representation cannot be used as a primary download item."
+    },
+    {
+      "code": "RESOLUTION_STALE",
+      "category": "state",
+      "retriable": true,
+      "meaning": "The candidate Resolution or source fingerprint is stale and must be inspected again."
+    },
+    {
+      "code": "OUTCOME_MISMATCH",
+      "category": "state",
+      "retriable": false,
+      "meaning": "The actual Provider outcome does not match the capability-aware Plan item binding."
+    },
+    {
+      "code": "VALIDATION_ERROR",
+      "category": "validation",
+      "retriable": false,
+      "meaning": "A server-owned authority payload failed bounded semantic or persistence validation; raw validator strings are not exposed."
+    },
+    {
+      "code": "CAPABILITY_BINDING_CONFLICT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "A Plan or persisted authority fact no longer matches its bound descriptor, readiness, resolution, representation, or eligibility evidence."
+    },
+    {
+      "code": "CAPABILITY_DESCRIPTOR_AMBIGUOUS",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "More than one capability descriptor matches the requested platform, resource type, scope, and strategy."
+    },
+    {
+      "code": "CAPABILITY_DESCRIPTOR_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The descriptor digest changed after preparation and the resource must be resolved and prepared again."
+    },
+    {
+      "code": "CAPABILITY_REGISTRY_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The capability registry version or digest changed after preparation and requires fresh authority evidence."
+    },
+    {
+      "code": "CAPABILITY_STRATEGY_MISMATCH",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The requested or returned acquisition strategy does not match the declared capability binding."
+    },
+    {
+      "code": "CAPABILITY_STRATEGY_REQUIRED",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The selected capability does not declare an executable acquisition strategy."
+    },
+    {
+      "code": "ELIGIBILITY_CONTEXT_REQUIRED",
+      "category": "policy",
+      "retriable": false,
+      "meaning": "The trusted Flow or policy context required to revalidate eligibility is missing."
+    },
+    {
+      "code": "ELIGIBILITY_DRIFT",
+      "category": "policy",
+      "retriable": true,
+      "meaning": "Policy, rights, authorization, or eligibility facts changed after preparation."
+    },
+    {
+      "code": "PROVIDER_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The loaded Provider identity or version no longer matches the prepared binding."
+    },
+    {
+      "code": "READINESS_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "Deployment readiness changed after preparation and the capability is no longer ready."
+    },
+    {
+      "code": "READINESS_EXPIRED",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The deployment readiness snapshot expired before the action was executed."
+    },
+    {
+      "code": "READINESS_UNBOUND",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The readiness observation is not bound to a validated capability registry snapshot."
+    },
+    {
+      "code": "REPRESENTATION_AMBIGUOUS",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "Multiple representations are available and no unambiguous server-owned representation binding was selected."
+    },
+    {
+      "code": "REPRESENTATION_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The resolved representation changed after preparation and must be inspected and prepared again."
+    },
+    {
+      "code": "REPRESENTATION_NOT_FOUND",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The selected representation_id is not present in the authoritative Resolution."
+    },
+    {
+      "code": "REPRESENTATION_NOT_MATERIALIZABLE",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The selected representation is not a concrete materializable primary resource."
+    },
+    {
+      "code": "REPRESENTATION_REQUIRED",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "A concrete server-owned representation selection is required for the requested action."
+    },
+    {
+      "code": "SCOPE_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The observed representation or Provider scope changed after preparation."
+    },
+    {
+      "code": "SOURCE_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The observed source fingerprint changed after preparation."
+    },
+    {
+      "code": "STRATEGY_DRIFT",
+      "category": "capability",
+      "retriable": true,
+      "meaning": "The executable acquisition strategy changed after preparation."
+    },
+    {
+      "code": "SOURCE_FINGERPRINT_UNAVAILABLE",
+      "category": "upstream",
+      "retriable": true,
+      "meaning": "The service could not observe the source fingerprint required for an authoritative binding."
+    },
+    {
+      "code": "FEATURE_NOT_SUPPORTED",
+      "category": "capability",
+      "retriable": false,
+      "meaning": "The requested platform feature is explicitly unsupported by the current declared capability."
+    },
+    {
+      "code": "SIGN_FAILED",
+      "category": "upstream",
+      "retriable": false,
+      "meaning": "A platform signature required for a legitimate request could not be produced by the configured signer."
     }
   ]
 }

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
 import time
 import unittest
+
+from e2e_stdio_client import build_fixture_subprocess_environment
 
 
 MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
@@ -45,19 +46,11 @@ def contract_input_schema(tool_name: str) -> dict:
 def stdio_parameters(data_dir: str):
     from mcp.client.stdio import StdioServerParameters
 
-    environment = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(
-            [str(SERVICE_ROOT / "src"), str(SERVICE_ROOT / "tests")]
-        ),
-        "EDUCATION_RESOURCE_MCP_DATA_DIR": data_dir,
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
     return StdioServerParameters(
         command=sys.executable,
         args=[str(SERVICE_ROOT / "tests" / "stdio_fixture_server.py")],
         cwd=SERVICE_ROOT,
-        env=environment,
+        env=build_fixture_subprocess_environment(data_dir),
     )
 
 
@@ -171,6 +164,22 @@ class McpStdioTests(unittest.TestCase):
                             search["candidates"][1]["resource_id"],
                             search["candidates"][0]["resource_id"],
                         ]
+                        for index, resource_id in enumerate(displayed, start=1):
+                            inspected = await call(
+                                session,
+                                "resource_inspect",
+                                {
+                                    "contract_version": "1.0.0",
+                                    "flow_id": flow["flow_id"],
+                                    "resource_id": resource_id,
+                                    "idempotency_key": f"stdio-inspect-key-{index}",
+                                },
+                            )
+                            self.assertEqual("resolved", inspected["resolution_status"])
+                            self.assertEqual(
+                                "landing_page",
+                                inspected["resolved_resource"]["representations"][0]["scope"],
+                            )
                         presentation = await call(
                             session,
                             "resource_presentation_save",
@@ -263,6 +272,7 @@ class McpStdioTests(unittest.TestCase):
                                 "plan_id": plan["plan_id"],
                                 **binding,
                                 "plan_digest": plan["plan_digest"],
+                                "authority_digest": plan["authority_digest"],
                                 "confirmation_token": plan["confirmation_token"],
                                 "idempotency_key": "stdio-start-key-001",
                             },
@@ -271,6 +281,9 @@ class McpStdioTests(unittest.TestCase):
                             {field: started[field] for field in BINDING_FIELDS}, binding
                         )
                         self.assertEqual(started["plan_digest"], plan["plan_digest"])
+                        self.assertEqual(
+                            started["authority_digest"], plan["authority_digest"]
+                        )
 
                         deadline = time.monotonic() + 3
                         while True:

@@ -1,0 +1,418 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/capability-descriptor.schema.json",
+  "title": "Education resource static capability descriptor",
+  "description": "A server-owned static declaration of a platform capability. It does not assert current deployment readiness, candidate availability, or user rights.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "descriptor_id",
+    "descriptor_version",
+    "descriptor_digest",
+    "registry_version",
+    "platform_id",
+    "resource_types",
+    "scope",
+    "representation",
+    "strategy",
+    "provider",
+    "inspector",
+    "prerequisites",
+    "policy_class",
+    "fallback",
+    "source",
+    "compatibility"
+  ],
+  "properties": {
+    "descriptor_id": {
+      "$ref": "common.schema.json#/$defs/descriptor_id"
+    },
+    "descriptor_version": {
+      "$ref": "common.schema.json#/$defs/component_version"
+    },
+    "descriptor_digest": {
+      "$ref": "common.schema.json#/$defs/canonical_digest"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "platform_id": {
+      "$ref": "common.schema.json#/$defs/platform_id"
+    },
+    "resource_types": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/resource_type"
+      }
+    },
+    "scope": {
+      "$ref": "common.schema.json#/$defs/capability_scope"
+    },
+    "representation": {
+      "$ref": "#/$defs/representation"
+    },
+    "strategy": {
+      "$ref": "common.schema.json#/$defs/capability_strategy"
+    },
+    "provider": {
+      "$ref": "common.schema.json#/$defs/provider_ref"
+    },
+    "inspector": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/inspector_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "prerequisites": {
+      "$ref": "#/$defs/prerequisites"
+    },
+    "policy_class": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "fallback": {
+      "$ref": "#/$defs/fallback"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "compatibility": {
+      "$ref": "#/$defs/compatibility"
+    },
+    "deprecated": {
+      "type": "boolean",
+      "default": false
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  },
+  "$defs": {
+    "representation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "role",
+        "containers",
+        "mime_types"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "webpage",
+            "document",
+            "video",
+            "audio",
+            "image",
+            "subtitle",
+            "other"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "landing",
+            "metadata",
+            "attachment",
+            "companion"
+          ]
+        },
+        "containers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/safe_container"
+          }
+        },
+        "mime_types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/mime_type"
+          }
+        },
+        "materializable": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "prerequisites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_fields",
+        "auth_mode",
+        "network_policy",
+        "max_bytes",
+        "max_retries"
+      ],
+      "properties": {
+        "required_fields": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_.-]*$"
+          }
+        },
+        "auth_mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "optional",
+            "required"
+          ]
+        },
+        "network_policy": {
+          "type": "string",
+          "enum": [
+            "public_http",
+            "platform_allowlist",
+            "session_scoped",
+            "none"
+          ]
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5368709120
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "requires_session": {
+          "type": "boolean",
+          "default": false
+        },
+        "required_policy_profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_.-]*$"
+        }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "max_scope",
+        "allowed_scopes",
+        "on_errors"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "max_scope": {
+          "$ref": "common.schema.json#/$defs/capability_scope"
+        },
+        "allowed_scopes": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/capability_scope"
+          }
+        },
+        "on_errors": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "../error-codes.json#/$defs/error_code"
+          }
+        },
+        "scope_preserving": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "published_at"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "registry",
+            "built_in",
+            "deployment"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "published_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "read_min",
+        "write_version",
+        "breaking_major"
+      ],
+      "properties": {
+        "read_min": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "write_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "breaking_major": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "scope": {
+            "const": "primary_resource"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "role": {
+                "const": "primary"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "scope": {
+            "const": "landing_page"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "landing_page"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "role": {
+                "const": "landing"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "scope": {
+            "const": "metadata"
+          }
+        },
+        "required": [
+          "scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provider": {
+            "properties": {
+              "scope": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "representation": {
+            "properties": {
+              "role": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

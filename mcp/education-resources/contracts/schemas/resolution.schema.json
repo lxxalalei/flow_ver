@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/resolution.schema.json",
+  "title": "Education resource candidate resolution and representation capability projection",
+  "description": "A server-generated candidate-specific resolution. Technical availability and representation scope are facts; rights_hint is advisory and is not an eligibility decision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "resource_id",
+    "resolution_id",
+    "resolution_version",
+    "resolution_status",
+    "source_fingerprint",
+    "inspector",
+    "observed_at",
+    "expires_at",
+    "availability",
+    "representations",
+    "failures"
+  ],
+  "properties": {
+    "contract_version": {
+      "$ref": "common.schema.json#/$defs/contract_version"
+    },
+    "resource_id": {
+      "$ref": "common.schema.json#/$defs/resource_id"
+    },
+    "resolution_id": {
+      "$ref": "common.schema.json#/$defs/resolution_id"
+    },
+    "resolution_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "resolution_status": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "partial",
+        "unresolved",
+        "landing_only",
+        "metadata_only"
+      ]
+    },
+    "source_fingerprint": {
+      "$ref": "common.schema.json#/$defs/source_fingerprint"
+    },
+    "inspector": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/inspector_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capability_ref": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/capability_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "observed_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "availability": {
+      "$ref": "#/$defs/availability"
+    },
+    "representations": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/representation"
+      }
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/failure"
+      }
+    }
+  },
+  "$defs": {
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "auth_required",
+            "unavailable",
+            "unknown",
+            "policy_blocked"
+          ]
+        },
+        "reason_code": {
+          "$ref": "../error-codes.json#/$defs/error_code"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "representation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "representation_id",
+        "scope",
+        "kind",
+        "role",
+        "technical_availability",
+        "materializable",
+        "evidence"
+      ],
+      "properties": {
+        "representation_id": {
+          "$ref": "common.schema.json#/$defs/representation_id"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/capability_scope"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "webpage",
+            "document",
+            "video",
+            "audio",
+            "image",
+            "subtitle",
+            "other"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "landing",
+            "metadata",
+            "attachment",
+            "companion"
+          ]
+        },
+        "container": {
+          "$ref": "common.schema.json#/$defs/safe_container"
+        },
+        "mime_type": {
+          "$ref": "common.schema.json#/$defs/mime_type"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "materializable": {
+          "type": "boolean"
+        },
+        "technical_availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "auth_required",
+            "unavailable",
+            "unknown",
+            "policy_blocked"
+          ]
+        },
+        "capability_ref": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/capability_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "rights_hint": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Advisory text only. It cannot establish eligibility."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "primary"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "primary"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "source_fingerprint",
+        "observed_at",
+        "expires_at"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "inspection",
+            "provider",
+            "metadata",
+            "resolution"
+          ]
+        },
+        "source_fingerprint": {
+          "$ref": "common.schema.json#/$defs/source_fingerprint"
+        },
+        "observed_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "expires_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "../error-codes.json#/$defs/error_code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "retriable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

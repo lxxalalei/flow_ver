@@ -20,9 +20,9 @@ Python unit test 冒充。
 - [x] completed：实现真实子进程终止/重启和同 SQLite 恢复，验证无网络副作用自动重放
 - [x] completed：实现 AUTH_REQUIRED 后合法会话恢复并由新 Plan/Job 继续，不泄漏凭据
 - [x] completed：执行 MCP stdio probe、13 工具/Schema/绑定/幂等/安全断言和完整本地回归
-- [ ] blocked：本机未发现 `openclaw`；无法执行 doctor/probe 和默认 Agent 完整对话，继续条件为提供已安装并配置的 OpenClaw 环境
+- [x] completed：2026-08-08 当前环境串行执行 OpenClaw config/status/doctor/probe；配置有效、MCP doctor 为 ok、probe 精确发现 13 个 `resource_*` Tool 且无 diagnostics
 - [x] completed：更新 Skill、MCP、架构、开发计划和总体规划的 E2E 证据与剩余风险
-- [ ] blocked：根智能体完成本地跨层验收；0023 因真实 OpenClaw 门槛保持 blocked，不把 stdio 固定夹具冒充完整 OpenClaw 验收
+- [ ] blocked：默认 Agent 的完整自然语言教育资源业务回合与真实平台网络/readiness 矩阵尚未验收；0023 不把 stdio 固定夹具或 MCP probe 冒充最终用户闭环
 
 ## E2E 矩阵
 
@@ -40,4 +40,13 @@ Python unit test 冒充。
 - 同一数据库跨至少两个 MCP 子进程恢复 Flow/ResultSet/Presentation/Selection/Job/Bundle/Archive。
 - 绑定字段、确认令牌、幂等冲突、取消、partial、无 primary、归档和 Library 关系均有失败或成功断言。
 - 测试数据只在临时目录；不产生凭据、Cookie、Token、仓库 SQLite、下载产物或网络调用。
-- 真实 OpenClaw 验收只有在 doctor/probe 和完整对话实际运行后才能标记通过。
+- OpenClaw CLI 与 MCP 发现层已通过；只有默认 Agent 完整对话和真实平台边界实际验收后，0023 才能标记完成。
+
+## 2026-08-08 当前环境复验
+
+- `openclaw --version`：`OpenClaw 2026.7.1-2 (0790d9f)`。
+- `openclaw config validate --json`：`valid=true`，无 warning。
+- `openclaw mcp status --verbose`：`education-resources` 指向当前仓库、持久 venv 和 `resource_*` filter。
+- `openclaw mcp doctor education-resources --probe`：`ok`。
+- `openclaw mcp probe education-resources --json`：13 个 Tool，`diagnostics=[]`。
+- 上述命令必须串行执行；并行执行曾出现 CLI 锁竞争式长时间无输出，不能据此误判 MCP 不可用。

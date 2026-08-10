@@ -224,7 +224,16 @@ class StorageMigrationTests(unittest.TestCase):
                         "PRAGMA table_info(resources)"
                     ).fetchall()
                 }
-            self.assertEqual([(1,), (2,), (3,), (4,), (5,)], versions)
+                outcome_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(acquisition_outcomes)"
+                    ).fetchall()
+                }
+            self.assertEqual(
+                [(version,) for version in range(1, LATEST_SCHEMA_VERSION + 1)],
+                versions,
+            )
             self.assertTrue(
                 {
                     "archive_contents",
@@ -239,6 +248,11 @@ class StorageMigrationTests(unittest.TestCase):
                     "asset_bundles",
                     "asset_bundle_items",
                     "asset_bundle_failures",
+                    "capability_readiness_snapshots",
+                    "eligibility_decisions",
+                    "download_plan_items",
+                    "job_execution_items",
+                    "acquisition_outcomes",
                 }.issubset(tables)
             )
             self.assertTrue(
@@ -254,6 +268,7 @@ class StorageMigrationTests(unittest.TestCase):
             self.assertTrue(
                 {"identity_json", "identity_rules_version"}.issubset(resource_columns)
             )
+            self.assertIn("execution_binding_digest", outcome_columns)
 
     def test_legacy_archive_is_backfilled_without_rewriting_original_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -312,7 +327,7 @@ class StorageMigrationTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM archive_contents").fetchone()[0],
                 )
                 self.assertEqual(
-                    5,
+                    LATEST_SCHEMA_VERSION,
                     connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0],
                 )
                 bundle_rows = connection.execute(
@@ -340,13 +355,13 @@ class StorageMigrationTests(unittest.TestCase):
             with closing(sqlite3.connect(database)) as connection:
                 connection.execute("DROP TABLE resource_resolutions")
                 connection.execute(
-                    "DELETE FROM schema_migrations WHERE version IN (3, 4, 5)"
+                    "DELETE FROM schema_migrations WHERE version >= 3"
                 )
                 connection.execute("PRAGMA user_version = 2")
                 connection.commit()
 
             migrated = Store(database)
-            self.assertEqual(5, migrated.schema_version())
+            self.assertEqual(LATEST_SCHEMA_VERSION, migrated.schema_version())
             with closing(sqlite3.connect(database)) as connection:
                 migration = connection.execute(
                     "SELECT name FROM schema_migrations WHERE version = 3"
@@ -386,7 +401,7 @@ class StorageMigrationTests(unittest.TestCase):
 
             migrated = Store(database)
 
-            self.assertEqual(5, migrated.schema_version())
+            self.assertEqual(LATEST_SCHEMA_VERSION, migrated.schema_version())
             result_set = migrated.get_result_set("rset_v3")
             self.assertIsNotNone(result_set)
             assert result_set is not None
@@ -491,7 +506,7 @@ class StorageMigrationTests(unittest.TestCase):
                             "2025-03-01T00:00:00+00:00",
                         ),
                     )
-                connection.execute("DELETE FROM schema_migrations WHERE version = 5")
+                connection.execute("DELETE FROM schema_migrations WHERE version >= 5")
                 connection.execute("PRAGMA user_version = 4")
 
             migrated = Store(database)
@@ -509,7 +524,7 @@ class StorageMigrationTests(unittest.TestCase):
             first_ids = [bundle["bundle_id"] for bundle in bundles]
 
             with sqlite3.connect(database) as connection:
-                connection.execute("DELETE FROM schema_migrations WHERE version = 5")
+                connection.execute("DELETE FROM schema_migrations WHERE version >= 5")
                 connection.execute("PRAGMA user_version = 4")
                 connection.commit()
             reopened = Store(database)
@@ -518,6 +533,232 @@ class StorageMigrationTests(unittest.TestCase):
             with reopened._connect() as connection:
                 self.assertEqual(2, connection.execute("SELECT COUNT(*) FROM asset_bundles").fetchone()[0])
                 self.assertEqual(3, connection.execute("SELECT COUNT(*) FROM asset_bundle_items").fetchone()[0])
+
+
+    def test_schema_version_5_adds_capability_authority_without_upgrading_legacy_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "v5.sqlite"
+            store = Store(database)
+            now = "2026-08-08T00:00:00+00:00"
+            with store.transaction(immediate=True) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO flows(
+                        flow_id, query, context_json, status, presented_version,
+                        task_version, result_version, selection_version,
+                        created_at, updated_at
+                    ) VALUES ('flow_v5', '旧计划', '{}', 'selected', 1, 1, 1, 1, ?, ?)
+                    """,
+                    (now, now),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO download_plans(
+                        plan_id, flow_id, presented_version, resource_ids_json,
+                        options_json, confirmation_token, confirmation_hash,
+                        expires_at, used, created_at, presentation_id,
+                        selection_version, selection_digest, plan_digest
+                    ) VALUES (
+                        'plan_v5', 'flow_v5', 1, '["resource_v5"]', '{}',
+                        'legacy-token', 'legacy-hash', '2099-01-01T00:00:00+00:00',
+                        0, ?, NULL, 1, 'legacy-selection-digest', 'legacy-plan-digest'
+                    )
+                    """,
+                    (now,),
+                )
+                for table in (
+                    "job_execution_items",
+                    "acquisition_outcomes",
+                    "download_plan_items",
+                    "eligibility_decisions",
+                    "capability_readiness_snapshots",
+                ):
+                    connection.execute(f"DROP TABLE {table}")
+                connection.execute("DROP INDEX IF EXISTS uq_jobs_job_plan")
+                connection.execute("DELETE FROM schema_migrations WHERE version >= 6")
+                connection.execute("PRAGMA user_version = 5")
+
+            migrated = Store(database)
+            self.assertEqual(LATEST_SCHEMA_VERSION, migrated.schema_version())
+            legacy_plan = migrated.get_plan("plan_v5")
+            self.assertIsNotNone(legacy_plan)
+            assert legacy_plan is not None
+            self.assertEqual([], legacy_plan["capability_items"])
+            self.assertIsNone(legacy_plan["capability_binding_version"])
+            self.assertIsNone(legacy_plan["authority_digest"])
+
+            with closing(sqlite3.connect(database)) as connection:
+                migrations = connection.execute(
+                    "SELECT version, name FROM schema_migrations WHERE version >= 6 "
+                    "ORDER BY version"
+                ).fetchall()
+                tables = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                }
+                indexes = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'index'"
+                    ).fetchall()
+                }
+                plan_item_foreign_keys = {
+                    row[2]
+                    for row in connection.execute(
+                        "PRAGMA foreign_key_list(download_plan_items)"
+                    ).fetchall()
+                }
+                outcome_foreign_keys = {
+                    row[2]
+                    for row in connection.execute(
+                        "PRAGMA foreign_key_list(acquisition_outcomes)"
+                    ).fetchall()
+                }
+                execution_foreign_keys = {
+                    row[2]
+                    for row in connection.execute(
+                        "PRAGMA foreign_key_list(job_execution_items)"
+                    ).fetchall()
+                }
+                outcome_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(acquisition_outcomes)"
+                    ).fetchall()
+                }
+            self.assertEqual(
+                [
+                    (6, "capability_authority_chain"),
+                    (7, "job_execution_authority"),
+                ],
+                migrations,
+            )
+            self.assertTrue(
+                {
+                    "capability_readiness_snapshots",
+                    "eligibility_decisions",
+                    "download_plan_items",
+                    "job_execution_items",
+                    "acquisition_outcomes",
+                }.issubset(tables)
+            )
+            self.assertTrue(
+                {
+                    "idx_capability_readiness_descriptor",
+                    "idx_eligibility_resource",
+                    "idx_download_plan_items_capability",
+                    "idx_acquisition_outcomes_job",
+                    "uq_jobs_job_plan",
+                    "uq_job_execution_items_position",
+                    "uq_job_execution_items_plan_binding",
+                    "uq_job_execution_items_execution_binding",
+                    "idx_job_execution_items_plan",
+                    "idx_job_execution_items_capability",
+                    "idx_job_execution_items_provider",
+                    "idx_job_execution_items_readiness",
+                }.issubset(indexes)
+            )
+            self.assertEqual(
+                {
+                    "download_plans",
+                    "resources",
+                    "capability_readiness_snapshots",
+                    "eligibility_decisions",
+                },
+                plan_item_foreign_keys,
+            )
+            self.assertEqual(
+                {"jobs", "download_plans", "resources", "asset_bundles"},
+                outcome_foreign_keys,
+            )
+            self.assertEqual(
+                {
+                    "jobs",
+                    "download_plan_items",
+                    "capability_readiness_snapshots",
+                    "eligibility_decisions",
+                },
+                execution_foreign_keys,
+            )
+            self.assertIn("execution_binding_digest", outcome_columns)
+
+            with self.assertRaisesRegex(RuntimeError, "capability_binding_missing"):
+                migrated.reserve_job(
+                    "plan_v5",
+                    "legacy-hash",
+                    "legacy-start-idempotency",
+                    "legacy-start-request-hash",
+                    "2026-08-08T01:00:00+00:00",
+                    bindings={
+                        "presentation_id": None,
+                        "presented_version": 1,
+                        "selection_version": 1,
+                        "selection_digest": "legacy-selection-digest",
+                        "plan_digest": "legacy-plan-digest",
+                        "authority_digest": None,
+                    },
+                )
+
+
+    def test_schema_version_6_adds_execution_authority_without_fabricating_legacy_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "v6.sqlite"
+            create_legacy_database(database)
+            store = Store(database)
+            with store.transaction(immediate=True) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO acquisition_outcomes(
+                        outcome_id, job_id, plan_id, resource_id,
+                        plan_binding_digest, planned_scope, planned_strategy,
+                        planned_provider_id, planned_provider_version, status,
+                        asset_ids_json, metadata_json, started_at, outcome_digest
+                    ) VALUES (
+                        'outcome_legacy_v6', 'job_old', 'plan_old', 'res_old', ?,
+                        'primary_resource', 'direct_file', 'legacy-provider', '1.0.0',
+                        'running', '[]', '{}', '2025-01-02T03:04:05+00:00',
+                        'legacy-outcome-digest'
+                    )
+                    """,
+                    ("b" * 64,),
+                )
+                connection.execute("DROP TABLE job_execution_items")
+                connection.execute("DROP INDEX uq_jobs_job_plan")
+                connection.execute(
+                    "ALTER TABLE acquisition_outcomes "
+                    "DROP COLUMN execution_binding_digest"
+                )
+                connection.execute(
+                    "DELETE FROM schema_migrations WHERE version = 7"
+                )
+                connection.execute("PRAGMA user_version = 6")
+
+            migrated = Store(database)
+            self.assertEqual(LATEST_SCHEMA_VERSION, migrated.schema_version())
+            with migrated._connect() as connection:
+                migration = connection.execute(
+                    "SELECT name FROM schema_migrations WHERE version = 7"
+                ).fetchone()
+                execution_count = connection.execute(
+                    "SELECT COUNT(*) FROM job_execution_items WHERE job_id = 'job_old'"
+                ).fetchone()[0]
+                outcome = connection.execute(
+                    """
+                    SELECT execution_binding_digest, outcome_digest
+                    FROM acquisition_outcomes
+                    WHERE outcome_id = 'outcome_legacy_v6'
+                    """
+                ).fetchone()
+            self.assertEqual(("job_execution_authority",), tuple(migration))
+            self.assertEqual(0, execution_count)
+            self.assertIsNone(outcome["execution_binding_digest"])
+            self.assertEqual("legacy-outcome-digest", outcome["outcome_digest"])
+            with self.assertRaisesRegex(RuntimeError, "execution_binding_missing"):
+                migrated.get_job_execution_items("job_old")
+            with self.assertRaisesRegex(RuntimeError, "execution_binding_missing"):
+                migrated.start_acquisition_outcome("job_old", "res_old")
 
 
 if __name__ == "__main__":

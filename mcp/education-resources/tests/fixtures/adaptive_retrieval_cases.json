@@ -1,113 +1,1296 @@
 [
   {
-    "name": "exploration_starts_with_replan",
-    "task": {"goal": {"topic": "太阳系入门"}},
-    "rounds": [],
-    "expected": "Replan"
-  },
-  {
     "name": "missing_goal_clarifies",
-    "task": {"goal": {"topic": ""}},
+    "task": {
+      "goal": ""
+    },
     "rounds": [],
-    "expected": "Clarify"
+    "expected": "Clarify",
+    "expected_clarify": [
+      "goal"
+    ]
   },
   {
     "name": "curriculum_sync_missing_scope_clarifies",
-    "task": {"goal": {"topic": "教材同步练习"}},
+    "task": {
+      "goal": {
+        "topic": "教材同步练习"
+      }
+    },
     "rounds": [],
-    "expected": "Clarify"
+    "expected": "Clarify",
+    "expected_clarify": [
+      "grade_or_stage",
+      "volume_or_edition"
+    ]
   },
   {
     "name": "conflicting_constraints_clarify",
-    "task": {"goal": {"topic": "数学资料"}, "conflicts": ["免费和付费同时必须"]},
+    "task": {
+      "goal": "数学资料",
+      "conflicts": [
+        "免费和付费同时必须"
+      ]
+    },
     "rounds": [],
-    "expected": "Clarify"
+    "expected": "Clarify",
+    "expected_clarify": [
+      "conflicting_constraints"
+    ]
   },
   {
-    "name": "one_available_article_can_present",
-    "task": {"goal": {"topic": "恐龙化石"}},
-    "rounds": [{"round": 1, "candidates": [{"title": "恐龙化石图解", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/fossil"}]}],
-    "expected": "Present"
+    "name": "title_only_without_facts_does_not_present",
+    "task": {
+      "goal": "太阳系入门"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-title-only",
+            "facts": {
+              "title": "太阳系图解"
+            }
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_inspect": [
+      "r-title-only"
+    ]
   },
   {
-    "name": "parent_reference_uses_resource_target",
-    "task": {"goal": {"topic": "亲子阅读方法"}, "user_role": "child", "resource_target": "parent"},
-    "rounds": [{"round": 1, "candidates": [{"title": "家长阅读指导", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/parent", "resource_target_match": true}]}],
-    "expected": "Present"
+    "name": "availability_missing_is_unknown",
+    "task": {
+      "goal": "恐龙化石"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-availability-unknown",
+            "displayable": true,
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-availability-unknown",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_inspect": [
+      "r-availability-unknown"
+    ]
   },
   {
-    "name": "multimodal_forms_covered",
-    "task": {"goal": {"topic": "太阳系"}, "required_forms": ["article", "video"]},
-    "rounds": [{"round": 1, "candidates": [{"title": "太阳系文章", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/solar"}, {"title": "太阳系视频", "platform": "bilibili", "resource_type": "video", "source_url": "https://www.bilibili.com/video/BV1Golden"}]}],
-    "expected": "Present"
+    "name": "missing_semantic_review_is_unknown",
+    "task": {
+      "goal": "亲子阅读"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-no-review",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_inspect": [
+      "r-no-review"
+    ]
   },
   {
-    "name": "missing_required_form_replans",
-    "task": {"goal": {"topic": "太阳系视频"}, "required_forms": ["video"]},
-    "rounds": [{"round": 1, "candidates": [{"title": "只有文章", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/article-only"}]}],
-    "expected": "Replan"
-  },
-  {
-    "name": "inspection_gap_replans",
-    "task": {"goal": {"topic": "可打印实验单"}, "inspection_required": true},
-    "rounds": [{"round": 1, "candidates": [{"title": "实验单候选", "platform": "generic", "resource_type": "document", "source_url": "https://example.test/sheet"}]}],
-    "expected": "Replan"
-  },
-  {
-    "name": "source_failure_replans",
-    "task": {"goal": {"topic": "古诗文讲解"}},
-    "rounds": [{"round": 1, "source_results": [{"source": "generic", "status": "failed", "failure_count": 1}]}],
-    "expected": "Replan"
-  },
-  {
-    "name": "authentication_boundary_clarifies",
-    "task": {"goal": {"topic": "课程视频"}},
-    "rounds": [{"round": 1, "source_results": [{"source": "smartedu", "status": "auth_required", "failure_count": 1}]}],
-    "expected": "Clarify"
-  },
-  {
-    "name": "policy_boundary_stops_with_gap",
-    "task": {"goal": {"topic": "受限资料"}},
-    "rounds": [{"round": 1, "source_results": [{"source": "generic", "status": "policy_blocked", "failure_count": 1}]}],
-    "expected": "StopWithGap"
-  },
-  {
-    "name": "unsupported_boundary_stops_with_gap",
-    "task": {"goal": {"topic": "不支持的平台资源"}},
-    "rounds": [{"round": 1, "source_results": [{"source": "unknown", "status": "unsupported", "failure_count": 1}]}],
-    "expected": "StopWithGap"
-  },
-  {
-    "name": "duplicates_do_not_inflate_unique_count",
-    "task": {"goal": {"topic": "重复候选"}},
-    "rounds": [{"round": 1, "candidates": [{"title": "首见", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/same#one"}, {"title": "重复", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/same#two"}]}],
+    "name": "search_only_semantic_pass_can_present",
+    "task": {
+      "goal": "太阳系入门"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "factual_coverage": {
+          "status": "covered",
+          "candidate_count": 1,
+          "platform_count": 1,
+          "source_families": [
+            "generic"
+          ]
+        },
+        "candidates": [
+          {
+            "resource_id": "r-search-pass",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-search-pass",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only",
+            "reasons": [
+              "摘要与目标一致"
+            ]
+          }
+        ],
+        "information_gain": {
+          "new_unique_candidates": 1,
+          "observed": true
+        }
+      }
+    ],
     "expected": "Present",
-    "expected_unique": 1,
-    "expected_duplicates": 1
+    "expected_displayable": [
+      "r-search-pass"
+    ],
+    "expected_unique": 1
   },
   {
-    "name": "two_no_gain_rounds_stop",
-    "task": {"goal": {"topic": "冷门主题"}},
-    "rounds": [{"round": 1, "candidates": []}, {"round": 2, "candidates": []}],
+    "name": "inspected_semantic_pass_can_present",
+    "task": {
+      "goal": "可打印实验单",
+      "requires_inspection": true
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-inspected-pass",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "document",
+            "source_family": "generic",
+            "inspection_status": "succeeded"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-inspected-pass",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "inspected"
+          }
+        ],
+        "information_gain": {
+          "new_unique_candidates": 1,
+          "observed": true
+        }
+      }
+    ],
+    "expected": "Present",
+    "expected_displayable": [
+      "r-inspected-pass"
+    ]
+  },
+  {
+    "name": "wrong_resource_target_does_not_present",
+    "task": {
+      "goal": "儿童实验",
+      "resource_target": "child"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-parent-only",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-parent-only",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "fail",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "unknown_resource_target_does_not_block",
+    "task": {
+      "goal": "儿童实验"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-target-unknown",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-target-unknown",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Present"
+  },
+  {
+    "name": "hard_constraint_unknown_replans",
+    "task": {
+      "goal": "练习题",
+      "constraints": [
+        {
+          "kind": "must",
+          "value": "可打印"
+        }
+      ]
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-constraint-unknown",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "document",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-constraint-unknown",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "hard_constraint_pass_presents",
+    "task": {
+      "goal": "可打印练习题",
+      "constraints": [
+        {
+          "kind": "must",
+          "value": "可打印"
+        }
+      ]
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-constraint-pass",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "document",
+            "source_family": "generic",
+            "constraint_facts": {
+              "printable": "pass"
+            }
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-constraint-pass",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "pass",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Present"
+  },
+  {
+    "name": "required_form_missing_replans",
+    "task": {
+      "goal": "太阳系视频",
+      "required_forms": [
+        "video"
+      ]
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-article-only",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-article-only",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "required_form_satisfied_presents",
+    "task": {
+      "goal": "太阳系视频",
+      "required_forms": [
+        "video"
+      ]
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-video",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "video",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-video",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Present"
+  },
+  {
+    "name": "single_source_comparison_replans",
+    "task": {
+      "goal": "比较数学资源",
+      "compare_sources": true,
+      "selection_min": 2
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-source-a1",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "source-a"
+          },
+          {
+            "resource_id": "r-source-a2",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "source-a"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-source-a1",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          },
+          {
+            "resource_id": "r-source-a2",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "multiple_source_comparison_presents",
+    "task": {
+      "goal": "比较数学资源",
+      "compare_sources": true,
+      "selection_min": 2
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-source-a",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "source-a"
+          },
+          {
+            "resource_id": "r-source-b",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "source-b"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-source-a",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          },
+          {
+            "resource_id": "r-source-b",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Present",
+    "expected_displayable": [
+      "r-source-a",
+      "r-source-b"
+    ]
+  },
+  {
+    "name": "inspection_required_without_inspection_replans",
+    "task": {
+      "goal": "资源本体",
+      "requires_inspection": true
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-needs-inspection",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "document",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-needs-inspection",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "weak",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_inspect": [
+      "r-needs-inspection"
+    ]
+  },
+  {
+    "name": "landing_page_only_does_not_present",
+    "task": {
+      "goal": "公开课程",
+      "requires_inspection": true
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-landing-page",
+            "displayable": false,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-landing-page",
+            "relevance": "pass",
+            "usefulness": "weak",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "weak",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_inspect": [
+      "r-landing-page"
+    ]
+  },
+  {
+    "name": "inspection_proves_body_irrelevant",
+    "task": {
+      "goal": "可打印实验单",
+      "requires_inspection": true
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-inspection-negative",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "document",
+            "source_family": "generic",
+            "inspection_status": "succeeded"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-inspection-negative",
+            "relevance": "fail",
+            "usefulness": "fail",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "fail",
+            "evidence_level": "inspected",
+            "reasons": [
+              "正文并非实验单"
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "auth_required_clarifies",
+    "task": {
+      "goal": "课程视频"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "source_statuses": [
+          "auth_required"
+        ],
+        "factual_coverage": {
+          "status": "empty",
+          "failure_codes": [
+            "AUTH_REQUIRED"
+          ]
+        }
+      }
+    ],
+    "expected": "Clarify",
+    "expected_clarify": [],
+    "expected_gap_causes": {
+      "auth_required": "AUTH_REQUIRED"
+    }
+  },
+  {
+    "name": "policy_blocked_stops_with_gap",
+    "task": {
+      "goal": "受限资料"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "source_statuses": [
+          "policy_blocked"
+        ],
+        "factual_coverage": {
+          "status": "empty",
+          "failure_codes": [
+            "POLICY"
+          ]
+        }
+      }
+    ],
+    "expected": "StopWithGap",
+    "expected_gap_causes": {
+      "policy_blocked": "POLICY"
+    }
+  },
+  {
+    "name": "unsupported_stops_with_gap",
+    "task": {
+      "goal": "不支持的平台资源"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "source_statuses": [
+          "unsupported"
+        ],
+        "factual_coverage": {
+          "status": "empty",
+          "failure_codes": [
+            "FEATURE_NOT_SUPPORTED"
+          ]
+        }
+      }
+    ],
+    "expected": "StopWithGap",
+    "expected_gap_causes": {
+      "unsupported": "FEATURE_NOT_SUPPORTED"
+    }
+  },
+  {
+    "name": "two_zero_gain_rounds_stop_with_gap",
+    "task": {
+      "goal": "冷门主题"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "factual_coverage": {
+          "status": "empty",
+          "candidate_count": 0
+        },
+        "information_gain": {
+          "new_unique_candidates": 0,
+          "observed": true
+        }
+      },
+      {
+        "round": 2,
+        "factual_coverage": {
+          "status": "empty",
+          "candidate_count": 0
+        },
+        "information_gain": {
+          "new_unique_candidates": 0,
+          "observed": true
+        }
+      }
+    ],
     "expected": "StopWithGap"
   },
   {
     "name": "comprehensive_budget_is_four",
-    "task": {"goal": {"topic": "综合检索"}, "mode": "comprehensive"},
-    "rounds": [{"round": 1, "candidates": []}, {"round": 2, "candidates": []}, {"round": 3, "candidates": []}, {"round": 4, "candidates": []}],
+    "task": {
+      "goal": "综合检索",
+      "mode": "comprehensive"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "information_gain": {
+          "new_unique_candidates": 0,
+          "observed": true
+        }
+      },
+      {
+        "round": 2,
+        "information_gain": {
+          "new_unique_candidates": 0,
+          "observed": true
+        }
+      },
+      {
+        "round": 3,
+        "information_gain": {
+          "new_unique_candidates": 0,
+          "observed": true
+        }
+      },
+      {
+        "round": 4,
+        "information_gain": {
+          "new_unique_candidates": 0,
+          "observed": true
+        }
+      }
+    ],
     "expected": "StopWithGap",
     "expected_max_rounds": 4
   },
   {
-    "name": "hard_constraint_unknown_replans",
-    "task": {"goal": {"topic": "练习题"}, "constraints": [{"kind": "must", "value": "可打印"}]},
-    "rounds": [{"round": 1, "candidates": [{"title": "练习题候选", "platform": "generic", "resource_type": "document", "source_url": "https://example.test/practice"}]}],
+    "name": "version_uncertain_replans",
+    "task": {
+      "goal": "指定版本教材"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-version-unknown",
+            "displayable": true,
+            "availability": "unknown",
+            "resource_type": "book",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-version-unknown",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
     "expected": "Replan"
   },
   {
-    "name": "user_role_does_not_imply_resource_target_fit",
-    "task": {"goal": {"topic": "儿童实验"}, "user_role": "parent", "resource_target": "child"},
-    "rounds": [{"round": 1, "candidates": [{"title": "实验候选", "platform": "generic", "resource_type": "article", "source_url": "https://example.test/experiment"}]}],
+    "name": "enough_candidates_without_semantics_replans",
+    "task": {
+      "goal": "数学资料",
+      "selection_min": 3
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-many-1",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          },
+          {
+            "resource_id": "r-many-2",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          },
+          {
+            "resource_id": "r-many-3",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ]
+      }
+    ],
     "expected": "Replan"
+  },
+  {
+    "name": "explicit_machine_facts_do_not_replace_semantics",
+    "task": {
+      "goal": "深度阅读",
+      "selection_min": 2
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "factual_coverage": {
+          "status": "covered",
+          "candidate_count": 2,
+          "platform_count": 2,
+          "source_families": [
+            "a",
+            "b"
+          ]
+        },
+        "candidates": [
+          {
+            "resource_id": "r-fact-1",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "book",
+            "source_family": "a"
+          },
+          {
+            "resource_id": "r-fact-2",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "book",
+            "source_family": "b"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-fact-1",
+            "relevance": "unknown",
+            "usefulness": "unknown",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "unknown",
+            "evidence_level": "unknown"
+          },
+          {
+            "resource_id": "r-fact-2",
+            "relevance": "unknown",
+            "usefulness": "unknown",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "unknown",
+            "evidence_level": "unknown"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "explicit_source_failure_does_not_hide_valid_candidate",
+    "task": {
+      "goal": "天文文章"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "source_statuses": [
+          "failed"
+        ],
+        "factual_coverage": {
+          "status": "partial",
+          "failure_codes": [
+            "TIMEOUT"
+          ]
+        },
+        "candidates": [
+          {
+            "resource_id": "r-valid-with-failure",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-valid-with-failure",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Present"
+  },
+  {
+    "name": "required_source_missing_replans",
+    "task": {
+      "goal": "指定来源资料",
+      "required_sources": [
+        "nlc"
+      ]
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-wrong-source",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-wrong-source",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "selection_min_requires_multiple_semantic_passes",
+    "task": {
+      "goal": "两份资料",
+      "selection_min": 2
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-selection-pass",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          },
+          {
+            "resource_id": "r-selection-weak",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-selection-pass",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          },
+          {
+            "resource_id": "r-selection-weak",
+            "relevance": "weak",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan"
+  },
+  {
+    "name": "candidate_id_review_mismatch_rejected",
+    "task": {
+      "goal": "科学"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-real",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article",
+            "source_family": "generic"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-forged",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      }
+    ],
+    "expected_error": "semantic review"
+  },
+  {
+    "name": "inspection_partial_remains_gap",
+    "task": {
+      "goal": "资源本体",
+      "requires_inspection": true
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-partial-inspection",
+            "displayable": true,
+            "availability": "partial",
+            "resource_type": "document",
+            "source_family": "generic",
+            "inspection_status": "partial"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-partial-inspection",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "inspected"
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_inspect": [
+      "r-partial-inspection"
+    ]
+  },
+  {
+    "name": "missing_gain_rounds_are_unknown_not_zero",
+    "task": {
+      "goal": "冷门主题"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "factual_coverage": {
+          "status": "empty"
+        }
+      },
+      {
+        "round": 2,
+        "factual_coverage": {
+          "status": "empty"
+        }
+      }
+    ],
+    "expected": "Replan",
+    "expected_no_gain_streak": 0
+  },
+  {
+    "name": "explicit_zero_gain_rounds_stop",
+    "task": {
+      "goal": "冷门主题"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "information_gain": {
+          "observed": true
+        }
+      },
+      {
+        "round": 2,
+        "information_gain": {
+          "observed": true
+        }
+      }
+    ],
+    "expected": "StopWithGap",
+    "expected_no_gain_streak": 2
+  },
+  {
+    "name": "unknown_gain_breaks_observed_zero_streak",
+    "task": {
+      "goal": "冷门主题",
+      "max_rounds": 4
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "information_gain": {
+          "observed": true
+        }
+      },
+      {
+        "round": 2
+      },
+      {
+        "round": 3,
+        "information_gain": {
+          "observed": true
+        }
+      }
+    ],
+    "expected": "Replan",
+    "expected_no_gain_streak": 1
+  },
+  {
+    "name": "candidate_requires_auth_clarifies",
+    "task": {
+      "goal": "需要授权的资源"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-candidate-auth",
+            "displayable": true,
+            "availability": "requires_auth",
+            "resource_type": "document"
+          }
+        ]
+      }
+    ],
+    "expected": "Clarify",
+    "expected_gap_contains": [
+      "availability:r-candidate-auth"
+    ],
+    "expected_gap_causes": {
+      "availability:r-candidate-auth": "AUTH_REQUIRED"
+    }
+  },
+  {
+    "name": "candidate_policy_blocked_stops_with_gap",
+    "task": {
+      "goal": "受策略限制的资源"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-candidate-policy",
+            "displayable": true,
+            "availability": "policy_blocked",
+            "resource_type": "document"
+          }
+        ]
+      }
+    ],
+    "expected": "StopWithGap",
+    "expected_gap_contains": [
+      "availability:r-candidate-policy"
+    ],
+    "expected_gap_causes": {
+      "availability:r-candidate-policy": "POLICY"
+    }
+  },
+  {
+    "name": "candidate_unsupported_stops_with_gap",
+    "task": {
+      "goal": "能力未支持的资源"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-candidate-unsupported",
+            "displayable": true,
+            "availability": "unsupported",
+            "resource_type": "document"
+          }
+        ]
+      }
+    ],
+    "expected": "StopWithGap",
+    "expected_gap_contains": [
+      "availability:r-candidate-unsupported"
+    ],
+    "expected_gap_causes": {
+      "availability:r-candidate-unsupported": "FEATURE_NOT_SUPPORTED"
+    }
+  },
+  {
+    "name": "latest_explicit_displayable_false_is_authoritative",
+    "task": {
+      "goal": "太阳系入门"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "candidates": [
+          {
+            "resource_id": "r-displayable-latest",
+            "displayable": true,
+            "availability": "available",
+            "resource_type": "article"
+          }
+        ],
+        "semantic_reviews": [
+          {
+            "resource_id": "r-displayable-latest",
+            "relevance": "pass",
+            "usefulness": "pass",
+            "target_fit": "unknown",
+            "constraint_fit": "unknown",
+            "substantive": "pass",
+            "evidence_level": "search_only"
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "candidates": [
+          {
+            "resource_id": "r-displayable-latest",
+            "displayable": false
+          }
+        ]
+      }
+    ],
+    "expected": "Replan",
+    "expected_displayable": [],
+    "expected_gap_contains": [
+      "displayable:r-displayable-latest"
+    ]
   }
 ]

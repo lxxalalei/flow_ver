@@ -1,0 +1,458 @@
+{
+  "fixture_version": "capability-truth-negative-v1",
+  "cases": [
+    {
+      "id": "search_only_cannot_prepare_primary",
+      "layer": "resolution",
+      "candidate": {
+        "platform": "generic",
+        "title": "仅有搜索摘要的候选",
+        "resource_type": "book",
+        "source_url": "https://example.com/search-only",
+        "summary": "搜索结果标题和摘要，不含已验证的资源表示。"
+      },
+      "resolution": {
+        "availability": "unknown",
+        "scope": "metadata",
+        "representation": null
+      },
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["resolution_id", "representation_id", "descriptor_digest", "readiness_snapshot_id", "eligibility_decision_id", "source_fingerprint"]
+      }
+    },
+    {
+      "id": "landing_only_cannot_prepare_primary",
+      "layer": "resolution",
+      "candidate": {
+        "platform": "generic",
+        "title": "只有落地页的候选",
+        "resource_type": "book",
+        "source_url": "https://example.com/landing-page",
+        "summary": "详情或落地页，不是具体文件。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "landing_page",
+        "representation": {
+          "kind": "webpage",
+          "container": "html",
+          "mime_type": "text/html",
+          "role": "landing",
+          "materializable": false,
+          "requires_auth": false
+        }
+      },
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["resolution_id", "representation_id", "planned_scope", "descriptor_digest", "readiness_snapshot_id", "eligibility_decision_id", "source_fingerprint"]
+      }
+    },
+    {
+      "id": "concrete_primary_requires_full_capability_chain",
+      "layer": "prepare",
+      "candidate": {
+        "platform": "generic",
+        "title": "已验证 PDF 主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/verified-primary.pdf",
+        "summary": "受控 fixture 中唯一允许进入 primary 计划的具体文件。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "expected": {
+        "prepare": "prepared",
+        "start": "allowed",
+        "primary_allowed": true,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["resolution_id", "representation_id", "planned_scope", "descriptor_id", "descriptor_digest", "provider_id", "provider_version", "readiness_snapshot_id", "eligibility_decision_id", "source_fingerprint"]
+      }
+    },
+    {
+      "id": "missing_provider_is_not_generic_capability",
+      "layer": "readiness",
+      "candidate": {
+        "platform": "generic",
+        "title": "声明能力但 Provider 缺失",
+        "resource_type": "book",
+        "source_url": "https://example.com/missing-provider.pdf",
+        "summary": "候选有具体表示，但部署未加载声明的 Provider。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "runtime": {"provider_status": "missing"},
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["descriptor_id", "descriptor_digest", "readiness_snapshot_id", "provider_id"]
+      }
+    },
+    {
+      "id": "provider_failure_does_not_fall_back_to_generic",
+      "layer": "router",
+      "candidate": {
+        "platform": "generic",
+        "title": "专用 Provider 失败的主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/provider-failure.pdf",
+        "summary": "专用 Provider 失败必须保留真实失败。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "runtime": {"provider_status": "fails"},
+      "expected": {
+        "prepare": "prepared",
+        "start": "rejected",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["provider_id", "provider_version", "readiness_snapshot_id", "planned_scope"]
+      }
+    },
+    {
+      "id": "auth_required_blocks_prepare",
+      "layer": "eligibility",
+      "candidate": {
+        "platform": "generic",
+        "title": "需要登录的主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/auth-required.pdf",
+        "summary": "技术上存在文件，但当前 action 需要合法授权。"
+      },
+      "resolution": {
+        "availability": "auth_required",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": true
+        }
+      },
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["eligibility_decision_id", "eligibility_status", "eligibility_expires_at"]
+      }
+    },
+    {
+      "id": "policy_blocked_blocks_prepare",
+      "layer": "eligibility",
+      "candidate": {
+        "platform": "generic",
+        "title": "被策略阻断的候选",
+        "resource_type": "book",
+        "source_url": "https://example.com/policy-blocked.pdf",
+        "summary": "当前部署策略不允许该 action。"
+      },
+      "resolution": {
+        "availability": "policy_blocked",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["eligibility_decision_id", "eligibility_status", "policy_version"]
+      }
+    },
+    {
+      "id": "descriptor_expiry_requires_reprepare",
+      "layer": "revalidation",
+      "candidate": {
+        "platform": "generic",
+        "title": "Descriptor 已过期的主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/descriptor-expiry.pdf",
+        "summary": "Prepare 后 descriptor 证据过期。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "mutation": {"kind": "descriptor_expired"},
+      "expected": {
+        "prepare": "prepared",
+        "start": "rejected",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["descriptor_id", "descriptor_digest", "descriptor_expires_at", "planned_scope"]
+      }
+    },
+    {
+      "id": "readiness_expiry_requires_reprepare",
+      "layer": "revalidation",
+      "candidate": {
+        "platform": "generic",
+        "title": "Readiness 已过期的主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/readiness-expiry.pdf",
+        "summary": "Prepare 后 provider readiness snapshot 过期。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "mutation": {"kind": "readiness_expired"},
+      "expected": {
+        "prepare": "prepared",
+        "start": "rejected",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["readiness_snapshot_id", "readiness_status", "readiness_expires_at", "provider_id", "provider_version"]
+      }
+    },
+    {
+      "id": "provider_version_drift_requires_reprepare",
+      "layer": "revalidation",
+      "candidate": {
+        "platform": "generic",
+        "title": "Provider 版本漂移的主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/provider-drift.pdf",
+        "summary": "Prepare 后 Provider 版本与绑定版本不一致。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "mutation": {"kind": "provider_version_drift"},
+      "expected": {
+        "prepare": "prepared",
+        "start": "rejected",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["provider_id", "provider_version", "readiness_snapshot_id", "descriptor_digest"]
+      }
+    },
+    {
+      "id": "source_fingerprint_drift_requires_reprepare",
+      "layer": "revalidation",
+      "candidate": {
+        "platform": "generic",
+        "title": "来源指纹漂移的主文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/source-before.pdf",
+        "summary": "Prepare 后来源、表示或文件身份发生变化。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "mutation": {"kind": "source_fingerprint_drift", "source_url": "https://example.com/source-after.pdf"},
+      "expected": {
+        "prepare": "prepared",
+        "start": "rejected",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["resolution_id", "representation_id", "source_fingerprint", "descriptor_digest"]
+      }
+    },
+    {
+      "id": "implicit_generic_fallback_is_forbidden",
+      "layer": "router",
+      "candidate": {
+        "platform": "generic",
+        "title": "没有声明专用 Provider 的具体文件",
+        "resource_type": "book",
+        "source_url": "https://example.com/implicit-fallback.pdf",
+        "summary": "不存在 provider binding 时不可由 generic direct 接管。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "runtime": {"provider_status": "undeclared"},
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["descriptor_id", "provider_id", "readiness_snapshot_id"]
+      }
+    },
+    {
+      "id": "annas_libgen_landing_is_not_concrete_primary",
+      "layer": "resolution",
+      "candidate": {
+        "platform": "annas-archive",
+        "title": "Anna/Libgen 元数据或镜像落地页",
+        "resource_type": "book",
+        "source_url": "https://annas-archive.gl/md5/0123456789abcdef0123456789abcdef",
+        "summary": "有 MD5/元数据和落地页，不等于已验证的具体主文件。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "landing_page",
+        "representation": {
+          "kind": "webpage",
+          "container": "html",
+          "mime_type": "text/html",
+          "role": "landing",
+          "materializable": false,
+          "requires_auth": false,
+          "rights_hint": "metadata or landing only"
+        }
+      },
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["representation_id", "planned_scope", "descriptor_digest", "eligibility_decision_id", "source_fingerprint"]
+      }
+    },
+    {
+      "id": "scope_escalation_from_landing_to_primary_is_rejected",
+      "layer": "prepare",
+      "candidate": {
+        "platform": "generic",
+        "title": "尝试把 landing 升级为 primary",
+        "resource_type": "book",
+        "source_url": "https://example.com/scope-escalation",
+        "summary": "用户请求文件不能把已有 landing evidence 升级为 primary。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "landing_page",
+        "representation": {
+          "kind": "webpage",
+          "container": "html",
+          "mime_type": "text/html",
+          "role": "landing",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "request": {"requested_scope": "primary_resource"},
+      "expected": {
+        "prepare": "rejected",
+        "start": "not_reached",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["representation_id", "planned_scope", "source_fingerprint", "eligibility_decision_id"]
+      }
+    },
+    {
+      "id": "legacy_plan_without_capability_bindings_is_not_executable",
+      "layer": "migration",
+      "candidate": {
+        "platform": "generic",
+        "title": "旧版无能力绑定计划",
+        "resource_type": "book",
+        "source_url": "https://example.com/legacy-plan.pdf",
+        "summary": "旧 Plan 只能诊断或兼容读取，不能变成可执行下载。"
+      },
+      "resolution": {
+        "availability": "available",
+        "scope": "primary_resource",
+        "representation": {
+          "kind": "document",
+          "container": "pdf",
+          "mime_type": "application/pdf",
+          "role": "primary",
+          "materializable": true,
+          "requires_auth": false
+        }
+      },
+      "legacy_plan": {"capability_bindings": "missing"},
+      "expected": {
+        "prepare": "prepared",
+        "start": "rejected",
+        "primary_allowed": false,
+        "generic_fallback": "forbidden",
+        "required_bindings": ["descriptor_digest", "readiness_snapshot_id", "eligibility_decision_id", "representation_id", "source_fingerprint"]
+      }
+    }
+  ]
+}

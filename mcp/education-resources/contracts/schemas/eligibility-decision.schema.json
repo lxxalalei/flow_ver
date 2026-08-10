@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/eligibility-decision.schema.json",
+  "title": "Education resource policy and rights eligibility decision",
+  "description": "A server-generated decision for one candidate representation and action. An eligible decision means the current policy permits an attempt; it does not guarantee network success or establish copyright ownership.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "eligibility_id",
+    "decision_version",
+    "decision_digest",
+    "resource_id",
+    "representation_id",
+    "action",
+    "status",
+    "policy_id",
+    "policy_version",
+    "rule_ids",
+    "reason",
+    "evaluated_at",
+    "expires_at",
+    "evidence"
+  ],
+  "properties": {
+    "contract_version": {
+      "$ref": "common.schema.json#/$defs/contract_version"
+    },
+    "eligibility_id": {
+      "$ref": "common.schema.json#/$defs/eligibility_id"
+    },
+    "decision_id": {
+      "$ref": "common.schema.json#/$defs/decision_id"
+    },
+    "decision_version": {
+      "$ref": "common.schema.json#/$defs/component_version"
+    },
+    "decision_digest": {
+      "$ref": "common.schema.json#/$defs/canonical_digest"
+    },
+    "resource_id": {
+      "$ref": "common.schema.json#/$defs/resource_id"
+    },
+    "representation_id": {
+      "$ref": "common.schema.json#/$defs/representation_id"
+    },
+    "action": {
+      "$ref": "common.schema.json#/$defs/eligibility_action"
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/eligibility_status"
+    },
+    "capability_ref": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/capability_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "policy_version": {
+      "$ref": "common.schema.json#/$defs/component_version"
+    },
+    "rule_ids": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9_.-]*$"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "reason_code": {
+      "$ref": "../error-codes.json#/$defs/error_code"
+    },
+    "evaluated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "revalidation_required": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "reference",
+        "observed_at"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "capability",
+            "readiness",
+            "resolution",
+            "representation",
+            "session",
+            "policy"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?:cap_|ready_|resolve_|repr_|elig_|policy_|session_)"
+        },
+        "observed_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "digest": {
+          "$ref": "common.schema.json#/$defs/canonical_digest"
+        }
+      }
+    }
+  }
+}

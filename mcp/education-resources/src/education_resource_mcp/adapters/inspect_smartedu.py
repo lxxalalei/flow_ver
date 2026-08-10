@@ -38,6 +38,12 @@ class SmartEduInspector(_PlatformWebInspector):
     platform_id = "smartedu"
     inspector_id = "smartedu"
     version = INSPECTOR_VERSION
+    supported_scopes = (
+        "primary_resource",
+        "representation",
+        "landing_page",
+        "metadata",
+    )
     host_suffixes = ("smartedu.cn", "eduyun.cn")
     metadata_allowlist = (
         "content_id",

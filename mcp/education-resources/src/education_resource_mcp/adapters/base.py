@@ -101,6 +101,19 @@ class AdapterDescriptor:
     auth_mode: str
     auth_kind: str
     source_traits: tuple[str, ...]
+    descriptor_id: str | None = None
+    descriptor_version: str | None = None
+    descriptor_digest: str | None = None
+    registry_version: str | None = None
+    capability_scope: tuple[str, ...] = ()
+    provider_id: str | None = None
+    provider_version: str | None = None
+    provider_scope: tuple[str, ...] = ()
+    inspector_id: str | None = None
+    inspector_version: str | None = None
+    inspector_scope: tuple[str, ...] = ()
+    representations: tuple[Mapping[str, Any], ...] = ()
+    legacy_descriptor: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "platform_id", _require_text(self.platform_id, "platform_id"))
@@ -112,6 +125,19 @@ class AdapterDescriptor:
         object.__setattr__(self, "source_traits", _immutable_text_tuple(self.source_traits, "source_traits"))
         object.__setattr__(self, "auth_mode", _require_text(self.auth_mode, "auth_mode"))
         object.__setattr__(self, "auth_kind", _require_text(self.auth_kind, "auth_kind"))
+        for field_name in ("descriptor_id", "descriptor_version", "descriptor_digest", "registry_version", "provider_id", "provider_version", "inspector_id", "inspector_version"):
+            value = getattr(self, field_name)
+            if value is not None:
+                object.__setattr__(self, field_name, _require_text(value, field_name))
+        for field_name in ("capability_scope", "provider_scope", "inspector_scope"):
+            value = getattr(self, field_name)
+            if isinstance(value, (str, bytes, bytearray)):
+                raise AdapterDescriptorError(f"{field_name} must be a sequence of strings")
+            values = tuple(_require_text(item, f"{field_name}[{index}]") for index, item in enumerate(value))
+            if len(set(values)) != len(values):
+                raise AdapterDescriptorError(f"{field_name} must not contain duplicates")
+            object.__setattr__(self, field_name, values)
+        object.__setattr__(self, "representations", tuple(_freeze_value(item, f"representations[{index}]") for index, item in enumerate(self.representations)))
 
         capabilities = _immutable_mapping(self.capabilities, "capabilities")
         if not capabilities:
@@ -154,6 +180,51 @@ class AdapterDescriptor:
         acquisition = entry["acquisition"]
         if not isinstance(acquisition, Mapping) or "strategies" not in acquisition:
             raise AdapterDescriptorError("registry entry acquisition must contain strategies")
+        descriptor_values: dict[str, Any] = {}
+        # Retrieval registry 1.1 fields are normalized by the registry
+        # snapshot helper.  Import lazily to keep this low-level adapter
+        # module usable by legacy fixtures and avoid an import cycle.
+        try:
+            from ..retrieval.registry import PlatformRegistryError, _descriptor_from_entry
+
+            registry_version = str(
+                entry.get("registry_version")
+                or ("1.1.0" if any(key in entry for key in ("descriptor", "descriptor_id", "capability_scope", "provider_id")) else "1.0.0")
+            )
+            normalized = _descriptor_from_entry(entry, registry_version, "platform")
+            descriptor_values = {
+                "descriptor_id": normalized.descriptor_id,
+                "descriptor_version": normalized.descriptor_version,
+                "descriptor_digest": normalized.descriptor_digest,
+                "registry_version": normalized.registry_version,
+                "capability_scope": normalized.capability_scope,
+                "provider_id": normalized.provider_id,
+                "provider_version": normalized.provider_version,
+                "provider_scope": normalized.provider_scope,
+                "inspector_id": normalized.inspector_id,
+                "inspector_version": normalized.inspector_version,
+                "inspector_scope": normalized.inspector_scope,
+                "representations": normalized.representations,
+                "legacy_descriptor": normalized.legacy_descriptor,
+            }
+        except PlatformRegistryError as exc:
+            # Preserve this low-level adapter API's stable exception type while
+            # retaining the strict registry validation message for callers.
+            raise AdapterDescriptorError(str(exc)) from exc
+        except ImportError:
+            # Keep this low-level helper import-safe for isolated third-party
+            # fixtures that do not install the retrieval package.
+            descriptor_values = {
+                key: entry[key]
+                for key in (
+                    "descriptor_id", "descriptor_version", "descriptor_digest",
+                    "registry_version", "capability_scope", "provider_id",
+                    "provider_version", "provider_scope", "inspector_id",
+                    "inspector_version", "inspector_scope", "representations",
+                    "legacy_descriptor",
+                )
+                if key in entry
+            }
         return cls(
             platform_id=entry["platform_id"],
             resource_types=entry["resource_types"],
@@ -163,6 +234,7 @@ class AdapterDescriptor:
             auth_mode=entry["auth_mode"],
             auth_kind=entry["auth_kind"],
             source_traits=entry["source_traits"],
+            **descriptor_values,
         )
 
     def __hash__(self) -> int:
@@ -176,6 +248,19 @@ class AdapterDescriptor:
                 self.auth_mode,
                 self.auth_kind,
                 self.source_traits,
+                self.descriptor_id,
+                self.descriptor_version,
+                self.descriptor_digest,
+                self.registry_version,
+                self.capability_scope,
+                self.provider_id,
+                self.provider_version,
+                self.provider_scope,
+                self.inspector_id,
+                self.inspector_version,
+                self.inspector_scope,
+                _hashable_value(self.representations),
+                self.legacy_descriptor,
             )
         )
 

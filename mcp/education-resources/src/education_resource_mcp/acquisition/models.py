@@ -26,6 +26,9 @@ from ..downloader import DownloadItemFailure
 StrategyKind: TypeAlias = Literal[
     "direct_file", "web_materialize", "web_capture"
 ]
+CapabilityScope: TypeAlias = Literal[
+    "primary_resource", "representation", "landing_page", "metadata"
+]
 CompletionKind: TypeAlias = Literal["complete", "partial"]
 PersistentArtifactRole: TypeAlias = Literal[
     "primary",
@@ -99,6 +102,16 @@ MAX_BYTES = 5_368_709_120
 DEFAULT_MAX_BYTES = MAX_BYTES
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_CANONICAL_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+_PROVIDER_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+_COMPONENT_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]{0,63}$")
+_REPRESENTATION_ID_PATTERN = re.compile(r"^repr_[A-Za-z0-9_-]{16,64}$")
+_DESCRIPTOR_ID_PATTERN = re.compile(r"^cap_[A-Za-z0-9][A-Za-z0-9_.-]{7,123}$")
+_READINESS_SNAPSHOT_ID_PATTERN = re.compile(r"^ready_[A-Za-z0-9][A-Za-z0-9_.-]{7,122}$")
+_ELIGIBILITY_ID_PATTERN = re.compile(r"^elig_[A-Za-z0-9][A-Za-z0-9_.-]{7,123}$")
+CAPABILITY_SCOPES: frozenset[str] = frozenset(
+    {"primary_resource", "representation", "landing_page", "metadata"}
+)
 _FAILURE_SENSITIVE_KEYS = frozenset(
     {
         "authorization",
@@ -274,6 +287,28 @@ def _validate_server_path(value: Path) -> Path:
     return value
 
 
+def _validate_pattern(value: str, pattern: re.Pattern[str], *, label: str) -> str:
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise ValueError(f"{label} is not a valid authority reference")
+    return value
+
+
+def _validate_provider_id(value: str, *, label: str) -> str:
+    return _validate_pattern(value, _PROVIDER_ID_PATTERN, label=label)
+
+
+def _validate_component_version(value: str, *, label: str) -> str:
+    return _validate_pattern(value, _COMPONENT_VERSION_PATTERN, label=label)
+
+
+def _validate_sha256(value: str, *, label: str) -> str:
+    return _validate_pattern(value, _SHA256_PATTERN, label=label)
+
+
+def _validate_canonical_digest(value: str, *, label: str) -> str:
+    return _validate_pattern(value, _CANONICAL_DIGEST_PATTERN, label=label)
+
+
 class AcquisitionStrategy(str, Enum):
     """One of the three internal acquisition mechanisms.
 
@@ -296,16 +331,17 @@ class AcquisitionStrategy(str, Enum):
         value: "AcquisitionStrategy | str | None",
         resource: Mapping[str, Any] | None = None,
     ) -> "AcquisitionStrategy":
-        """Translate the old plan strategy values to the internal enum.
+        """Translate an explicit plan strategy value to the internal enum.
 
-        ``resource`` is accepted for callers that have no strategy in an old
-        plan.  It is deliberately only a conservative type hint: it may
-        select static materialization, but it can never select browser
-        capture automatically.
+        ``resource`` remains an ignored compatibility parameter for callers
+        that still pass it, but resource type must never determine a download
+        strategy. Every executable plan must bind its strategy explicitly.
         """
 
         if isinstance(value, cls):
             return value
+        if value is None:
+            raise ValueError("acquisition strategy must be explicitly planned")
         aliases = {
             "direct": cls.DIRECT_FILE,
             "direct_file": cls.DIRECT_FILE,
@@ -315,16 +351,10 @@ class AcquisitionStrategy(str, Enum):
             "capture": cls.WEB_CAPTURE,
             "web_capture": cls.WEB_CAPTURE,
         }
-        if value is not None:
-            normalized = aliases.get(str(value))
-            if normalized is None:
-                raise ValueError(f"unsupported acquisition strategy: {value}")
-            return normalized
-
-        resource_type = str((resource or {}).get("resource_type") or (resource or {}).get("type") or "").lower()
-        if resource_type in {"article", "网页", "webpage", "html", "text"}:
-            return cls.WEB_MATERIALIZE
-        return cls.DIRECT_FILE
+        normalized = aliases.get(str(value))
+        if normalized is None:
+            raise ValueError(f"unsupported acquisition strategy: {value}")
+        return normalized
 
     @classmethod
     def from_value(cls, value: "AcquisitionStrategy | str") -> "AcquisitionStrategy":
@@ -348,25 +378,38 @@ class AcquisitionStrategy(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class AcquisitionRequest:
-    """Immutable job input passed to an acquisition provider.
+    """Immutable, authority-bound input passed to one acquisition provider.
 
-    ``resource`` is copied and recursively frozen before it is exposed.  A
-    provider receives a fresh mutable copy through the Router, so a provider
-    cannot mutate the job runner's resource state or share mutations with a
-    later fallback attempt.  No client path is a field of this request; file
-    locations are assigned by server-owned providers under the job root.
+    A request is formed only after ``download_prepare`` has bound a selected
+    resource to a concrete representation, capability descriptor, deployment
+    readiness snapshot, eligibility decision, and exact provider version.  A
+    router must never reconstruct those facts from a platform name or use a
+    fallback provider.  ``resource`` is copied and recursively frozen before
+    it is exposed; providers receive a new mutable copy only for their own
+    invocation.
     """
 
     job_id: str
     resource: Mapping[str, Any]
     strategy: AcquisitionStrategy | StrategyKind | str
+    provider_id: str
+    provider_version: str
+    planned_scope: CapabilityScope | str
+    representation_id: str
+    binding_digest: str
+    source_fingerprint: str
+    capability_id: str
+    descriptor_version: str
+    descriptor_digest: str
+    readiness_snapshot_id: str
+    readiness_digest: str
+    eligibility_id: str
+    eligibility_digest: str
     preferred_container: PreferredContainer = "html"
     max_bytes: int = DEFAULT_MAX_BYTES
-    allow_safe_fallback: bool = True
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
     # ``None`` is rejected in ``__post_init__``.  Keeping a sentinel default
-    # preserves the requested positional signature while ensuring callers
-    # cannot construct a request without a server-controlled root.
+    # makes missing server-owned roots unrepresentable at the provider seam.
     jobs_root: Path | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -395,8 +438,30 @@ class AcquisitionRequest:
             raise TypeError("max_bytes must be an integer")
         if self.max_bytes <= 0 or self.max_bytes > MAX_BYTES:
             raise ValueError(f"max_bytes must be between 1 and {MAX_BYTES}")
-        if not isinstance(self.allow_safe_fallback, bool):
-            raise TypeError("allow_safe_fallback must be a boolean")
+
+        _validate_provider_id(self.provider_id, label="provider_id")
+        _validate_component_version(self.provider_version, label="provider_version")
+        if not isinstance(self.planned_scope, str) or self.planned_scope not in CAPABILITY_SCOPES:
+            raise ValueError("planned_scope must be a declared capability scope")
+        _validate_pattern(
+            self.representation_id,
+            _REPRESENTATION_ID_PATTERN,
+            label="representation_id",
+        )
+        _validate_sha256(self.binding_digest, label="binding_digest")
+        _validate_canonical_digest(self.source_fingerprint, label="source_fingerprint")
+        _validate_pattern(self.capability_id, _DESCRIPTOR_ID_PATTERN, label="capability_id")
+        _validate_component_version(self.descriptor_version, label="descriptor_version")
+        _validate_canonical_digest(self.descriptor_digest, label="descriptor_digest")
+        _validate_pattern(
+            self.readiness_snapshot_id,
+            _READINESS_SNAPSHOT_ID_PATTERN,
+            label="readiness_snapshot_id",
+        )
+        _validate_canonical_digest(self.readiness_digest, label="readiness_digest")
+        _validate_pattern(self.eligibility_id, _ELIGIBILITY_ID_PATTERN, label="eligibility_id")
+        _validate_canonical_digest(self.eligibility_digest, label="eligibility_digest")
+
         object.__setattr__(self, "resource", snapshot)
         object.__setattr__(self, "strategy", AcquisitionStrategy.from_value(self.strategy))
 
@@ -414,9 +479,25 @@ class AcquisitionRequest:
             "job_id": self.job_id,
             "resource_id": self.resource_id,
             "strategy": self.strategy.kind,
+            "provider_id": self.provider_id,
+            "provider_version": self.provider_version,
+            "planned_provider": {
+                "provider_id": self.provider_id,
+                "version": self.provider_version,
+            },
+            "planned_scope": self.planned_scope,
+            "representation_id": self.representation_id,
+            "binding_digest": self.binding_digest,
+            "source_fingerprint": self.source_fingerprint,
+            "capability_id": self.capability_id,
+            "descriptor_version": self.descriptor_version,
+            "descriptor_digest": self.descriptor_digest,
+            "readiness_snapshot_id": self.readiness_snapshot_id,
+            "readiness_digest": self.readiness_digest,
+            "eligibility_id": self.eligibility_id,
+            "eligibility_digest": self.eligibility_digest,
             "preferred_container": self.preferred_container,
             "max_bytes": self.max_bytes,
-            "allow_safe_fallback": self.allow_safe_fallback,
         }
 
 
@@ -665,7 +746,13 @@ class AcquisitionFailure:
 
 @dataclass(frozen=True, slots=True)
 class AcquisitionResult:
-    """Success or structured failure returned by an acquisition provider."""
+    """Success or structured failure returned by an acquisition provider.
+
+    Providers may construct the payload portion of this value, but the router
+    attaches the planned and actual provider facts after it resolves the exact
+    registration.  These facts are deliberately first-class fields instead of
+    untrusted provider metadata.
+    """
 
     strategy: AcquisitionStrategy | StrategyKind | str
     bundle: ArtifactBundle | None = None
@@ -674,6 +761,15 @@ class AcquisitionResult:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     item_failures: tuple[AcquisitionItemFailure | DownloadItemFailure, ...] = ()
     completion: CompletionKind | None = None
+    planned_provider_id: str | None = None
+    planned_provider_version: str | None = None
+    provider_id: str | None = None
+    provider_version: str | None = None
+    planned_scope: CapabilityScope | None = None
+    actual_scope: CapabilityScope | None = None
+    representation_id: str | None = None
+    binding_digest: str | None = None
+    source_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         strategy = AcquisitionStrategy.from_value(self.strategy)
@@ -727,6 +823,47 @@ class AcquisitionResult:
         if not isinstance(frozen_metadata, Mapping):  # pragma: no cover
             raise TypeError("result metadata must be a mapping")
         object.__setattr__(self, "metadata", frozen_metadata)
+        self._validate_provider_facts()
+
+    def _validate_provider_facts(self) -> None:
+        planned_values = (self.planned_provider_id, self.planned_provider_version)
+        actual_values = (self.provider_id, self.provider_version)
+        if any(value is not None for value in planned_values):
+            if any(value is None for value in planned_values):
+                raise ValueError("planned provider facts must include both id and version")
+            _validate_provider_id(self.planned_provider_id, label="planned_provider_id")  # type: ignore[arg-type]
+            _validate_component_version(
+                self.planned_provider_version,
+                label="planned_provider_version",
+            )  # type: ignore[arg-type]
+        if any(value is not None for value in actual_values):
+            if any(value is None for value in actual_values):
+                raise ValueError("actual provider facts must include both id and version")
+            if any(value is None for value in planned_values):
+                raise ValueError("actual provider facts require planned provider facts")
+            _validate_provider_id(self.provider_id, label="provider_id")  # type: ignore[arg-type]
+            _validate_component_version(self.provider_version, label="provider_version")  # type: ignore[arg-type]
+        for field_name, value in (
+            ("planned_scope", self.planned_scope),
+            ("actual_scope", self.actual_scope),
+        ):
+            if value is not None and value not in CAPABILITY_SCOPES:
+                raise ValueError(f"{field_name} must be a declared capability scope")
+        if self.actual_scope is not None and self.planned_scope is None:
+            raise ValueError("actual_scope requires planned_scope")
+        if self.representation_id is not None:
+            _validate_pattern(
+                self.representation_id,
+                _REPRESENTATION_ID_PATTERN,
+                label="representation_id",
+            )
+        if self.binding_digest is not None:
+            _validate_sha256(self.binding_digest, label="binding_digest")
+        if self.source_fingerprint is not None:
+            _validate_canonical_digest(
+                self.source_fingerprint,
+                label="source_fingerprint",
+            )
 
     @property
     def ok(self) -> bool:
@@ -750,6 +887,15 @@ class AcquisitionResult:
         item_failures: tuple[AcquisitionItemFailure | DownloadItemFailure, ...]
         | list[AcquisitionItemFailure | DownloadItemFailure] = (),
         completion: CompletionKind | None = None,
+        planned_provider_id: str | None = None,
+        planned_provider_version: str | None = None,
+        provider_id: str | None = None,
+        provider_version: str | None = None,
+        planned_scope: CapabilityScope | None = None,
+        actual_scope: CapabilityScope | None = None,
+        representation_id: str | None = None,
+        binding_digest: str | None = None,
+        source_fingerprint: str | None = None,
     ) -> "AcquisitionResult":
         return cls(
             strategy,
@@ -758,6 +904,15 @@ class AcquisitionResult:
             metadata=metadata or {},
             item_failures=tuple(item_failures),
             completion=completion,
+            planned_provider_id=planned_provider_id,
+            planned_provider_version=planned_provider_version,
+            provider_id=provider_id,
+            provider_version=provider_version,
+            planned_scope=planned_scope,
+            actual_scope=actual_scope,
+            representation_id=representation_id,
+            binding_digest=binding_digest,
+            source_fingerprint=source_fingerprint,
         )
 
     @classmethod
@@ -772,6 +927,15 @@ class AcquisitionResult:
         item_failures: tuple[AcquisitionItemFailure | DownloadItemFailure, ...]
         | list[AcquisitionItemFailure | DownloadItemFailure] = (),
         completion: CompletionKind | None = None,
+        planned_provider_id: str | None = None,
+        planned_provider_version: str | None = None,
+        provider_id: str | None = None,
+        provider_version: str | None = None,
+        planned_scope: CapabilityScope | None = None,
+        actual_scope: CapabilityScope | None = None,
+        representation_id: str | None = None,
+        binding_digest: str | None = None,
+        source_fingerprint: str | None = None,
     ) -> "AcquisitionResult":
         return cls(
             strategy,
@@ -780,12 +944,40 @@ class AcquisitionResult:
             ),
             item_failures=tuple(item_failures),
             completion=completion,
+            planned_provider_id=planned_provider_id,
+            planned_provider_version=planned_provider_version,
+            provider_id=provider_id,
+            provider_version=provider_version,
+            planned_scope=planned_scope,
+            actual_scope=actual_scope,
+            representation_id=representation_id,
+            binding_digest=binding_digest,
+            source_fingerprint=source_fingerprint,
         )
 
     def to_dict(self, *, include_paths: bool = False) -> dict[str, Any]:
+        planned_provider = None
+        if self.planned_provider_id is not None:
+            planned_provider = {
+                "provider_id": self.planned_provider_id,
+                "version": self.planned_provider_version,
+            }
+        provider = None
+        if self.provider_id is not None:
+            provider = {
+                "provider_id": self.provider_id,
+                "version": self.provider_version,
+            }
         result: dict[str, Any] = {
             "ok": self.ok,
             "strategy": self.strategy.kind,
+            "planned_provider": planned_provider,
+            "provider": provider,
+            "planned_scope": self.planned_scope,
+            "actual_scope": self.actual_scope,
+            "representation_id": self.representation_id,
+            "binding_digest": self.binding_digest,
+            "source_fingerprint": self.source_fingerprint,
             "warnings": list(self.warnings),
             "metadata": thaw(self.metadata),
             "item_failures": [item.to_dict() for item in self.item_failures],
@@ -809,6 +1001,7 @@ class AcquisitionResult:
 
 __all__ = [
     "ACQUISITION_STRATEGIES",
+    "CAPABILITY_SCOPES",
     "ARTIFACT_ROLES",
     "ASSET_ROLES",
     "FORMAL_ARTIFACT_ROLES",
@@ -825,6 +1018,7 @@ __all__ = [
     "ArtifactBundle",
     "ArtifactRole",
     "DownloadItemFailure",
+    "CapabilityScope",
     "CompletionKind",
     "InternalArtifactRole",
     "PersistentArtifactRole",

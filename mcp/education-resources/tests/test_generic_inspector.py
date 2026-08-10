@@ -117,9 +117,15 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("科学小组", resolved["creator"])
         self.assertEqual("zh-CN", resolved["language"])
         self.assertEqual("2024-06-01", resolved["metadata"]["published_date"])
-        self.assertEqual("webpage", resolved["representations"][0]["kind"])
+        representation = resolved["representations"][0]
+        self.assertEqual("webpage", representation["kind"])
+        self.assertEqual("landing_page", representation["scope"])
+        self.assertEqual("landing", representation["role"])
+        self.assertTrue(representation["materializable"])
+        self.assertEqual("inspection", representation["evidence"]["source"])
+        self.assertRegex(representation["evidence"]["source_fingerprint"], r"^sha256:[a-f0-9]{64}$")
         self.assertEqual("bounded_get", mapped["inspection"]["method"])
-        self.assertEqual("generic_web", mapped["inspection"]["inspector_id"])
+        self.assertEqual("generic", mapped["inspection"]["inspector_id"])
 
     def test_pdf_file_is_classified_by_mime_and_magic(self) -> None:
         body = b"%PDF-1.7\nexample\n%%EOF"
@@ -137,7 +143,42 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("document", representation["kind"])
         self.assertEqual("application/pdf", representation["mime_type"])
         self.assertEqual("pdf", representation["container"])
-        self.assertEqual(len(body), representation["estimated_size_bytes"])
+        self.assertEqual("primary_resource", representation["scope"])
+        self.assertEqual("primary", representation["role"])
+        self.assertTrue(representation["materializable"])
+        self.assertEqual("available", representation["technical_availability"])
+        self.assertEqual(len(body), representation["size_bytes"])
+        self.assertEqual(len(body), representation["size_bytes"])
+
+    def test_declared_file_mime_without_magic_is_not_primary(self) -> None:
+        body = b"this is not a verified PDF"
+        response = FakeResponse(
+            headers={"Content-Type": "application/pdf"},
+            body=body,
+        )
+        mapped = inspector(QueueTransport(response)).inspect(
+            resource(resource_type="document")
+        ).to_mapping()
+        representation = mapped["resolved_resource"]["representations"][0]
+
+        self.assertNotEqual("primary_resource", representation["scope"])
+        self.assertNotEqual("primary", representation["role"])
+        self.assertFalse(representation["materializable"])
+        self.assertEqual("unknown", representation["technical_availability"])
+
+    def test_mime_magic_conflict_is_not_primary(self) -> None:
+        body = b"%PDF-1.7\nnot actually the declared image"
+        response = FakeResponse(
+            headers={"Content-Type": "image/png"},
+            body=body,
+        )
+        mapped = inspector(QueueTransport(response)).inspect(resource()).to_mapping()
+        representation = mapped["resolved_resource"]["representations"][0]
+
+        self.assertEqual("partial", mapped["resolution_status"])
+        self.assertNotEqual("primary_resource", representation["scope"])
+        self.assertNotEqual("primary", representation["role"])
+        self.assertFalse(representation["materializable"])
 
     def test_declared_content_length_is_rejected_before_reading(self) -> None:
         response = FakeResponse(

@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 import unittest
 
+from education_resource_mcp.adapters.inspect_annas_archive import AnnasArchiveInspector
+from education_resource_mcp.adapters.inspect_generic import GenericWebInspector
+from education_resource_mcp.adapters.inspect_nlc import NlcInspector
+from education_resource_mcp.inspection import source_fingerprint
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
@@ -63,7 +67,7 @@ def valid_success() -> dict:
             "metadata": {},
         },
         "inspection": {
-            "inspector_id": "generic_web",
+            "inspector_id": "generic",
             "version": "1.0.0",
             "method": "bounded_get",
             "cache_status": "miss",
@@ -71,6 +75,91 @@ def valid_success() -> dict:
             "warnings": [],
         },
         "failures": [],
+    }
+
+
+class _ResolutionResponse:
+    def __init__(self, url: str) -> None:
+        self.status = 200
+        self.headers = {"Content-Type": "text/html; charset=utf-8"}
+        self._body = "<html lang='zh'><head><title>公开资源</title></head><body>detail</body></html>".encode("utf-8")
+        self._offset = 0
+        self._url = url
+        self.closed = False
+
+    def read(self, amount: int = -1) -> bytes:
+        if amount < 0:
+            amount = len(self._body) - self._offset
+        value = self._body[self._offset : self._offset + amount]
+        self._offset += len(value)
+        return value
+
+    def geturl(self) -> str:
+        return self._url
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _ResolutionTransport:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.requests = []
+
+    def __call__(self, request, timeout=None):
+        self.requests.append((request, timeout))
+        return _ResolutionResponse(self.url)
+
+
+def _public_resolver(hostname: str, port: int):
+    return ("93.184.216.34",)
+
+
+def _resolution_resource(platform: str, source_url: str, **metadata) -> dict:
+    return {
+        "resource_id": "res_" + "a" * 16,
+        "platform": platform,
+        "title": "公开教育资源",
+        "source_url": source_url,
+        "resource_type": "other",
+        "metadata": metadata,
+    }
+
+
+def _resolution_envelope(resource: dict, result: object) -> dict:
+    """Project one real inspector result into the Resolution contract envelope."""
+
+    mapped = result.to_mapping()  # type: ignore[attr-defined]
+    resolved = mapped["resolved_resource"]
+    inspection = mapped["inspection"]
+    representations = resolved["representations"]
+    evidence = representations[0]["evidence"] if representations else None
+    observed_at = evidence["observed_at"] if evidence else inspection["inspected_at"]
+    expires_at = evidence["expires_at"] if evidence else observed_at
+    failures = [
+        {
+            key: failure[key]
+            for key in ("code", "message", "retriable")
+            if key in failure
+        }
+        for failure in mapped["failures"]
+    ]
+    return {
+        "contract_version": "1.0.0",
+        "resource_id": resource["resource_id"],
+        "resolution_id": "resolve_" + "a" * 16,
+        "resolution_version": 1,
+        "resolution_status": mapped["resolution_status"],
+        "source_fingerprint": "sha256:" + source_fingerprint(resource),
+        "inspector": {
+            "inspector_id": inspection["inspector_id"],
+            "version": inspection["version"],
+        },
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "availability": resolved["availability"],
+        "representations": representations,
+        "failures": failures,
     }
 
 
@@ -128,6 +217,66 @@ class ResourceInspectContractTests(unittest.TestCase):
                 locator = copy.deepcopy(valid_success())
                 locator["resolved_resource"]["representations"][0][field] = value
                 self.assert_invalid(locator)
+
+    def assert_valid_resolution(self, instance: dict) -> None:
+        schema = load_json(CONTRACTS_ROOT / "schemas" / "resolution.schema.json")
+        validator = Draft202012Validator(
+            schema,
+            registry=build_registry(),
+            format_checker=FormatChecker(),
+        )
+        errors = sorted(validator.iter_errors(instance), key=lambda error: list(error.path))
+        self.assertEqual([], errors, instance)
+
+    def test_real_generic_nlc_and_annas_inspectors_match_resolution_contract(self) -> None:
+        cases = (
+            (
+                GenericWebInspector,
+                _resolution_resource("generic", "https://public.test/resource"),
+                "https://public.test/resource",
+            ),
+            (
+                NlcInspector,
+                _resolution_resource(
+                    "nlc",
+                    "https://www.nlc.cn/catalog/42",
+                    isbn="9780306406157",
+                    author="国家图书馆编",
+                ),
+                "https://www.nlc.cn/catalog/42",
+            ),
+            (
+                AnnasArchiveInspector,
+                _resolution_resource(
+                    "annas-archive",
+                    "https://libgen.test/book/1",
+                    md5="0123456789abcdef0123456789abcdef",
+                    extension="pdf",
+                ),
+                "https://libgen.test/book/1",
+            ),
+        )
+
+        for inspector_class, resource, final_url in cases:
+            with self.subTest(platform=resource["platform"]):
+                result = inspector_class(
+                    resolver=_public_resolver,
+                    transport=_ResolutionTransport(final_url),
+                    timeout=0.25,
+                ).inspect(resource)
+                envelope = _resolution_envelope(resource, result)
+                self.assert_valid_resolution(envelope)
+                self.assertEqual(
+                    "sha256:" + source_fingerprint(resource),
+                    envelope["source_fingerprint"],
+                )
+                for representation in envelope["representations"]:
+                    self.assertNotIn("estimated_size_bytes", representation)
+                    self.assertNotIn("requires_auth", representation)
+                    self.assertRegex(
+                        representation["evidence"]["source_fingerprint"],
+                        r"^sha256:[a-f0-9]{64}$",
+                    )
 
 
 if __name__ == "__main__":

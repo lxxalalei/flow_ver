@@ -133,6 +133,7 @@
       }
     },
     "coverage_dimension": {
+      "description": "Persisted factual-gap dimension. target/use/constraints/form/selection remain accepted only for legacy stored rows. The active Search emitter currently emits only source/inspection; availability is reserved for concrete Resolution-derived facts and is not inferred by Search. This is not a Skill semantic Gap.",
       "type": "string",
       "enum": [
         "target",
@@ -163,6 +164,7 @@
       }
     },
     "coverage_gap": {
+      "description": "A bounded server-observed factual gap. It must not be interpreted as a Skill semantic Gap or StopDecision.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -186,6 +188,7 @@
       }
     },
     "coverage": {
+      "description": "Immutable MCP factual summary for one ResultSet. It records server-observed counts and factual gaps only; it is not semantic sufficiency, a recommendation decision, or an offline-oracle result.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -196,6 +199,14 @@
         "gaps"
       ],
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "factual"
+        },
+        "schema_version": {
+          "type": "string",
+          "const": "factual-coverage-v1"
+        },
         "status": {
           "type": "string",
           "enum": [

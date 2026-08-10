@@ -165,34 +165,70 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
         if language:
             metadata["language"] = language
 
-        current = result.to_mapping()["resolved_resource"]["representations"]
-        base = current[0] if current else {}
-        representation: dict[str, Any] = {
-            "representation_id": self._representation_id(resource, "document", "primary"),
-            "kind": "document",
-            "container": extension or "document",
-            "role": "primary",
-            "materializable": False,
-            "requires_auth": False,
-            "rights_hint": RIGHTS_HINT,
-        }
-        mime_type = _MIME_BY_EXTENSION.get(extension or "")
-        if mime_type:
-            representation["mime_type"] = mime_type
-        if size is not None:
-            representation["estimated_size_bytes"] = size
-        if language:
-            representation["language"] = language
-        elif isinstance(base, Mapping) and base.get("language"):
-            # Only copy the already-validated language scalar.
-            representation["language"] = base["language"]
+        current = [dict(item) for item in result.to_mapping()["resolved_resource"]["representations"]]
+        concrete_primary = [
+            item
+            for item in current
+            if item.get("scope") == "primary_resource"
+            and item.get("role") == "primary"
+            and item.get("materializable") is True
+            and item.get("technical_availability") == "available"
+        ]
+        if concrete_primary:
+            # A verified concrete response outranks Libgen/Anna metadata.  Do
+            # not replace or downgrade the primary representation.
+            representations = current
+        else:
+            base = current[0] if current else {}
+            representation: dict[str, Any] = {
+                "representation_id": self._representation_id(resource, "document", "metadata"),
+                "kind": "document",
+                "container": extension or "document",
+                "scope": "metadata",
+                "role": "metadata",
+                "technical_availability": "unknown",
+                "materializable": False,
+                "rights_hint": RIGHTS_HINT,
+            }
+            mime_type = _MIME_BY_EXTENSION.get(extension or "")
+            if mime_type:
+                representation["mime_type"] = mime_type
+            if size is not None:
+                representation["size_bytes"] = size
+            if language:
+                representation["language"] = language
+            elif isinstance(base, Mapping) and base.get("language"):
+                # Only copy the already-validated language scalar.
+                representation["language"] = base["language"]
+
+            landing = next(
+                (
+                    item
+                    for item in current
+                    if item.get("kind") == "webpage"
+                    and item.get("scope") == "landing_page"
+                ),
+                None,
+            )
+            if landing is None:
+                landing = {
+                    "representation_id": self._representation_id(resource, "webpage", "landing"),
+                    "kind": "webpage",
+                    "container": "html",
+                    "mime_type": "text/html",
+                    "scope": "landing_page",
+                    "role": "landing",
+                    "technical_availability": "available",
+                    "materializable": False,
+                }
+            representations = [representation, landing]
 
         return self._rewrite_result(
             resource,
             result,
             resource_type="book",
             metadata=metadata,
-            representations=[representation],
+            representations=representations,
             creator=author,
         )
 

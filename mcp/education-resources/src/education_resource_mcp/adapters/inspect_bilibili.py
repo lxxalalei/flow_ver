@@ -15,7 +15,11 @@ import math
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..inspection import INSPECTOR_VERSION, InspectionResult
+from ..inspection import (
+    INSPECTOR_VERSION,
+    InspectionResult,
+    build_representation_authority,
+)
 from .inspect_generic import GenericWebInspector, _safe_text
 
 
@@ -155,9 +159,10 @@ class _PlatformWebInspector(GenericWebInspector):
         payload: dict[str, Any],
         *,
         kind: str,
-        role: str = "primary",
+        role: str = "companion",
         container: str | None = None,
         mime_type: str | None = None,
+        scope: str | None = None,
     ) -> None:
         resolved = payload["resolved_resource"]
         representations = [dict(item) for item in resolved.get("representations", [])]
@@ -171,19 +176,37 @@ class _PlatformWebInspector(GenericWebInspector):
             for item in representations
         ):
             return
+        if scope is None:
+            scope = {
+                "primary": "primary_resource",
+                "landing": "landing_page",
+                "metadata": "metadata",
+            }.get(role, "representation")
         representation: dict[str, Any] = {
             "representation_id": _new_representation_id(
                 resource, kind, role, len(representations)
             ),
             "kind": kind,
+            "scope": scope,
             "role": role,
+            "technical_availability": "unknown",
             "materializable": False,
-            "requires_auth": False,
         }
         if container:
             representation["container"] = container
         if mime_type:
             representation["mime_type"] = mime_type
+        observed_at = payload.get("inspection", {}).get("inspected_at")
+        representation.update(
+            build_representation_authority(
+                resource,
+                scope=scope,
+                role=role,
+                technical_availability="unknown",
+                source="metadata",
+                observed_at=observed_at if isinstance(observed_at, str) else None,
+            )
+        )
         for item in representations:
             if item.get("kind") == "webpage" and item.get("role") == "primary":
                 item["role"] = "landing"
@@ -238,7 +261,9 @@ class BilibiliInspector(_PlatformWebInspector):
     ) -> dict[str, Any]:
         payload = super()._enrich_payload(resource, payload)
         if self._can_add_representation(payload):
-            self._append_representation(resource, payload, kind="video", container="video")
+            self._append_representation(
+                resource, payload, kind="video", container="video", role="companion"
+            )
         return payload
 
 

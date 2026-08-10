@@ -12,6 +12,7 @@ from education_resource_mcp.inspection import (
     InspectionResult,
     InspectionRouter,
     build_default_inspection,
+    build_representation_authority,
     source_fingerprint,
 )
 
@@ -48,6 +49,8 @@ def valid_result(**kwargs) -> InspectionResult:
 
 
 class _StubInspector:
+    supported_scopes = ("landing_page", "metadata")
+
     def __init__(self, platform_id: str, result: InspectionResult | None = None) -> None:
         self.platform_id = platform_id
         self.inspector_id = f"{platform_id}.inspector"
@@ -104,6 +107,52 @@ class InspectionCoreTests(unittest.TestCase):
         volatile_changed = copy.deepcopy(first)
         volatile_changed["metadata"]["crawl_timestamp"] = "later"
         self.assertEqual(source_fingerprint(first), source_fingerprint(volatile_changed))
+
+    def test_authority_uses_canonical_fingerprint_and_validates_role_and_timestamps(self) -> None:
+        resource = valid_resource()
+        authority = build_representation_authority(
+            resource,
+            scope="representation",
+            role="companion",
+            technical_availability="unknown",
+            observed_at="2026-08-08T00:00:00Z",
+            expires_at="2026-08-08T01:00:00Z",
+        )
+        self.assertRegex(source_fingerprint(resource), r"^[a-f0-9]{64}$")
+        self.assertRegex(
+            authority["evidence"]["source_fingerprint"],
+            r"^sha256:[a-f0-9]{64}$",
+        )
+        self.assertEqual("2026-08-08T00:00:00Z", authority["evidence"]["observed_at"])
+        self.assertEqual("2026-08-08T01:00:00Z", authority["evidence"]["expires_at"])
+
+        with self.assertRaises(DomainError):
+            build_representation_authority(
+                resource,
+                scope="representation",
+                role="representation",
+                technical_availability="unknown",
+            )
+        with self.assertRaises(DomainError):
+            build_representation_authority(
+                resource,
+                scope="representation",
+                role="companion",
+                technical_availability="unknown",
+                observed_at="not-a-timestamp",
+            )
+
+    def test_router_exposes_read_only_runtime_inspector_inventory(self) -> None:
+        router = InspectionRouter([_StubInspector("bilibili")])
+        inventory = router.registered_inspectors
+        self.assertEqual(("bilibili",), tuple(inventory))
+        self.assertEqual("bilibili.inspector", inventory["bilibili"]["inspector_id"])
+        self.assertEqual("1.0.0", inventory["bilibili"]["version"])
+        self.assertEqual(("landing_page", "metadata"), inventory["bilibili"]["supported_scopes"])
+        with self.assertRaises(TypeError):
+            inventory["new"] = {}  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            inventory["bilibili"]["version"] = "changed"  # type: ignore[index]
 
     def test_router_uses_exact_platform_and_has_no_generic_fallback(self) -> None:
         generic = _StubInspector("generic")

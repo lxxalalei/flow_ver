@@ -21,12 +21,18 @@ from education_resource_mcp.acquisition import (
     AcquisitionRouter,
     AcquisitionStrategy,
     Artifact,
+    ProviderRegistration,
     ArtifactBundle,
 )
 from education_resource_mcp.cdp_renderer import CDPRenderer
 from education_resource_mcp.config import Settings
 from education_resource_mcp.downloader import DownloadResult
 from education_resource_mcp.errors import DomainError
+from education_resource_mcp.inspection import (
+    InspectionResult,
+    InspectionRouter,
+    build_default_inspection,
+)
 from education_resource_mcp.service import ResourceService
 
 
@@ -41,6 +47,43 @@ def _settings(data_dir: Path) -> Settings:
         max_workers=2,
         plan_ttl_seconds=60,
     )
+
+
+class _StaticLandingInspector:
+    """Offline landing-page evidence for static materialization routing."""
+
+    platform_id = "generic"
+    inspector_id = "generic"
+    version = "1.0.0"
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        "scope": "landing_page",
+                        "kind": "webpage",
+                        "container": "html",
+                        "mime_type": "text/html",
+                        "role": "landing",
+                        "materializable": True,
+                        "requires_auth": False,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                self.inspector_id,
+                method="offline-fixture",
+                cache_status="miss",
+                inspected_at="2026-08-08T00:00:00Z",
+            ),
+            failures=[],
+        )
 
 
 def _mhtml_bytes() -> bytes:
@@ -250,10 +293,9 @@ class ServiceRoutingTests(unittest.TestCase):
                 p.write_bytes(_mhtml_bytes())
                 return [(p, "multipart/related", ".mhtml", "rendered mhtml")]
 
+        # A browser renderer may exist in the process, but it is deliberately
+        # not registered as an executable capability for this landing-page Plan.
         fake = RoutingRenderer()
-        renderer = RenderingDownloader(
-            self.settings, renderer=fake  # type: ignore[arg-type]
-        )
 
         class StaticMaterializer:
             def __init__(self) -> None:
@@ -283,16 +325,21 @@ class ServiceRoutingTests(unittest.TestCase):
 
         static = StaticMaterializer()
         acquisition_router = AcquisitionRouter(
-            direct_provider=MagicMock(),
-            web_materializer=static,
-            browser_capture=renderer,
+            [
+                ProviderRegistration(
+                    provider_id="generic-web-materializer",
+                    provider_version="1.0.0",
+                    provider=static,
+                    strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+                    scopes=("landing_page",),
+                )
+            ]
         )
         service = ResourceService(
             self.settings,
             search_provider=StaticSearchProvider(resources),
-            download_provider=MagicMock(),
-            rendering_downloader=renderer,
             acquisition_router=acquisition_router,
+            inspection_router=InspectionRouter([_StaticLandingInspector()]),
         )
         service._fake_renderer = fake  # type: ignore[attr-defined]
         service._fake_static_materializer = static  # type: ignore[attr-defined]
@@ -309,6 +356,11 @@ class ServiceRoutingTests(unittest.TestCase):
             [{"platform": "generic", "queries": [{"query": "天文"}]}],
             filters={},
             limit=10,
+        )
+        service.inspect(
+            flow["flow_id"],
+            "inspect-routing-00001",
+            search["candidates"][0]["resource_id"],
         )
         presentation = service.presentation_save(
             flow["flow_id"],
@@ -332,6 +384,12 @@ class ServiceRoutingTests(unittest.TestCase):
         started = service.download_start(
             flow["flow_id"], plan["plan_id"], plan["confirmation_token"],
             "start-routing-000001",
+            presentation_id=plan["presentation_id"],
+            presented_version=plan["presented_version"],
+            selection_version=plan["selection_version"],
+            selection_digest=plan["selection_digest"],
+            plan_digest=plan["plan_digest"],
+            authority_digest=plan["authority_digest"],
         )
         job_id = started["job_id"]
         deadline = time.monotonic() + 3

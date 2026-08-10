@@ -65,6 +65,35 @@
         "representation_id": {
           "$ref": "../common.schema.json#/$defs/representation_id"
         },
+        "scope": {
+          "$ref": "../common.schema.json#/$defs/capability_scope"
+        },
+        "capability_ref": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/capability_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "technical_availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "auth_required",
+            "unavailable",
+            "unknown",
+            "policy_blocked"
+          ]
+        },
+        "source_fingerprint": {
+          "$ref": "../common.schema.json#/$defs/source_fingerprint"
+        },
+        "evidence": {
+          "$ref": "../resolution.schema.json#/$defs/evidence"
+        },
         "kind": {
           "type": "string",
           "enum": [
@@ -183,6 +212,19 @@
         },
         "metadata": {
           "$ref": "#/$defs/metadata"
+        },
+        "capability_ref": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/capability_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolution_digest": {
+          "$ref": "../common.schema.json#/$defs/canonical_digest"
         }
       }
     },
@@ -285,6 +327,19 @@
           "items": {
             "$ref": "../common.schema.json#/$defs/item_failure"
           }
+        },
+        "capability_ref": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/capability_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolution_digest": {
+          "$ref": "../common.schema.json#/$defs/canonical_digest"
         }
       }
     },

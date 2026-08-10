@@ -20,6 +20,7 @@ from education_resource_mcp.acquisition import (  # noqa: E402
     DownloadBatchResult,
     DownloadItemFailure,
     DownloadResult,
+    ProviderRegistration,
 )
 
 
@@ -35,6 +36,22 @@ def _result(path: Path, *, role: str | None = None, item_key: str | None = None,
         item_key=item_key,
         required=required,
         metadata={"kind": role or "legacy", "source_url": "https://private.invalid/file"},
+    )
+
+
+def _registration(
+    provider: object,
+    *,
+    provider_id: str = "batch-provider",
+    version: str = "1.0.0",
+    scopes: tuple[str, ...] = ("primary_resource",),
+) -> ProviderRegistration:
+    return ProviderRegistration(
+        provider_id=provider_id,
+        provider_version=version,
+        provider=provider,  # type: ignore[arg-type]
+        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+        scopes=scopes,
     )
 
 
@@ -64,11 +81,31 @@ class AcquisitionBatchTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def _request(self, *, cancel_event: threading.Event | None = None) -> AcquisitionRequest:
+    def _request(
+        self,
+        *,
+        cancel_event: threading.Event | None = None,
+        provider_id: str = "batch-provider",
+        provider_version: str = "1.0.0",
+        planned_scope: str = "primary_resource",
+    ) -> AcquisitionRequest:
         return AcquisitionRequest(
-            "job-batch-001",
-            self.resource,
-            AcquisitionStrategy.DIRECT_FILE,
+            job_id="job-batch-001",
+            resource=self.resource,
+            strategy=AcquisitionStrategy.DIRECT_FILE,
+            provider_id=provider_id,
+            provider_version=provider_version,
+            planned_scope=planned_scope,
+            representation_id="repr_acquisition_batch001",
+            binding_digest="a" * 64,
+            source_fingerprint="sha256:" + "e" * 64,
+            capability_id="cap_acquisition_batch_v1",
+            descriptor_version="1.0.0",
+            descriptor_digest="sha256:" + "b" * 64,
+            readiness_snapshot_id="ready_acquisition_batch_v1",
+            readiness_digest="sha256:" + "c" * 64,
+            eligibility_id="elig_acquisition_batch_v1",
+            eligibility_digest="sha256:" + "d" * 64,
             max_bytes=4096,
             cancel_event=cancel_event or threading.Event(),
             jobs_root=self.root,
@@ -85,13 +122,15 @@ class AcquisitionBatchTests(unittest.TestCase):
 
     def test_old_single_and_list_keep_five_argument_compatibility(self) -> None:
         primary, attachment = self._files(["legacy.bin", "legacy-extra.bin"])
-        single = AcquisitionRouter(_Provider(self.root, _result(primary))).acquire(self._request())
+        single = AcquisitionRouter([
+            _registration(_Provider(self.root, _result(primary))),
+        ]).acquire(self._request())
         self.assertTrue(single.ok)
         self.assertEqual(single.bundle.primary.role, "primary")  # type: ignore[union-attr]
 
-        old_list = AcquisitionRouter(
-            _Provider(self.root, [_result(primary), _result(attachment)])
-        ).acquire(self._request())
+        old_list = AcquisitionRouter([
+            _registration(_Provider(self.root, [_result(primary), _result(attachment)])),
+        ]).acquire(self._request())
         self.assertTrue(old_list.ok)
         artifacts = old_list.bundle.artifacts  # type: ignore[union-attr]
         self.assertEqual([item.role for item in artifacts], ["primary", "attachment"])
@@ -112,9 +151,9 @@ class AcquisitionBatchTests(unittest.TestCase):
                     _result(path, role=role, item_key=f"{resource_type}:{role}", required=role == "primary")
                     for path, (_name, role) in zip(paths, specs)
                 ]
-                result = AcquisitionRouter(
-                    _Provider(self.root, DownloadBatchResult(values, ()))
-                ).acquire(self._request())
+                result = AcquisitionRouter([
+                    _registration(_Provider(self.root, DownloadBatchResult(values, ()))),
+                ]).acquire(self._request())
                 self.assertTrue(result.ok)
                 self.assertEqual(result.completion, "complete")
                 self.assertEqual(
@@ -146,7 +185,9 @@ class AcquisitionBatchTests(unittest.TestCase):
              _result(attachment, role="attachment", item_key="course:attachment")],
             [failure],
         )
-        result = AcquisitionRouter(_Provider(self.root, raw)).acquire(self._request())
+        result = AcquisitionRouter([
+            _registration(_Provider(self.root, raw)),
+        ]).acquire(self._request())
         self.assertTrue(result.ok)
         self.assertEqual(result.completion, "partial")
         self.assertEqual(len(result.item_failures), 1)
@@ -158,7 +199,7 @@ class AcquisitionBatchTests(unittest.TestCase):
         self.assertNotIn("abc", rendered)
         self.assertIn("course:subtitle", rendered)
 
-    def test_primary_failure_is_not_ok_and_auth_policy_cancel_do_not_fallback(self) -> None:
+    def test_primary_failure_does_not_call_an_unrelated_exact_provider(self) -> None:
         attachment, = self._files(["attachment.pdf"])
         for code in ("AUTH_REQUIRED", "POLICY_DENIED", "JOB_CANCELLED"):
             with self.subTest(code=code):
@@ -169,16 +210,17 @@ class AcquisitionBatchTests(unittest.TestCase):
                     self.root,
                     DownloadBatchResult([_result(attachment, role="attachment", item_key="course:attachment")], [primary_failure]),
                 )
-                direct = _Provider(self.root, _result(attachment))
-                router = AcquisitionRouter(
-                    direct,
-                    platform_providers={"generic": platform},
-                )
-                result = router.acquire(self._request())
+                unrelated = _Provider(self.root, _result(attachment))
+                router = AcquisitionRouter([
+                    _registration(platform, provider_id="bound-platform"),
+                    _registration(unrelated, provider_id="unrelated-generic"),
+                ])
+                result = router.acquire(self._request(provider_id="bound-platform"))
                 self.assertFalse(result.ok)
                 self.assertEqual(result.failure.code, code)  # type: ignore[union-attr]
                 self.assertEqual(len(result.item_failures), 1)
-                self.assertEqual(direct.calls, 0)
+                self.assertEqual(unrelated.calls, 0)
+                self.assertEqual(platform.calls, 1)
 
     def test_role_invariants_and_duplicate_item_keys_are_rejected(self) -> None:
         first, second = self._files(["one.bin", "two.bin"])
@@ -201,7 +243,9 @@ class AcquisitionBatchTests(unittest.TestCase):
             ),
         ]
         for raw in cases:
-            result = AcquisitionRouter(_Provider(self.root, raw)).acquire(self._request())
+            result = AcquisitionRouter([
+                _registration(_Provider(self.root, raw)),
+            ]).acquire(self._request())
             self.assertFalse(result.ok)
             self.assertEqual(result.failure.code, "ACQUISITION_OUTPUT_INVALID")  # type: ignore[union-attr]
 
@@ -217,14 +261,19 @@ class AcquisitionBatchTests(unittest.TestCase):
         self.assertNotIn("path", payload["results"][0])
         self.assertNotIn(str(self.root), batch.to_json())
 
-    def test_cancelled_request_does_not_call_provider(self) -> None:
+    def test_cancelled_request_does_not_call_provider_and_keeps_planned_facts(self) -> None:
         cancel = threading.Event()
         cancel.set()
         provider = _Provider(self.root, None)
-        result = AcquisitionRouter(provider).acquire(self._request(cancel_event=cancel))
+        result = AcquisitionRouter([
+            _registration(provider),
+        ]).acquire(self._request(cancel_event=cancel))
         self.assertFalse(result.ok)
         self.assertEqual(result.failure.code, "JOB_CANCELLED")  # type: ignore[union-attr]
         self.assertEqual(provider.calls, 0)
+        self.assertEqual(result.planned_provider_id, "batch-provider")
+        self.assertIsNone(result.provider_id)
+        self.assertEqual(result.source_fingerprint, "sha256:" + "e" * 64)
 
 
 if __name__ == "__main__":

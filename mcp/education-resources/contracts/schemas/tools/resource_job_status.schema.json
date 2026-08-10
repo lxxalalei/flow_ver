@@ -134,11 +134,21 @@
             "$ref": "../common.schema.json#/$defs/item_failure"
           }
         },
+        "outcomes": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/outcome_projection"
+          }
+        },
         "updated_at": {
           "$ref": "../common.schema.json#/$defs/timestamp"
         },
         "plan_digest": {
           "$ref": "../common.schema.json#/$defs/plan_digest"
+        },
+        "authority_digest": {
+          "$ref": "../common.schema.json#/$defs/authority_digest"
         }
       }
     },
@@ -151,6 +161,178 @@
           "$ref": "../common.schema.json#/$defs/error_result"
         }
       ]
+    },
+    "outcome_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome_id",
+        "resource_id",
+        "status",
+        "planned",
+        "started_at",
+        "outcome_digest"
+      ],
+      "properties": {
+        "outcome_id": {
+          "$ref": "../common.schema.json#/$defs/actual_outcome_id"
+        },
+        "resource_id": {
+          "$ref": "../common.schema.json#/$defs/resource_id"
+        },
+        "status": {
+          "$ref": "../common.schema.json#/$defs/outcome_status"
+        },
+        "planned": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "strategy",
+            "provider",
+            "plan_binding_digest"
+          ],
+          "properties": {
+            "scope": {
+              "$ref": "../common.schema.json#/$defs/capability_scope"
+            },
+            "strategy": {
+              "$ref": "../common.schema.json#/$defs/capability_strategy"
+            },
+            "provider": {
+              "$ref": "../common.schema.json#/$defs/provider_ref"
+            },
+            "plan_binding_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "execution": {
+          "description": "Present only when the persisted Outcome references a valid immutable execution binding. Legacy readable Outcomes created before execution authority was introduced omit this object rather than fabricating a digest.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "binding_digest"
+          ],
+          "properties": {
+            "binding_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "scope": {
+              "$ref": "../common.schema.json#/$defs/capability_scope"
+            },
+            "strategy": {
+              "$ref": "../common.schema.json#/$defs/capability_strategy"
+            },
+            "provider": {
+              "$ref": "../common.schema.json#/$defs/provider_ref"
+            },
+            "capability": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "capability_id",
+                "descriptor_version",
+                "descriptor_digest",
+                "registry_version",
+                "registry_digest",
+                "readiness_snapshot_id",
+                "readiness_digest"
+              ],
+              "properties": {
+                "capability_id": {
+                  "$ref": "../common.schema.json#/$defs/capability_id"
+                },
+                "descriptor_version": {
+                  "$ref": "../common.schema.json#/$defs/component_version"
+                },
+                "descriptor_digest": {
+                  "$ref": "../common.schema.json#/$defs/canonical_digest"
+                },
+                "registry_version": {
+                  "$ref": "../common.schema.json#/$defs/component_version"
+                },
+                "registry_digest": {
+                  "$ref": "../common.schema.json#/$defs/canonical_digest"
+                },
+                "readiness_snapshot_id": {
+                  "$ref": "../common.schema.json#/$defs/readiness_snapshot_id"
+                },
+                "readiness_digest": {
+                  "$ref": "../common.schema.json#/$defs/canonical_digest"
+                }
+              }
+            },
+            "eligibility": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "eligibility_id",
+                "decision_digest"
+              ],
+              "properties": {
+                "eligibility_id": {
+                  "$ref": "../common.schema.json#/$defs/eligibility_id"
+                },
+                "decision_digest": {
+                  "$ref": "../common.schema.json#/$defs/canonical_digest"
+                }
+              }
+            },
+            "source_fingerprint": {
+              "$ref": "../common.schema.json#/$defs/source_fingerprint"
+            },
+            "revalidated_at": {
+              "$ref": "../common.schema.json#/$defs/timestamp"
+            }
+          }
+        },
+        "actual": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "strategy",
+            "provider"
+          ],
+          "properties": {
+            "scope": {
+              "$ref": "../common.schema.json#/$defs/capability_scope"
+            },
+            "strategy": {
+              "$ref": "../common.schema.json#/$defs/capability_strategy"
+            },
+            "provider": {
+              "$ref": "../common.schema.json#/$defs/provider_ref"
+            }
+          }
+        },
+        "bundle_id": {
+          "$ref": "../common.schema.json#/$defs/bundle_id"
+        },
+        "asset_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "../common.schema.json#/$defs/asset_id"
+          }
+        },
+        "failure": {
+          "$ref": "../common.schema.json#/$defs/item_failure"
+        },
+        "started_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        },
+        "completed_at": {
+          "$ref": "../common.schema.json#/$defs/timestamp"
+        },
+        "outcome_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
     }
   }
 }

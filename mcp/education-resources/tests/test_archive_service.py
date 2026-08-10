@@ -15,10 +15,20 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from education_resource_mcp.acquisition import (
+    AcquisitionRouter,
+    AcquisitionStrategy,
+    ProviderRegistration,
+)
 from education_resource_mcp.archive import ArchiveFileError, ArchiveFileManager
 from education_resource_mcp.config import Settings
 from education_resource_mcp.downloader import DownloadResult
 from education_resource_mcp.errors import DomainError
+from education_resource_mcp.inspection import (
+    InspectionResult,
+    InspectionRouter,
+    build_default_inspection,
+)
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
 from education_resource_mcp.storage import Store
@@ -59,6 +69,46 @@ class FixedContentDownloader:
             media_type=self.media_type,
             sha256=hashlib.sha256(self.payload).hexdigest(),
             filename=path.name,
+        )
+
+
+class OfflineGenericInspector:
+    """Return exact built-in generic primary-document evidence without I/O."""
+
+    platform_id = "generic"
+    inspector_id = "generic"
+    version = "1.0.0"
+    supported_scopes = ("primary_resource",)
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        "scope": "primary_resource",
+                        "kind": "document",
+                        "container": "pdf",
+                        "mime_type": "application/pdf",
+                        "role": "primary",
+                        "materializable": True,
+                        "technical_availability": "available",
+                        "requires_auth": False,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                self.inspector_id,
+                version=self.version,
+                method="offline-fixture",
+                cache_status="miss",
+                inspected_at="2026-08-10T00:00:00Z",
+            ),
+            failures=[],
         )
 
 
@@ -130,12 +180,25 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
         archive_manager: ArchiveFileManager | None = None,
         downloader: FixedContentDownloader | None = None,
     ) -> ResourceService:
+        exact_downloader = downloader or FixedContentDownloader(
+            self.settings.jobs_dir
+        )
         service = ResourceService(
             self.settings,
             store=store,
             search_provider=StaticSearchProvider(self.resources),
-            download_provider=downloader
-            or FixedContentDownloader(self.settings.jobs_dir),
+            acquisition_router=AcquisitionRouter(
+                [
+                    ProviderRegistration(
+                        provider_id="generic-direct",
+                        provider_version="1.0.0",
+                        provider=exact_downloader,
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    )
+                ]
+            ),
+            inspection_router=InspectionRouter([OfflineGenericInspector()]),
             archive_file_manager=archive_manager,
         )
         self.services.append(service)
@@ -167,17 +230,52 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             presentation["presented_version"],
             list(range(1, len(ids) + 1)),
         )
+        for position, resource_id in enumerate(ids, start=1):
+            resolution = service.inspect(
+                flow["flow_id"],
+                f"archive-inspect-{suffix:05d}-{position:03d}",
+                resource_id,
+            )
+            self.assertEqual(
+                ("generic", "1.0.0"),
+                (
+                    resolution["inspection"]["inspector_id"],
+                    resolution["inspection"]["version"],
+                ),
+            )
+            self.assertEqual(
+                "primary_resource",
+                resolution["resolved_resource"]["representations"][0]["scope"],
+            )
         plan = service.download_prepare(
             flow["flow_id"],
             f"archive-prepare-{suffix:05d}",
             selection["selection_version"],
             options={"preferred_container": "original"},
         )
+        self.assertEqual(len(plan["items"]), len(ids))
+        for item in plan["items"]:
+            self.assertEqual("primary_resource", item["planned_scope"])
+            self.assertEqual("direct_file", item["planned_strategy"])
+            self.assertEqual(
+                {
+                    "provider_id": "generic-direct",
+                    "version": "1.0.0",
+                    "scope": "primary_resource",
+                },
+                item["planned_provider"],
+            )
         started = service.download_start(
             flow["flow_id"],
             plan["plan_id"],
             plan["confirmation_token"],
             f"archive-start-{suffix:07d}",
+            presentation_id=plan["presentation_id"],
+            presented_version=plan["presented_version"],
+            selection_version=plan["selection_version"],
+            selection_digest=plan["selection_digest"],
+            plan_digest=plan["plan_digest"],
+            authority_digest=plan["authority_digest"],
         )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
@@ -223,6 +321,113 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
         self.assertNotIn("模型伪造", archived["relative_path"])
         self.assertFalse(Path(archived["relative_path"]).is_absolute())
         self.assertTrue((self.settings.library_dir / archived["relative_path"]).is_file())
+
+    def test_archive_fails_closed_for_orphan_and_quarantined_assets(self) -> None:
+        service = self._service()
+        flow, job, assets = self._download(service)
+        asset = service.store.get_asset(assets[0]["asset_id"])
+        assert asset is not None
+        orphan_asset_id = "asset_orphan_ready_without_bundle"
+        with service.store.transaction(immediate=True) as connection:
+            connection.execute(
+                """
+                INSERT INTO assets(
+                    asset_id, job_id, resource_id, status, local_path, byte_size,
+                    media_type, sha256, filename, created_at
+                ) VALUES (?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    orphan_asset_id,
+                    asset["job_id"],
+                    asset["resource_id"],
+                    asset["local_path"],
+                    asset["byte_size"],
+                    asset["media_type"],
+                    asset["sha256"],
+                    asset["filename"],
+                    asset["created_at"],
+                ),
+            )
+
+        with self.assertRaises(DomainError) as orphan_error:
+            service.archive(
+                flow["flow_id"],
+                job["job_id"],
+                orphan_asset_id,
+                idempotency_key="archive-orphan-reject-001",
+                metadata=self._classification(),
+            )
+        self.assertEqual("ASSET_NOT_ARCHIVABLE", orphan_error.exception.code)
+        with self.assertRaisesRegex(ValueError, "asset_not_archivable"):
+            service.store.reserve_archive(
+                orphan_asset_id,
+                self._classification(),
+                "04-自然科学/天文与宇宙/图文/orphan.pdf",
+            )
+
+        with service.store.transaction(immediate=True) as connection:
+            connection.execute(
+                "UPDATE assets SET status = 'quarantined' WHERE asset_id = ?",
+                (asset["asset_id"],),
+            )
+        with self.assertRaises(DomainError) as quarantined_error:
+            service.archive(
+                flow["flow_id"],
+                job["job_id"],
+                asset["asset_id"],
+                idempotency_key="archive-quarantine-reject-001",
+                metadata=self._classification(),
+            )
+        self.assertEqual("ASSET_NOT_ARCHIVABLE", quarantined_error.exception.code)
+        with service.store._connect() as connection:
+            self.assertEqual(
+                0,
+                connection.execute("SELECT COUNT(*) FROM archive_entries").fetchone()[0],
+            )
+
+    def test_archive_requires_exact_job_execution_authority(self) -> None:
+        service = self._service()
+        flow, job, assets = self._download(service)
+        asset_id = assets[0]["asset_id"]
+        with service.store.transaction(immediate=True) as connection:
+            connection.execute(
+                "DELETE FROM job_execution_items WHERE job_id = ?",
+                (job["job_id"],),
+            )
+            outcome_row = connection.execute(
+                "SELECT * FROM acquisition_outcomes WHERE job_id = ?",
+                (job["job_id"],),
+            ).fetchone()
+            assert outcome_row is not None
+            legacy_outcome = service.store._decode_acquisition_outcome(outcome_row)
+            legacy_outcome["execution_binding_digest"] = None
+            legacy_outcome.pop("outcome_digest", None)
+            connection.execute(
+                """
+                UPDATE acquisition_outcomes
+                SET execution_binding_digest = NULL, outcome_digest = ?
+                WHERE outcome_id = ?
+                """,
+                (
+                    service.store._request_digest(legacy_outcome),
+                    outcome_row["outcome_id"],
+                ),
+            )
+
+        with self.assertRaises(DomainError) as captured:
+            service.archive(
+                flow["flow_id"],
+                job["job_id"],
+                asset_id,
+                idempotency_key="archive-legacy-authority-reject-001",
+                metadata=self._classification(),
+            )
+        self.assertEqual("ASSET_NOT_ARCHIVABLE", captured.exception.code)
+        with service.store._connect() as connection:
+            self.assertEqual(
+                0,
+                connection.execute("SELECT COUNT(*) FROM archive_entries").fetchone()[0],
+            )
 
     def test_different_assets_with_same_content_share_one_file_and_remain_traceable(self) -> None:
         service = self._service()
@@ -347,11 +552,62 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
         legacy_root.mkdir()
         legacy_file = legacy_root / "legacy.pdf"
         legacy_file.write_bytes(Path(asset["local_path"]).read_bytes())
-        service.store.create_archive(
-            asset["asset_id"],
-            legacy_file,
-            {"primary_domain": "自然科学", "topics": ["天文与宇宙"], "tags": ["旧数据"]},
-        )
+        archive_id = "archive_legacy_absolute"
+        content_id = "content_legacy_absolute"
+        archived_at = str(asset["created_at"])
+        legacy_metadata = {
+            "primary_domain": "自然科学",
+            "topics": ["天文与宇宙"],
+            "tags": ["旧数据"],
+        }
+        with service.store.transaction(immediate=True) as connection:
+            connection.execute(
+                """
+                INSERT INTO archive_contents(
+                    content_id, sha256, byte_size, media_type, resource_format,
+                    relative_path, status, owner_archive_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'document', NULL, 'ready', ?, ?, ?)
+                """,
+                (
+                    content_id,
+                    asset["sha256"],
+                    asset["byte_size"],
+                    asset["media_type"],
+                    archive_id,
+                    archived_at,
+                    archived_at,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO archive_entries(
+                    archive_id, asset_id, library_path, metadata_json, created_at,
+                    content_id, status, taxonomy_version, classification_status,
+                    primary_domain, primary_topic, legacy_metadata_json,
+                    archived_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'ready', 'learning-v1', 'classified',
+                          'natural_science', '天文与宇宙', ?, ?, ?)
+                """,
+                (
+                    archive_id,
+                    asset["asset_id"],
+                    str(legacy_file),
+                    json.dumps(legacy_metadata, ensure_ascii=False),
+                    archived_at,
+                    content_id,
+                    json.dumps(legacy_metadata, ensure_ascii=False),
+                    archived_at,
+                    archived_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO archive_topics(archive_id, value, position) VALUES (?, ?, 0)",
+                (archive_id, "天文与宇宙"),
+            )
+            connection.execute(
+                "INSERT INTO archive_tags(archive_id, value, position) VALUES (?, ?, 0)",
+                (archive_id, "旧数据"),
+            )
 
         legacy_settings = Settings(
             data_dir=self.settings.data_dir,
@@ -368,7 +624,18 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             legacy_settings,
             store=Store(legacy_settings.database_path),
             search_provider=StaticSearchProvider(self.resources),
-            download_provider=FixedContentDownloader(legacy_settings.jobs_dir),
+            acquisition_router=AcquisitionRouter(
+                [
+                    ProviderRegistration(
+                        provider_id="generic-direct",
+                        provider_version="1.0.0",
+                        provider=FixedContentDownloader(legacy_settings.jobs_dir),
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    )
+                ]
+            ),
+            inspection_router=InspectionRouter([OfflineGenericInspector()]),
         )
         self.services.append(recovered)
         library = recovered.library_search(

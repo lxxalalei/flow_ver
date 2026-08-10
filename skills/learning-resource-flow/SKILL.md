@@ -16,7 +16,7 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 由本 Skill 负责：
 
 - 理解需求，区分用户事实、可靠推断和低风险默认。
-- 判断是否需要澄清，设计 `SearchDirection`，并驱动 Plan -> Search -> Evaluate -> Inspect? -> Gap -> Replan/Present 的有界循环。
+- 判断是否需要澄清，设计 `SearchDirection`，并驱动 Plan -> Search -> Evaluate -> Inspect? -> 私有 Gap/StopDecision -> Replan/Present 的有界循环。
 - 审查 ResultSet 候选的相关性、内容门槛、儿童安全、证据、可用性和组合价值。
 - 在候选展示前克制地决定哪些高潜候选需要 `resource_inspect`，并解释真实核验结果。
 - 实际向用户展示经过审查的有序子集，并把完全相同的顺序提交为 Presentation。
@@ -25,13 +25,43 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 由 `education-resources` MCP 负责：
 
 - Flow、ResultSet、Presentation、Selection、Plan、Job、Asset 以及 AssetBundle/BundleItem 关系的权威状态。
-- SearchRound、搜索运行 provenance、跨轮去重、Coverage、Gap、InformationGain 和恢复状态的权威事实（契约提供时）。
+- SearchRound、搜索运行 provenance、跨轮去重、服务端观察到的 factual `coverage` 和恢复状态的权威事实（契约提供时）。`coverage` 只说明服务端看到了什么；其中的 `gaps` 是 factual gaps，不是本 Skill 的语义 `Gap`。
 - 单个资源的 Resolution、Inspection、Representation、可用性、失败和恢复状态。
 - 结果集和展示集成员校验、位置映射、版本、幂等、恢复、下载、取消和归档。
 
 搜索结果不是已展示结果。模型不得把 ResultSet 自动称为 Presentation，也不得让用户选择未进入当前 Presentation 的隐藏候选。
 
 平台登录不属于本 Skill 或 `education-resources` 控制面。需要认证时暂停当前流程，交给独立 `session-manager` 和 `session-login-flow` 完成合法登录与会话保存；登录成功后调用 `resource_flow_status` 恢复，不在本 Skill 中复制 Cookie 捕获逻辑。
+
+## 生产判定边界
+
+生产链只有一组服务端权威事实来源和一个停止决策执行者：
+
+```text
+MCP Search -> immutable ResultSet + factual `coverage`
+MCP Inspect / Resolution / Capability / Job / Outcome / Asset -> 各自独立的权威事实
+  -> Skill 统一读取上述事实
+  -> Skill 私有 `SemanticReview`
+  -> Skill 私有 `Gap`
+  -> Skill 唯一 `StopDecision`
+  -> Present | Replan | Clarify | StopWithGap
+```
+
+Inspect、Resolution、Capability、Job、Outcome、Asset 或 Archive 的变化不反写旧 ResultSet 的
+`coverage`；恢复时分别读取它们的当前服务端状态，再重新计算私有语义判断。
+
+获取执行必须沿一条服务端权威链前进：Capability Descriptor -> Runtime Readiness -> persisted
+Resolution/Representation -> Eligibility -> Plan capability binding + `authority_digest` -> fresh
+Execution binding -> exact Provider -> persisted Acquisition Outcome -> Asset/AssetBundle -> sanitized
+Job status projection。平台 Registry、静态 descriptor、文件扩展名或旧 options 都不能单独决定
+Provider、strategy 或 scope，也不存在隐式 generic Provider fallback。
+
+`SemanticReview`、Skill `Gap` 和 `StopDecision` 是对当前任务的私有语义判断，不写入 MCP
+Schema、SQLite、Flow/ResultSet 业务状态或任何可提交的业务 ID。MCP 公共
+`coverage.gaps` 只记录服务端实际观察到的事实缺口；不能直接当作 Skill `Gap`，也不能把
+`coverage.status`、候选数量、标题命中、平台数量或 `SearchDirection` 单独当成相关性、用途、
+目标适配、约束满足或可推荐性的证据。`adaptive.py` 只用于离线 oracle/benchmark，不能参与
+生产搜索、Inspect、下载、归档或停止决策。
 
 ## 当前任务模型
 
@@ -41,12 +71,14 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 - `resource_target`：资源给孩子使用、给家长参考或未知。
 - `constraints`：用户明示或有充分证据支持的 must、prefer、exclude 及具体使用条件。
 
-同时保存核心目标 `goal`。`user_role` 与 `resource_target` 相互独立，不能互相推导；未知保持未知。年龄和年级不是默认必填信息。把该模型按 Task Schema 传给 `resource_flow_start`，不得回退为混合的 audience 字段。
+同时保存核心目标 `goal`。`user_role` 与 `resource_target` 相互独立，不能互相推导；未知保持未知。把该模型按 Task Schema 传给 `resource_flow_start`，不得回退为混合的 audience 字段。
 
-`SearchDirection` 不是 query、platform 或 resource type，而是为覆盖明确的学习目标、使用
+`SearchDirection` 不是 query、platform 或 resource type，而是本 Skill 为覆盖明确的学习目标、使用
 结果或决策缺口选择的搜索路径。方向由 `resource_target`、`goal` 和显式 `constraints` 决定；
-`user_role` 只影响交互方式。搜索方向、轮次预算、Coverage/Gap 和 StopDecision 的完整规则
-见 [`references/adaptive-retrieval.md`](references/adaptive-retrieval.md)。
+`user_role` 只影响交互方式。方向是 Skill 的搜索路线说明和可选审计 trace，不是事实 ID、
+Coverage 维度、语义证据、`Gap` 或 `StopDecision`；改变方向本身不能伪造候选计数、可用性或
+coverage 状态。搜索方向、轮次预算、Coverage/Gap 和 StopDecision 的完整规则见
+[`references/adaptive-retrieval.md`](references/adaptive-retrieval.md)。
 
 处理模糊请求、冲突、短回答或敏感儿童主题时读取 `references/intent-and-clarification.md`。
 
@@ -58,9 +90,11 @@ description: 面向孩子和家长的教育资源唯一对话入口。用户想�
 resource_flow_start
 -> Plan：确定 1–2 个 SearchDirection 和本轮有界路线
 -> Search：resource_search / resource_browse_creator  # 首轮 replace
--> Evaluate：读取当前 ResultSet、provenance、Coverage、失败和 Gap
--> Inspect?：对少量会改变决策的候选执行 Inspection Gate
--> Gap：Present / Clarify / StopWithGap / Replan
+-> Evaluate：读取当前 ResultSet、MCP factual coverage、provenance 和失败事实
+-> SemanticReview：Skill 对候选生成私有语义审查（unknown 不等于 pass）
+-> Inspect?：对少量会改变决策的候选执行 Inspection Gate，并重新审查
+-> Gap/Decision：Skill 生成私有 Gap，并且每轮只选择一个 StopDecision
+   （Present / Clarify / StopWithGap / Replan）
    -> Replan：resource_search mode=extend + 当前 base_result_set_id，回到 Search
    -> Present：模型审查并实际向用户展示当前 ResultSet 的有序子集
 -> resource_presentation_save         # 提交刚才实际展示的完全相同集合和顺序
@@ -93,18 +127,28 @@ resource_flow_start
 2. **Search**：首轮 `resource_search` 使用 `mode=replace`（省略即为 replace）。只有在
    `Replan` 且确有当前 `base_result_set_id` 时使用 `mode=extend`；MCP 负责复制 base、跨轮
    去重并创建新的不可变 ResultSet，模型不手工合并候选。
-3. **Evaluate**：只根据 MCP 返回的 ResultSet、platform/query runs、provenance、Coverage、
-   failures 和 Inspection 事实判断当前覆盖；不把候选数量、相关性分数或平台数量当 Coverage。
-4. **Inspect?**：只检查高潜、差异关键、可用性不确定或下载前需要 Representation 的少量
-   候选。检查结果回来后重新 Evaluate；未检查或检查失败的 Candidate 仍然未核验。
-5. **Gap**：缺口必须是会改变后续搜索、推荐或获取决策的必要条件，不是任意未知。Coverage
-   足够时 `Present`；缺少会改变方向的用户事实/硬范围时 `Clarify`；仍有必要缺口且没有有
-   价值的下一步时 `StopWithGap`；有新方向可关闭缺口时 `Replan`。
+3. **Evaluate**：读取 MCP 返回的 ResultSet、platform/query runs、provenance、factual
+   `coverage`、failures 和 Inspection 事实；`coverage` 及其 `gaps` 只表示服务端观察到的
+   事实完整度，不是任务语义结论。候选数量、相关性分数、平台数量、`coverage.status` 或
+   `SearchDirection` 都不能单独触发 `Present`。
+4. **SemanticReview**：Skill 对准备比较或展示的候选生成私有审查，至少记录
+   `relevance`、`usefulness`、`target_fit`、`constraint_fit`、`substantive`、
+   `evidence_level` 和 `reasons`。每个维度都允许 `unknown`；`unknown` 不是 `pass`，
+   证据不足时必须保留未知并进入 Inspect、Clarify、Replan 或 `StopWithGap`。
+5. **Inspect?**：只检查高潜、差异关键、可用性不确定或下载前需要 Representation 的少量
+   候选。检查结果回来后重新读取 factual facts 并重算私有 `SemanticReview`；未检查或检查
+   失败的 Candidate 仍然未核验。
+6. **Gap/StopDecision**：Skill 根据目标、显式约束、MCP factual facts 和私有
+   `SemanticReview` 生成私有 `Gap`，每轮只产生一个 `StopDecision`。缺口必须是会改变后续
+   搜索、推荐或获取决策的必要条件，不是任意未知。语义判断足以支持当前目标且有足够事实
+   与审查通过的候选时才可 `Present`；缺少会改变方向的用户事实/硬范围时 `Clarify`；仍有
+   必要缺口且没有有价值的下一步时 `StopWithGap`；有新方向可关闭缺口时 `Replan`。
 
 常规任务最多 3 轮，用户明确要求全面探索/横向比较的综合任务最多 4 轮。连续 2 轮
-`new_unique=0` 且没有 Gap closure 时必须停止继续搜索；Coverage 足够就 `Present`，否则
-`StopWithGap`/`Clarify`。`new_unique`、duplicate、Gap closure、Coverage 和 provenance
-只能使用服务端事实；缺少返回值时说明“无法确认”，不能补造。
+`new_unique=0` 且 Skill 没有基于 MCP facts 关闭任何私有 `Gap` 时必须停止继续搜索；事实
+足够且候选通过必要的私有审查才可 `Present`，否则选择 `StopWithGap`/`Clarify`。`new_unique`、
+duplicate 和 factual coverage 只能使用服务端事实；`Gap closure`、语义通过与
+`StopDecision` 只能由 Skill 判断。缺少返回值时说明“无法确认”，不能补造。
 
 ## 对话决策循环
 
@@ -112,7 +156,7 @@ resource_flow_start
 
 理解核心目标、`user_role`、`resource_target` 和显式 `constraints`。只有核心主题、搜索路线、硬约束或资源对象歧义会实质改变结果时才澄清；一次只问一个容易回答的问题。
 
-不要为了补齐用户角色、资源对象、年龄、年级、平台、格式或数量而追问。需求足够时直接搜索；搜索本身不需要确认。
+不要为了补齐不影响当前结果的字段而追问。需求足够时直接搜索；搜索本身不需要确认。
 
 ### 2. 设计搜索方向
 
@@ -123,8 +167,7 @@ platform-registry.json 作为当前能力和认证信息的机器权威。该参
 
 搜索前读取 `references/discovery-strategy.md` 和 `references/adaptive-retrieval.md`。查询只由
 `goal`、`resource_target` 和显式 `constraints` 驱动；`user_role` 只影响交互方式。不要用
-“优质、权威、适合孩子、高赞”等评价词替代后续审查。未知年龄/年级不默认追问，只有教材
-同步等必须定位学段的硬范围才澄清年级或册次。
+“优质、权威、适合孩子、高赞”等评价词替代后续审查。
 
 ### 3. 建立或恢复 Flow
 
@@ -135,7 +178,8 @@ platform-registry.json 作为当前能力和认证信息的机器权威。该参
 ### 4. 执行搜索轮次并只获得 ResultSet
 
 调用 `education-resources__resource_search`，保存 MCP 返回的 `search_run_id`、`result_set_id`、
-结果版本、候选 `resource_id`、platform/query runs、失败和（契约提供时）provenance、Coverage。
+结果版本、候选 `resource_id`、platform/query runs、失败和（契约提供时）provenance、factual
+`coverage`。`coverage.gaps` 只作为服务端事实输入，不能直接写成 Skill `Gap`。
 把返回项称为“搜索候选”或“待审查候选”，不能称为“已展示候选”。
 
 - 首轮或新任务用 `mode=replace`；`mode` 省略时按 replace 处理。
@@ -213,15 +257,17 @@ platform-registry.json 作为当前能力和认证信息的机器权威。该参
 
 ### 7. Prepare、确认和 Start
 
-非空 Selection 必须原样携带当前 `presentation_id`、`presented_version`、`selection_version` 和 `selection_digest` 调用 `resource_download_prepare`。向用户展示计划中的资源、格式或容器、大小上限、有效期、风险和降级，不展示确认令牌或内部 JSON。
+非空 Selection 必须原样携带当前 `presentation_id`、`presented_version`、`selection_version` 和 `selection_digest` 调用 `resource_download_prepare`。向用户展示计划中的资源、格式或容器、大小上限、有效期、风险，以及 Plan 明确声明的 capability fallback（若有），不展示确认令牌或内部 JSON。
 
-只有用户看过当前有效计划并明确确认后，才原样使用 MCP 返回的 `plan_id`、`plan_digest`、完整 Presentation/Selection 绑定元组和 `confirmation_token` 调用 `resource_download_start`。用户拒绝、修改选择、Presentation 变化或 Plan 过期后必须重新 prepare 和确认。
+只有用户看过当前有效计划并明确确认后，才原样使用 MCP 返回的 `plan_id`、`plan_digest`、完整 Presentation/Selection 绑定元组和 `confirmation_token` 调用 `resource_download_start`。`authority_digest` 是可选兼容校验输入：可以省略并让服务端从不可变 Plan 读取真实摘要；若回显，只能原样使用 prepare 返回值。`plan_digest` 已绑定该摘要，Skill 不生成或重算任一 digest。用户拒绝、修改选择、Presentation 变化或 Plan 过期后必须重新 prepare 和确认。
 
 ## 获取策略与网页物化
 
-0022 保持公开控制面兼容：`contract_version=1.0.0`、`catalog_version=1.3.0`，仍然只有
-13 个 MCP 工具。catalog 1.3.0 只为已有输出增加可选的 AssetBundle 投影，不新增 Bundle
-工具、不增加 `partial` Job 状态，也不改变 `prepare -> 用户确认 -> start` 控制流。
+当前公开控制面保持兼容：`contract_version=1.0.0`、`catalog_version=1.5.0`，仍然只有
+13 个 MCP 工具。0022 在 catalog 1.3.0 中增加可选 AssetBundle 投影；历史 1.4.0 增加
+factual coverage 可选元数据；当前 1.5.0 增加 Capability Authority 和 Outcome 的兼容投影。
+不新增 Bundle 工具、不增加 `partial` Job 状态，也不改变
+`prepare -> 用户确认 -> start` 控制流。
 获取策略仍是服务端内部的路由语义，不要求模型向工具提交本地路径、下载 URL、浏览器参数、
 角色关系或任意策略 JSON。
 
@@ -243,20 +289,25 @@ platform-registry.json 作为当前能力和认证信息的机器权威。该参
 结果完整度与任务生命周期分离：Job `status` 仍只使用 `queued`、`running`、`cancelling`、
 `succeeded`、`failed`、`cancelled`；`completion=complete|partial` 只表达已有可用 primary
 时 Bundle 是否有预期项失败。没有可用 primary 的结果为 `failed`，不能声明 `partial`；取消
-也不能伪装成 `partial`。
+也不能伪装成 `partial`。内部 canonical `ActualOutcome.status="partial"` 只是按资源持久化的
+acquisition outcome 事实；`resource_job_status.outcomes` 是它的脱敏公共投影，两者都不能被
+Skill 伪造或回填为服务端 persistence payload。
 
 在用户可理解的层面，本 Skill 只判断资源形态、用户期望和风险，并向用户解释 MCP 返回的
 计划与结果：
 
-- 已验证为文件、视频、音频、图书或其他直接媒体时，按 `direct_file` 语义获取原始文件。
-- 普通文章、古诗文页、图文博客和可静态读取的网页，优先按 `web_materialize` 语义获取；
+- 已验证为文件、视频、音频、图书或其他直接媒体，且服务端 Plan 已绑定 `direct_file` 精确路线时，
+  按计划解释原始文件获取。
+- 普通文章、古诗文页、图文博客和可静态读取的网页，且服务端 Plan 已绑定
+  `web_materialize` 精确路线时，按计划解释静态物化；
   物化结果同时提供可读 Markdown 和经过重建的安全 HTML。
 - 只有用户明确要求动态页面快照，且服务端计划明确允许受控浏览器采集时，才可以按
   `web_capture` 语义获取。浏览器采集不是网页获取的默认方式，也不是静态物化失败后的
   自动 fallback；动态页面无法安全静态物化时，应如实说明缺口或结构化失败。
 
-服务端 Acquisition Router 负责把上述语义映射到 `direct_file`、`web_materialize` 或
-`web_capture`，重新校验来源、权限、大小、内容类型和任务取消状态。Skill 不拼接命令、
+服务端只能从已声明的 Capability Descriptor、当前 readiness、持久化 Resolution/Representation
+和 Eligibility 生成 Plan；start 时再次校验并保存 fresh Execution binding，Acquisition Router
+只能按其中的 exact Provider/strategy/scope 执行。Skill 不拼接命令、
 脚本、绝对路径或 URL，也不决定落盘目录。网页物化产生的受控 bundle 以
 `index.html`、`content.md`、`metadata.json` 和 `assets/` 组成，并生成 `webbundle.zip`；
 `webbundle.zip` 作为一个 singleton Bundle 的 `primary` Asset，ZIP 内部文件不拆成公开
@@ -273,14 +324,15 @@ education-resources 工具。取消后的中间产物由服务端 quarantine，�
 完整的路由表、bundle 结构、失败解释和安全边界见
 [`references/acquisition-strategy.md`](references/acquisition-strategy.md)。
 
-### Provider 兼容与多资产解释
+### 历史 Provider 兼容与多资产解释
 
 服务端保留旧 `DownloadProvider` 兼容边界：旧单文件结果按 `primary` 映射，旧有序列表的
 首项按 `primary`、其余按保守的 `attachment` 映射；新 enriched batch 结果只有服务端明确
 提供的角色、顺序和失败事实才进入 Bundle。SmartEdu 的课程输出按来源事实保留关系：存在视频
 时视频为 `primary`，否则取首个明确内容项；PDF 为 `attachment`，MP3 为 `companion`，显式
 封面才是 `cover`，不得靠文件名猜测。逐项失败必须保留；认证、策略阻断或取消会终止整个
-获取结果，不把失败项或取消包装成成功。
+获取结果，不把失败项或取消包装成成功。该映射只解释历史 Provider 返回的资产关系，不能在
+当前 1.5 中选择或替换 Provider、strategy、scope、Representation 或 capability route。
 
 ## 归档与资料库检索
 
@@ -301,8 +353,9 @@ education-resources 工具。取消后的中间产物由服务端 quarantine，�
 `resource_flow_status` 是恢复权威来源：
 
 - `reviewing` 且只有 ResultSet：继续审查；实际展示后再保存 Presentation。
-- 存在当前 ResultSet 但上一轮搜索未完成决策：按状态返回的 provenance、Coverage 和失败
-  恢复当前 SearchRound；不能从聊天记录补造 `new_unique`、Gap closure 或 base ID。
+- 存在当前 ResultSet 但上一轮搜索未完成决策：按状态返回的 provenance、factual `coverage`
+  和失败恢复当前 SearchRound；不能从聊天记录补造 `new_unique`、Skill `Gap` closure 或
+  base ID。
 - 存在当前 Presentation、尚无 Selection：只按状态返回的有序 items 恢复编号并等待选择。
 - 上下文被压缩、工具响应丢失或服务重启：先读取 `current_resolutions`，按其中的
   `resolution_id`、`resolution_status`、`resolved_resource`、`inspection` 和 `failures`
@@ -315,6 +368,8 @@ education-resources 工具。取消后的中间产物由服务端 quarantine，�
 - Presentation、Selection 或 Plan 已 superseded/expired：不得沿用旧编号、positions、版本或令牌。
 
 如果状态返回的 Presentation 与对话记忆不一致，以 MCP 为准，并向用户简短说明候选列表已更新。
+恢复后只重建 MCP facts；`SemanticReview`、Skill `Gap` 和 `StopDecision` 必须由 Skill 基于
+最新事实重新计算，缺失审查按 `unknown` 处理，不能把 unknown 当作 pass。
 
 ## 强制边界
 
@@ -322,12 +377,16 @@ education-resources 工具。取消后的中间产物由服务端 quarantine，�
 - ResultSet 只能用于审查；只有当前 Presentation 可用于用户选择。
 - `base_result_set_id` 只能来自当前 Flow 的服务端状态；`mode=extend` 的复制、跨轮去重和
   新 ResultSet 由 MCP 完成，模型不得手工合并。
-- MCP 返回的 Coverage、InformationGain、new_unique、duplicate、provenance 和失败事实只能
-  来自服务端；Gap/StopDecision 必须是基于这些事实及当前 goal/resource_target/constraints 的
-  明确语义判断，不能把模型判断伪装成 MCP 字段，也不得把计划预算、候选数组长度或平台数量
-  写成这些事实。
+- MCP 返回的 factual `coverage`、new_unique、duplicate、provenance 和失败事实只能来自服务端；
+  `InformationGain` 若由服务端提供也只能作为事实摘要读取。Skill `Gap`/`StopDecision` 必须是
+  基于这些事实、私有 `SemanticReview` 及当前 goal/resource_target/constraints 的明确语义判断，
+  不能把模型判断伪装成 MCP 字段，也不得把计划预算、候选数组长度、平台数量或方向 trace 写成
+  这些事实。
 - Candidate 不是 ResolvedResource；`resolution_status`、`availability`、Representation 和
   `failures` 只能来自 `resource_inspect` 或 `resource_flow_status.current_resolutions`。
+- Capability Descriptor、Runtime Readiness、Eligibility、Plan/Execution binding、Provider 和
+  Acquisition Outcome 都是服务端事实。Skill 不从平台 Registry、旧 options 或资源标题推导执行路线，
+  不创建/重算 `authority_digest` 或 `plan_digest`，也不把 public `outcomes` 当作可写状态。
 - Artifact 只是服务端 Acquisition 的临时描述；只有 MCP 返回的 `asset_id` 才是可归档 Asset。
   Bundle 角色、顺序、`bundle_id`、`item_key` 和 `completion` 都是服务端只读事实，不能由模型提交或伪造。
 - 不向工具传本地路径、脚本、二进制、shell 命令、任意 URL、Cookie 或 Token。
@@ -345,7 +404,7 @@ education-resources 工具。取消后的中间产物由服务端 quarantine，�
 - `references/intent-and-clarification.md`：独立的 user_role、resource_target、constraints 模型和澄清。
 - `references/discovery-strategy.md`：搜索方向、查询设计、来源策略和停止条件。
 - `references/adaptive-retrieval.md`：Plan/Search/Evaluate/Inspect?/Gap 循环、extend、Coverage、失败解释和停止决策。
-- `references/acquisition-strategy.md`：0022 Acquisition Router、Artifact/Asset/Bundle、七种角色、旧 Provider/SmartEdu 映射、网页物化、Browser capture 条件和获取安全边界。
+- `references/acquisition-strategy.md`：Capability Authority、Artifact/Asset/Bundle、ActualOutcome、七种角色、历史 Provider/SmartEdu 映射、网页物化、Browser capture 条件和获取安全边界。
 - `references/site-whitelist.md`：可信站点定向搜索参考。
 - `references/candidate-judgment.md`：ResultSet 审查、展示子集和证据护栏。
 - `references/inspection-strategy.md`：Inspection Gate 决策、结果解释、比较与停止条件。
@@ -356,8 +415,9 @@ education-resources 工具。取消后的中间产物由服务端 quarantine，�
 
 ## 当前验收边界
 
-本 Skill 已按 0022 语义和 catalog 1.3.0 的可选输出字段完成对齐；服务层、migration 5、
-多资产 Provider、取消/重启状态、Archive/Library 关系已通过本地根回归。0023 又通过 4/4
-真实 stdio 子进程 E2E 和 352/352 全量回归，覆盖强杀/同库重启、部分失败和认证后新 Job
-恢复。真实平台网络、OpenClaw doctor/probe 和生产多租户隔离仍需外部环境；对话只能依据
-MCP 当前返回的权威状态，不得把本文件的设计说明当作运行时成功事实。
+本 Skill 文档已按当前 catalog 1.5.0、Capability Authority、schema version 7、AssetBundle 与
+Outcome 投影语义对齐。2026-08-08 的 0024 历史基线在原生 Linux 临时目录中通过全量 374/374、stdio
+E2E 8/8、retrieval calibration 39/39、`compileall`，并串行通过 OpenClaw
+config/status/doctor/probe（精确发现 13 个 Tool，`diagnostics=[]`）。默认 Agent 的完整自然
+语言资源业务回合、真实平台 readiness 和生产多租户隔离仍未完成；对话只能依据 MCP 当前
+返回的权威状态，不得把本文件的设计说明或离线 fixture 当作运行时成功事实。

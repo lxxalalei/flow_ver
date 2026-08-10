@@ -15,11 +15,20 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.acquisition import AcquisitionRouter
+from education_resource_mcp.acquisition import (
+    AcquisitionRouter,
+    AcquisitionStrategy,
+    ProviderRegistration,
+)
 from education_resource_mcp.acquisition.web_fetch import FetchResult
 from education_resource_mcp.acquisition.web_materializer import WebMaterializer
 from education_resource_mcp.config import Settings
 from education_resource_mcp.downloader import DownloadResult
+from education_resource_mcp.inspection import (
+    InspectionResult,
+    InspectionRouter,
+    build_default_inspection,
+)
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
 
@@ -58,6 +67,43 @@ class _FixtureFetcher:
         return FetchResult(url, 200, "image/png", PNG, {}), None
 
 
+class _StaticLandingInspector:
+    """Offline evidence for the landing page materialized by this fixture."""
+
+    platform_id = "generic"
+    inspector_id = "generic"
+    version = "1.0.0"
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        "scope": "landing_page",
+                        "kind": "webpage",
+                        "container": "html",
+                        "mime_type": "text/html",
+                        "role": "landing",
+                        "materializable": True,
+                        "requires_auth": False,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                self.inspector_id,
+                method="offline-fixture",
+                cache_status="miss",
+                inspected_at="2026-08-08T00:00:00Z",
+            ),
+            failures=[],
+        )
+
+
 def _settings(data_dir: Path) -> Settings:
     return Settings(
         data_dir=data_dir,
@@ -93,9 +139,24 @@ class AcquisitionServiceTests(unittest.TestCase):
             ),
             download_provider=direct,
             acquisition_router=AcquisitionRouter(
-                direct_provider=direct,
-                web_materializer=WebMaterializer(fetcher=self.fetcher),
+                [
+                    ProviderRegistration(
+                        provider_id="generic-direct",
+                        provider_version="1.0.0",
+                        provider=direct,
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    ),
+                    ProviderRegistration(
+                        provider_id="generic-web-materializer",
+                        provider_version="1.0.0",
+                        provider=WebMaterializer(fetcher=self.fetcher),
+                        strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+                        scopes=("landing_page",),
+                    ),
+                ]
             ),
+            inspection_router=InspectionRouter([_StaticLandingInspector()]),
         )
 
     def tearDown(self) -> None:
@@ -113,10 +174,16 @@ class AcquisitionServiceTests(unittest.TestCase):
             [{"platform": "generic", "queries": [{"query": "恐龙"}]}],
             limit=10,
         )
+        candidate = result_set["candidates"][0]
+        self.service.inspect(
+            flow["flow_id"],
+            "inspect-acquisition-service-0001",
+            candidate["resource_id"],
+        )
         presentation = self.service.presentation_save(
             flow["flow_id"],
             result_set["result_set_id"],
-            [result_set["candidates"][0]["resource_id"]],
+            [candidate["resource_id"]],
             "present-acquisition-service-0001",
         )
         selection = self.service.selection_save(
@@ -140,6 +207,12 @@ class AcquisitionServiceTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "start-acquisition-service-00001",
+            presentation_id=plan["presentation_id"],
+            presented_version=plan["presented_version"],
+            selection_version=plan["selection_version"],
+            selection_digest=plan["selection_digest"],
+            plan_digest=plan["plan_digest"],
+            authority_digest=plan["authority_digest"],
         )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:

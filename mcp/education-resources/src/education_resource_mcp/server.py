@@ -220,6 +220,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         plan_digest: str,
         confirmation_token: str,
         idempotency_key: str,
+        authority_digest: str | None = None,
     ) -> dict[str, Any]:
         """Start an asynchronous download after explicit user confirmation."""
         return _invoke(
@@ -233,6 +234,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
                 selection_version=selection_version,
                 selection_digest=selection_digest,
                 plan_digest=plan_digest,
+                authority_digest=authority_digest,
             ),
             flow_id=flow_id,
             plan_id=plan_id,

@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quanxiao.example/contracts/education-resource/schemas/plan-item.schema.json",
+  "title": "Education resource capability-aware download Plan item",
+  "description": "A server-generated Plan item that never accepts a client-supplied path, URL or credential. The 1.5 schema preserves the complete 1.4 base projection; when any capability-authority field is present, the complete representation, provider, capability, eligibility and binding group is required.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "resource_id",
+    "selected_position",
+    "platform",
+    "planned_container",
+    "estimated_size_bytes",
+    "effective_max_bytes",
+    "risks"
+  ],
+  "properties": {
+    "resource_id": {
+      "$ref": "common.schema.json#/$defs/resource_id"
+    },
+    "selected_position": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "platform": {
+      "$ref": "common.schema.json#/$defs/platform_id"
+    },
+    "representation_id": {
+      "$ref": "common.schema.json#/$defs/representation_id"
+    },
+    "planned_scope": {
+      "$ref": "common.schema.json#/$defs/capability_scope"
+    },
+    "planned_strategy": {
+      "$ref": "common.schema.json#/$defs/capability_strategy"
+    },
+    "planned_provider": {
+      "$ref": "common.schema.json#/$defs/provider_ref"
+    },
+    "capability": {
+      "$ref": "#/$defs/capability_binding"
+    },
+    "eligibility": {
+      "$ref": "#/$defs/eligibility_ref"
+    },
+    "binding_digest": {
+      "$ref": "common.schema.json#/$defs/binding_digest"
+    },
+    "planned_container": {
+      "type": "string",
+      "enum": [
+        "original",
+        "pdf",
+        "epub",
+        "mp4",
+        "mp3",
+        "html",
+        "text"
+      ]
+    },
+    "estimated_size_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "effective_max_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5368709120
+    },
+    "risks": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/risk"
+      }
+    }
+  },
+  "$defs": {
+    "capability_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_id",
+        "descriptor_version",
+        "descriptor_digest",
+        "readiness_snapshot_id"
+      ],
+      "properties": {
+        "capability_id": {
+          "$ref": "common.schema.json#/$defs/capability_id"
+        },
+        "descriptor_version": {
+          "$ref": "common.schema.json#/$defs/component_version"
+        },
+        "descriptor_digest": {
+          "$ref": "common.schema.json#/$defs/canonical_digest"
+        },
+        "readiness_snapshot_id": {
+          "$ref": "common.schema.json#/$defs/readiness_snapshot_id"
+        }
+      }
+    },
+    "eligibility_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligibility_id",
+        "status",
+        "decision_digest"
+      ],
+      "properties": {
+        "eligibility_id": {
+          "$ref": "common.schema.json#/$defs/eligibility_id"
+        },
+        "status": {
+          "$ref": "common.schema.json#/$defs/eligibility_status"
+        },
+        "expires_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "decision_digest": {
+          "$ref": "common.schema.json#/$defs/canonical_digest"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "level",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "level": {
+          "$ref": "common.schema.json#/$defs/risk_level"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "representation_id"
+            ]
+          },
+          {
+            "required": [
+              "planned_scope"
+            ]
+          },
+          {
+            "required": [
+              "planned_strategy"
+            ]
+          },
+          {
+            "required": [
+              "planned_provider"
+            ]
+          },
+          {
+            "required": [
+              "capability"
+            ]
+          },
+          {
+            "required": [
+              "eligibility"
+            ]
+          },
+          {
+            "required": [
+              "binding_digest"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "representation_id",
+          "planned_scope",
+          "planned_strategy",
+          "planned_provider",
+          "capability",
+          "eligibility",
+          "binding_digest"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "planned_scope": {
+            "const": "primary_resource"
+          }
+        },
+        "required": [
+          "planned_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "planned_provider": {
+            "properties": {
+              "scope": {
+                "const": "primary_resource"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "planned_scope": {
+            "const": "representation"
+          }
+        },
+        "required": [
+          "planned_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "planned_provider": {
+            "properties": {
+              "scope": {
+                "const": "representation"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "planned_scope": {
+            "const": "landing_page"
+          }
+        },
+        "required": [
+          "planned_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "planned_provider": {
+            "properties": {
+              "scope": {
+                "const": "landing_page"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "planned_scope": {
+            "const": "metadata"
+          }
+        },
+        "required": [
+          "planned_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "planned_provider": {
+            "properties": {
+              "scope": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

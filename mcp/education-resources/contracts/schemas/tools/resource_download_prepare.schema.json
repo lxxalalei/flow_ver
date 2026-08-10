@@ -35,7 +35,8 @@
         },
         "allow_safe_fallback": {
           "type": "boolean",
-          "default": true
+          "default": true,
+          "description": "Compatibility preference only. When true, the server may follow a fallback edge that is explicitly declared by the bound capability descriptor and deployment-readiness snapshot, and that remains valid after per-resource revalidation. This flag never authorizes a different Provider, platform, capability, scope, representation, or strategy; generic Provider takeover and landing/metadata substitution for a primary resource are forbidden. When no bound fallback exists, the server must reject or keep the original capability rather than infer a fallback."
         }
       }
     },
@@ -65,60 +66,7 @@
       }
     },
     "plan_item": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "resource_id",
-        "selected_position",
-        "platform",
-        "planned_container",
-        "estimated_size_bytes",
-        "effective_max_bytes",
-        "risks"
-      ],
-      "properties": {
-        "resource_id": {
-          "$ref": "../common.schema.json#/$defs/resource_id"
-        },
-        "selected_position": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 50
-        },
-        "platform": {
-          "$ref": "../common.schema.json#/$defs/platform_id"
-        },
-        "planned_container": {
-          "type": "string",
-          "enum": [
-            "original",
-            "pdf",
-            "epub",
-            "mp4",
-            "mp3",
-            "html",
-            "text"
-          ]
-        },
-        "estimated_size_bytes": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "effective_max_bytes": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "risks": {
-          "type": "array",
-          "maxItems": 16,
-          "items": {
-            "$ref": "#/$defs/risk"
-          }
-        }
-      }
+      "$ref": "../plan-item.schema.json"
     },
     "input": {
       "type": "object",
@@ -230,7 +178,21 @@
         },
         "plan_digest": {
           "$ref": "../common.schema.json#/$defs/plan_digest"
+        },
+        "authority_digest": {
+          "$ref": "../common.schema.json#/$defs/authority_digest"
+        },
+        "capability_binding_version": {
+          "$ref": "../common.schema.json#/$defs/capability_binding_version"
         }
+      },
+      "dependentRequired": {
+        "authority_digest": [
+          "capability_binding_version"
+        ],
+        "capability_binding_version": [
+          "authority_digest"
+        ]
       }
     },
     "output": {

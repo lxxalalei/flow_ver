@@ -87,6 +87,80 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
             f"flow-request-{suffix}",
         )
 
+    def test_fact_coverage_is_factual_and_keeps_identity_separate_from_availability(self) -> None:
+        coverage = ResourceService._fact_coverage(
+            [
+                {
+                    "platform": "generic",
+                    "resource_type": "article",
+                    # Deliberately no stable identity: provenance owns that
+                    # observation; it is not availability evidence.
+                    "identity": {},
+                },
+                {
+                    "platform": "bilibili",
+                    "resource_type": "video",
+                    "identity": {"canonical_url": "https://example.test/video"},
+                },
+            ],
+            [
+                {"platform": "generic", "status": "succeeded"},
+                {"platform": "bilibili", "status": "failed"},
+            ],
+            [
+                {
+                    "platform": "bilibili",
+                    "code": "PROVIDER_FAILED",
+                    "message": "fixture failure",
+                }
+            ],
+        )
+
+        self.assertEqual("factual", coverage["kind"])
+        self.assertEqual("factual-coverage-v1", coverage["schema_version"])
+        self.assertEqual("partial", coverage["status"])
+        self.assertEqual(2, coverage["candidate_count"])
+        self.assertEqual(2, coverage["platform_count"])
+        self.assertEqual(
+            [
+                {"resource_type": "article", "count": 1},
+                {"resource_type": "video", "count": 1},
+            ],
+            coverage["resource_types"],
+        )
+        self.assertEqual(
+            ["source", "inspection"],
+            [gap["dimension"] for gap in coverage["gaps"]],
+        )
+        self.assertNotIn("availability", {gap["dimension"] for gap in coverage["gaps"]})
+        self.assertTrue(
+            {"factual_coverage", "semantic_review", "stop_decision", "model_version"}.isdisjoint(
+                coverage
+            )
+        )
+
+    def test_empty_fact_coverage_reports_observed_empty_result_not_displayability(self) -> None:
+        coverage = ResourceService._fact_coverage(
+            [],
+            [{"platform": "generic", "status": "succeeded"}],
+            [],
+        )
+
+        self.assertEqual("empty", coverage["status"])
+        self.assertEqual(0, coverage["candidate_count"])
+        self.assertEqual(1, coverage["platform_count"])
+        self.assertEqual([], coverage["resource_types"])
+        self.assertEqual(
+            [
+                {
+                    "dimension": "source",
+                    "reason": "本轮没有服务端记录的候选",
+                    "count": 0,
+                }
+            ],
+            coverage["gaps"],
+        )
+
     def test_search_uses_identity_dedup_before_limit_and_fills_facts(self) -> None:
         provider = _IntegrationProvider(
             search_resources=[
@@ -247,6 +321,72 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
             self.store.get_idempotency(
                 f"resource_search:{flow['flow_id']}", request["idempotency_key"]
             )["result_id"],
+        )
+        self.assertEqual("factual", first["coverage"]["kind"])
+        self.assertEqual("factual-coverage-v1", first["coverage"]["schema_version"])
+        self.assertEqual(
+            first["coverage"],
+            self.store.get_result_set(first["result_set_id"])["coverage"],
+        )
+
+    def test_direction_is_trace_only_and_cannot_change_factual_coverage(self) -> None:
+        provider = _IntegrationProvider(
+            search_resources=[
+                {
+                    "platform": "generic",
+                    "title": "同一服务端候选",
+                    "source_url": "https://example.test/direction-neutral",
+                    "resource_type": "article",
+                    "metadata": {
+                        "coverage": {"status": "covered"},
+                        "model_version": "untrusted-adapter-field",
+                    },
+                    "coverage": {"status": "covered"},
+                    "model_version": "untrusted-adapter-field",
+                }
+            ],
+            creator_resources=[],
+        )
+        service = self._service(provider)
+        first_flow = self._flow("direction-a")
+        second_flow = self._flow("direction-b")
+
+        first = service.search(
+            first_flow["flow_id"],
+            "search-direction-neutral-a",
+            [
+                {
+                    "platform": "generic",
+                    "direction": "建立概念解释",
+                    "queries": [{"query": "同一查询"}],
+                }
+            ],
+            task_version=first_flow["task_version"],
+            limit=10,
+        )
+        second = service.search(
+            second_flow["flow_id"],
+            "search-direction-neutral-b",
+            [
+                {
+                    "platform": "generic",
+                    "direction": "寻找实践案例",
+                    "queries": [{"query": "同一查询"}],
+                }
+            ],
+            task_version=second_flow["task_version"],
+            limit=10,
+        )
+
+        self.assertEqual(first["coverage"], second["coverage"])
+        self.assertEqual("建立概念解释", first["platform_runs"][0]["direction"])
+        self.assertEqual("寻找实践案例", second["platform_runs"][0]["direction"])
+        self.assertNotIn("direction", first["coverage"])
+        self.assertNotIn("model_version", first["coverage"])
+        self.assertNotIn("semantic_review", first["coverage"])
+        self.assertEqual(
+            first["coverage"],
+            service.flow_status(first_flow["flow_id"])["current_result_set"]["coverage"],
         )
 
     def test_search_extend_creates_fresh_immutable_snapshot_and_provenance(self) -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -49,6 +49,12 @@ _PLATFORM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _RESOURCE_ID_RE = re.compile(r"^res_[A-Za-z0-9_-]{16,64}$")
 _REPRESENTATION_ID_RE = re.compile(r"^repr_[A-Za-z0-9_-]{16,64}$")
 _MIME_RE = re.compile(r"^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$")
+_SCOPE_RE = re.compile(r"^(?:primary_resource|representation|landing_page|metadata)$")
+_TECHNICAL_AVAILABILITY_STATUSES = frozenset(
+    {"available", "auth_required", "unavailable", "unknown", "policy_blocked"}
+)
+_SOURCE_FINGERPRINT_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
+_RESOLUTION_REPRESENTATION_ROLES = frozenset({"primary", "landing", "metadata", "attachment", "companion"})
 _CONTAINER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 _ROLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _INSPECTOR_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
@@ -155,6 +161,15 @@ _AVAILABILITY_FIELDS = frozenset({"status"})
 _REPRESENTATION_FIELDS = frozenset(
     {
         "representation_id",
+        # ``scope``/``evidence`` are the capability-authority fields.  The
+        # legacy estimated-size/materializable fields remain accepted for
+        # contract-version 1 consumers while adapters emit the authoritative
+        # fields below.
+        "scope",
+        "capability_ref",
+        "technical_availability",
+        "evidence",
+        "size_bytes",
         "kind",
         "container",
         "mime_type",
@@ -166,6 +181,7 @@ _REPRESENTATION_FIELDS = frozenset(
         "rights_hint",
     }
 )
+_EVIDENCE_FIELDS = frozenset({"source", "source_fingerprint", "observed_at", "expires_at"})
 _INSPECTION_FIELDS = frozenset(
     {"inspector_id", "version", "method", "cache_status", "inspected_at", "warnings"}
 )
@@ -297,15 +313,15 @@ def _optional_string(
     )
 
 
-def _validate_timestamp(value: Any) -> str:
-    timestamp = _string(value, "inspected_at", minimum=1, maximum=128)
+def _validate_timestamp(value: Any, field: str = "inspected_at") -> str:
+    timestamp = _string(value, field, minimum=1, maximum=128)
     candidate = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
     try:
         parsed = datetime.fromisoformat(candidate)
     except ValueError:
-        _invalid("inspected_at 必须是 ISO 8601 时间戳")
+        _invalid(f"{field} 必须是 ISO 8601 时间戳")
     if parsed.tzinfo is None:
-        _invalid("inspected_at 必须包含时区")
+        _invalid(f"{field} 必须包含时区")
     return timestamp
 
 
@@ -358,6 +374,28 @@ def _normalise_availability(value: Any) -> dict[str, str]:
     return {"status": str(status)}
 
 
+def _normalise_evidence(value: Any, field: str) -> dict[str, Any]:
+    evidence = _mapping(value, field)
+    _reject_extra_fields(evidence, _EVIDENCE_FIELDS, field)
+    for required in _EVIDENCE_FIELDS:
+        if required not in evidence:
+            _invalid(f"{field} 缺少 {required}")
+    source = evidence.get("source")
+    if not isinstance(source, str) or source not in {"inspection", "provider", "metadata", "resolution"}:
+        _invalid(f"{field}.source 无效")
+    fingerprint = evidence.get("source_fingerprint")
+    if not isinstance(fingerprint, str) or _SOURCE_FINGERPRINT_RE.fullmatch(fingerprint) is None:
+        _invalid(f"{field}.source_fingerprint 无效")
+    observed_at = _validate_timestamp(evidence.get("observed_at"), f"{field}.observed_at")
+    expires_at = _validate_timestamp(evidence.get("expires_at"), f"{field}.expires_at")
+    return {
+        "source": source,
+        "source_fingerprint": fingerprint,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+    }
+
+
 def _normalise_representation(value: Any, index: int) -> dict[str, Any]:
     representation = _mapping(value, f"representations[{index}]")
     _reject_extra_fields(representation, _REPRESENTATION_FIELDS, "representation")
@@ -372,6 +410,35 @@ def _normalise_representation(value: Any, index: int) -> dict[str, Any]:
             maximum=73,
             pattern=_REPRESENTATION_ID_RE,
         )
+
+    scope = representation.get("scope")
+    if scope is not None:
+        if not isinstance(scope, str) or _SCOPE_RE.fullmatch(scope) is None:
+            _invalid("representation.scope 无效")
+        result["scope"] = str(scope)
+
+    capability_ref = representation.get("capability_ref")
+    if capability_ref is not None:
+        result["capability_ref"] = _string(
+            capability_ref,
+            "representation.capability_ref",
+            minimum=1,
+            maximum=256,
+            pattern=re.compile(r"^[a-z][a-z0-9_.:-]{0,255}$"),
+        )
+
+    technical_availability = representation.get("technical_availability")
+    if technical_availability is not None:
+        if (
+            not isinstance(technical_availability, str)
+            or technical_availability not in _TECHNICAL_AVAILABILITY_STATUSES
+        ):
+            _invalid("representation.technical_availability 无效")
+        result["technical_availability"] = technical_availability
+
+    evidence = representation.get("evidence")
+    if evidence is not None:
+        result["evidence"] = _normalise_evidence(evidence, "representation.evidence")
 
     kind = representation.get("kind")
     if not isinstance(kind, str) or kind not in REPRESENTATION_KINDS:
@@ -407,6 +474,10 @@ def _normalise_representation(value: Any, index: int) -> dict[str, Any]:
     )
     if role is not None:
         result["role"] = role
+    if scope == "primary_resource" and role is not None and role != "primary":
+        _invalid("primary_resource scope 必须使用 primary role")
+    if role == "primary" and scope is not None and scope != "primary_resource":
+        _invalid("primary role 必须使用 primary_resource scope")
 
     language = _optional_string(
         representation.get("language"),
@@ -416,6 +487,12 @@ def _normalise_representation(value: Any, index: int) -> dict[str, Any]:
     )
     if language is not None:
         result["language"] = language
+
+    size_bytes = representation.get("size_bytes")
+    if size_bytes is not None:
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
+            _invalid("size_bytes 必须是非负整数")
+        result["size_bytes"] = size_bytes
 
     size = representation.get("estimated_size_bytes")
     if size is not None:
@@ -688,6 +765,39 @@ class InspectionRouter:
     def registered_platforms(self) -> tuple[str, ...]:
         return tuple(sorted(self._inspectors))
 
+    @property
+    def registered_inspectors(self) -> Mapping[str, Mapping[str, Any]]:
+        """Return a read-only runtime inventory of instantiated inspectors.
+
+        The inventory is deliberately sourced from the inspector instances,
+        never from the retrieval/catalog registry.  Adapters may declare a
+        ``supported_scopes`` tuple; an absent declaration is represented as an
+        empty tuple rather than inferred from catalog claims.
+        """
+
+        inventory: dict[str, Mapping[str, Any]] = {}
+        for platform_id, inspector in self._inspectors.items():
+            raw_scopes = getattr(inspector, "supported_scopes", ())
+            if isinstance(raw_scopes, (str, bytes, bytearray)):
+                scopes: tuple[str, ...] = ()
+            elif isinstance(raw_scopes, Sequence):
+                valid_scopes = {
+                    scope
+                    for scope in raw_scopes
+                    if isinstance(scope, str) and _SCOPE_RE.fullmatch(scope) is not None
+                }
+                scopes = tuple(sorted(valid_scopes))
+            else:
+                scopes = ()
+            entry = {
+                "platform_id": platform_id,
+                "inspector_id": getattr(inspector, "inspector_id", ""),
+                "version": getattr(inspector, "version", ""),
+                "supported_scopes": scopes,
+            }
+            inventory[platform_id] = MappingProxyType(entry)
+        return MappingProxyType(inventory)
+
     def inspect(self, resource: Mapping[str, Any]) -> InspectionResult:
         if not isinstance(resource, Mapping):
             _unsupported()
@@ -868,6 +978,60 @@ def source_fingerprint(resource: Mapping[str, Any] | Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def build_representation_authority(
+    resource: Mapping[str, Any] | Any,
+    *,
+    scope: str,
+    role: str,
+    technical_availability: str,
+    source: str = "inspection",
+    observed_at: str | None = None,
+    expires_at: str | None = None,
+) -> dict[str, Any]:
+    """Build the non-locator capability facts attached to a representation.
+
+    The evidence is intentionally a canonical source fingerprint and bounded
+    timestamps; it never carries a URL, path, response body, or provider
+    locator.  ``source_fingerprint()`` remains a bare digest for legacy cache
+    keys, while this authority projection uses the schema-level ``sha256:``
+    prefix.
+    """
+
+    if not isinstance(scope, str) or _SCOPE_RE.fullmatch(scope) is None:
+        _invalid("representation.scope 无效")
+    if not isinstance(role, str) or role not in _RESOLUTION_REPRESENTATION_ROLES:
+        _invalid("representation.role 无效")
+    if role == "primary" and scope != "primary_resource":
+        _invalid("primary role 必须使用 primary_resource scope")
+    if scope == "primary_resource" and role != "primary":
+        _invalid("primary_resource scope 必须使用 primary role")
+    if not isinstance(source, str) or source not in {"inspection", "provider", "metadata", "resolution"}:
+        _invalid("representation.evidence.source 无效")
+    if not isinstance(technical_availability, str) or technical_availability not in _TECHNICAL_AVAILABILITY_STATUSES:
+        _invalid("representation.technical_availability 无效")
+
+    now = _validate_timestamp(
+        observed_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "representation.evidence.observed_at",
+    )
+    if expires_at is None:
+        expiry_dt = datetime.fromisoformat(now[:-1] + "+00:00" if now.endswith("Z") else now)
+        expiry = (expiry_dt + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    else:
+        expiry = _validate_timestamp(expires_at, "representation.evidence.expires_at")
+
+    return {
+        "scope": scope,
+        "technical_availability": technical_availability,
+        "evidence": {
+            "source": source,
+            "source_fingerprint": "sha256:" + source_fingerprint(resource),
+            "observed_at": now,
+            "expires_at": expiry,
+        },
+    }
+
+
 __all__ = [
     "AVAILABILITY_STATUSES",
     "CACHE_STATUSES",
@@ -877,6 +1041,7 @@ __all__ = [
     "InspectionRouter",
     "ResourceInspector",
     "build_default_inspection",
+    "build_representation_authority",
     "normalize_resolved_resource",
     "source_fingerprint",
 ]
