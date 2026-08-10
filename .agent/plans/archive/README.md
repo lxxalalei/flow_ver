@@ -14,6 +14,10 @@
   `0025-platform-capability-contract-alignment.md` 是两个不同计划。
 - 计划重命名或移动后，所有 Markdown 链接必须指向新路径；正文中的计划引用也应使用
   完整文件名或明确的完整计划标题，避免重复编号造成歧义。
+- 0031/0032 收敛了 active Skill references。归档计划中若出现
+  `platform-capabilities.md`、`acquisition-strategy.md`、`inspection-strategy.md` 等旧路径，
+  它们是当时的审计证据，不表示旧文件仍存在；现行映射见
+  [`docs/archive/README.md`](../../../docs/archive/README.md#历史-skill-reference-路径)。
 
 ## 当前顶层计划
 
