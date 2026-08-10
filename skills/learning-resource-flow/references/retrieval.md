@@ -17,6 +17,17 @@ MCP factual `coverage` 只说明服务端实际观察到的候选、来源、去
 
 `SearchDirection` 是为了覆盖一个明确目标或关闭一个关键 Gap 的搜索路线，不是 query、platform、resource type 或评分标签。
 
+常见方向可以围绕用户希望获得的实际学习结果展开，例如：
+
+- 理解：讲解、图解、课程、文章、图书；
+- 沉浸：故事、纪录片、音频、绘本、人物叙事；
+- 观察：过程记录、地图、图鉴、实验现象、案例；
+- 实践：实验、手工、项目、活动方案、生活任务；
+- 巩固：练习、题卡、问答、互动工具；
+- 表达：讲述、写作、绘画、模型、展示任务。
+
+这些只是帮助形成 SearchDirection 的语义模板，不是固定 taxonomy、用户事实或必须凑齐的资源类型。任务很窄时一个方向就够；不要为了形式多样而加入无关方向。
+
 首轮通常规划 1–2 个方向。每个方向选择少量直接相关平台和查询，不无差别搜索全部平台。
 
 建议预算：
@@ -34,6 +45,8 @@ MCP factual `coverage` 只说明服务端实际观察到的候选、来源、去
 首轮使用 `resource_search mode=replace`。只有明确 Replan 且有当前 `base_result_set_id` 时才使用 `mode=extend`。
 
 ResultSet 始终不可变；跨轮复制、去重和新快照由 MCP 完成，Skill 不手工合并候选。
+
+`has_more=true` 只说明服务端还有未返回候选，不表示当前任务存在语义 Gap，也不构成自动翻页/继续搜索的理由。只有当前私有 Gap 仍存在，并且继续同一路线确实可能关闭它时，才继续取更多结果或 Replan。
 
 ## SemanticReview
 
@@ -90,4 +103,8 @@ Gap 只表示“尚未满足/验证，并且会改变下一步搜索、推荐或
 
 ResultSet 不是 Presentation。只有 Skill 实际向用户展示的有序子集，才能以完全相同顺序提交 `resource_presentation_save`。用户只能从当前 Presentation 选择。
 
+展示项优先让用户看到真正影响选择的信息：标题、资源类型/来源、为什么匹配当前目标、重要限制或不确定性；需要用户自行打开原始公开页面时，可以使用 Candidate/Resolution 中实际返回的 canonical public URL，不从标题或平台名拼 URL。
+
 `resource_presentation_save` 失败时，刚才的文本列表不能被当成可选择的权威 Presentation；先恢复服务端状态，必要时重新展示并保存，再邀请用户按编号选择。
+
+只有 Presentation 保存成功后才邀请用户按编号选择。“全部”只表示当前 Presentation 中实际可见的全部位置，不包括隐藏 ResultSet 候选、旧 Presentation 或其他轮次结果。
