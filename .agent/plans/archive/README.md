@@ -60,3 +60,4 @@
 | [0030-document-authority-consolidation.md](0030-document-authority-consolidation.md) | completed | 文档权威、归档和默认阅读面收敛 |
 | [0031-document-surface-simplification.md](0031-document-surface-simplification.md) | completed | 默认阅读面与 Skill/reference 职责去重 |
 | [0032-skill-reference-compat-cleanup.md](0032-skill-reference-compat-cleanup.md) | completed | 删除旧 reference 兼容壳并保留历史路径迁移说明 |
+| [0033-project-governance-integration.md](0033-project-governance-integration.md) | completed | 融合最小修改、复杂度举证、scope checkpoint 与分级验证规则 |
