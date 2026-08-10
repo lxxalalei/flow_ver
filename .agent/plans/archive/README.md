@@ -54,3 +54,4 @@
 | [0025-platform-capability-contract-alignment-handoff.md](0025-platform-capability-contract-alignment-handoff.md) | completed snapshot | 0025 完成快照与 0028 交接 |
 | [0026-acquisition-call-site-migration.md](0026-acquisition-call-site-migration.md) | completed | 获取调用面迁移完成计划 |
 | [0030-document-authority-consolidation.md](0030-document-authority-consolidation.md) | completed | 文档权威、归档和默认阅读面收敛 |
+| [0031-document-surface-simplification.md](0031-document-surface-simplification.md) | completed | 默认阅读面与 Skill/reference 职责去重 |
