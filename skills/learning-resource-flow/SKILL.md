@@ -84,6 +84,14 @@ Understand
   -> optional resource_archive / resource_library_search
 ```
 
+### 通用 Tool 调用不变量
+
+- 对所有要求 `idempotency_key` 的逻辑操作：同一个请求因超时、响应丢失或连接问题重试时复用原 key；参数、目标、选择或动作语义发生变化时使用新 key。
+- Tool 返回 `ok=false`、结构化失败或响应结果不确定时，不假定状态已经成功转换；优先读取 `resource_flow_status` / `resource_job_status` 等权威事实后再决定下一步。
+- 业务 ID、版本、position、digest、confirmation token、Provider、路径等只使用 MCP 实际返回值，不从聊天文本、标题、URL 或模型记忆重建。
+- 核心 `goal`、`resource_target` 或会改变任务语义的硬约束发生实质变化时建立新 Flow；同一核心任务下只是换 SearchDirection、来源或查询角度时继续当前 Flow。
+- 已经产生网络/文件副作用的操作不因上下文压缩或模型不确定而自动重放；先恢复真实 Job/Flow 状态。
+
 ### 不允许跳步
 
 - ResultSet 不是 Presentation；未实际展示的候选不能被选择。
