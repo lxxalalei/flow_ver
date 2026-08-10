@@ -6,24 +6,55 @@
 
 - 做了什么。
 - 哪些关键文件发生变化。
-- 对行为或架构有什么影响。
+- 对用户行为、业务不变量或架构有什么影响。
+- 是否引入新 abstraction、source of truth、fallback、兼容层或数据限制；若有，引用对应复杂度举证。
 
-## 验证
+## 验证等级
 
-- 执行的测试、lint、类型检查、语法检查或 smoke test。
-- 每项验证的结果。
-- 未能执行的验证及原因。
+只勾选本次**实际执行**的等级，不得用低一级验证冒充高一级。
+
+```text
+[ ] implemented
+[ ] statically checked
+[ ] targeted unit tested
+[ ] subsystem/integration tested
+[ ] backend E2E tested
+[ ] real Agent/user-flow tested
+[ ] visual behavior inspected
+[ ] full regression tested
+```
+
+对每项实际验证说明：
+
+| Validation | Result | What it proves | What it does NOT prove |
+| --- | --- | --- | --- |
+| | | | |
+
+特别注意：
+
+- 后端 E2E、fixture、Service 直调、MCP probe/doctor 不证明真实 Agent/用户流程正确。
+- 没有实际打开/执行真实用户链路时，明确写“未执行真实 Agent/用户流程验证”。
+- 没有实际运行全量测试时，不得写“全量回归通过”。
+- 小改动默认报告 targeted validation；全量回归必须有明确的跨切面/发布风险依据。
+
+## 未执行的验证
+
+- 没有运行哪些更高等级或昂贵验证。
+- 为什么本次不需要，或受什么环境/网络/凭据条件阻塞。
+- 剩余风险是什么。
 
 ## 计划状态
 
-- 本次计划是否全部 `completed`。
+- 本次 Task Spec / 执行计划是否全部满足 Acceptance Criteria。
+- Goal 和 Non-goals 是否保持不变。
+- 是否检测到 scope drift；如发生，如何处理。
 - 若存在 `blocked`，说明阻塞证据、影响和继续所需条件。
 
 ## 风险与下一步
 
 - 已知但未解决的风险。
+- 发现但按 scope control 没有顺手修的无关问题。
 - 明确没有执行的破坏性、联网或生产动作。
 - 最有价值的下一步。
 
 只读任务也必须明确写明：“本轮只读，未修改工作区”。
-
