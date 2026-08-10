@@ -23,6 +23,20 @@ Presentation
 
 不得跳过用户确认，也不得把“用户之前说想要这个资源”自动解释为对当前 Plan 的确认。
 
+## 向用户解释当前 Plan
+
+`resource_download_prepare` 成功后，只解释 MCP 当前实际返回并会影响用户决定的事实，例如：
+
+- 这次准备获取的是哪些已选资源；
+- scope 是 `primary_resource`、representation、landing page 还是 metadata；
+- 已确认的 representation / container / format；
+- 服务端返回的大小预算、有效期/expiry、认证或策略限制；
+- warning、风险或明确声明的能力缺口。
+
+某字段没有返回就保持未知，不用平台常识或旧能力表补齐。Plan 只承诺它实际绑定的 scope；landing page 计划不能说成资源本体下载。
+
+用户不需要看到 `plan_id`、digest、confirmation token、Provider 内部名或原始 Plan JSON。确认问题应针对用户刚看过的实际计划，而不是一个抽象的“是否继续”。
+
 ## Capability Authority
 
 获取执行必须沿同一条可追溯链：
