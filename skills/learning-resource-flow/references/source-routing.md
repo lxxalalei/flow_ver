@@ -28,6 +28,14 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 
 同一个 SearchDirection 通常选 2–3 个最相关来源即可。只有存在来源覆盖 Gap 时再扩展。
 
+## Search 与 Creator Browse
+
+用户是在“按主题找内容”时使用普通 `resource_search`。只有用户的目标明确是浏览某个创作者/账号已有内容，且当前平台 Registry/Tool 能力实际支持 creator browse 时，才使用 `resource_browse_creator`。
+
+典型 creator browse 意图包括：用户提供创作者主页/账号并询问“这个人发了什么”“把这个作者的相关内容找出来”等。普通内容链接、单条资源 URL 或仅仅提到创作者名字，都不能自动转换成 creator browse 身份。
+
+`resource_browse_creator` 返回的仍然是 ResultSet，后续必须经过相同的 Evaluate → Presentation → Selection 流程；它不是批量下载入口。平台不支持、需要认证或返回其他结构化失败时保留真实状态，不偷偷改成另一种浏览/下载路线。
+
 ## 资源类型不是平台路由器
 
 `video`、`book`、`document`、`course` 等只是资源语义类型，不能据此直接决定 Provider 或 Acquisition strategy。
