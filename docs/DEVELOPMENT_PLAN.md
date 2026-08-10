@@ -18,11 +18,21 @@
 0027 平台获取能力接入
   -> 0028 真实 OpenClaw / 真实平台 E2E
   -> 0029 检索 benchmark 与 release gate
+  -> 主体架构阶段完成
+  -> 产品能力成熟：扩平台 / Library & Viewer / 持续质量优化 / readiness 扩展
+  -> 平台化部署
 ```
 
 0025 Platform Capability Contract Alignment 已于 2026-08-10 完成，是上述顺序的前置基础。
+当前 0027 不是新增产品方向，而是 2026-08-08 归档路线中原 0025 的“逐平台实际能力接入”执行面拆分：
+0025 已完成 Descriptor、Readiness、Resolution/Representation、Eligibility、Plan/Execution、exact Provider、
+Outcome 等能力权威骨架；0027 负责让源码中已存在的平台获取实现真正进入该权威链。因此，归档路线中的
+原 0026 Real OpenClaw & Platform E2E 对应当前 0028，原 0027 Retrieval Benchmark & Release Gate
+对应当前 0029。该拆分改变计划编号与颗粒度，不改变原路线的产品目标和先后依赖。
+
 文档治理由 [0030 计划](../.agent/plans/archive/0030-document-authority-consolidation.md) 单独跟踪，
-不改变产品路线。
+不改变产品路线。2026-08-08 的阶段规划保留在 archive 中作为历史决策依据；若本文与历史路线出现
+实质产品目标差异，必须显式记录差异原因，不能因文档精简而静默丢失既定目标。
 
 ## 产品目标与任务模型
 
@@ -130,11 +140,85 @@ generic Provider 猜路由，不把 landing page 或 metadata 冒充 primary res
 
 执行计划：[0029-retrieval-benchmark-release-gate.md](../.agent/plans/0029-retrieval-benchmark-release-gate.md)。
 
-### 后续：平台化部署
+### 主体架构阶段完成边界
 
-0027–0029 通过后，才讨论教育平台的远程 Streamable HTTP MCP、会话/凭据服务、存储和网络隔离、
-多租户授权、审计与配额。远程化不是当前本地 MVP 的默认前置，也不能通过扩大本地 Tool catalog
-替代真实平台化设计。
+0027–0029 全部通过后，主体架构阶段才结束。此时至少应满足：
+
+- 0023 的真实 OpenClaw 阻塞项已经由 0028 的真实证据关闭；
+- 检索不会因候选数量或标题表面相关而过早 Present，SemanticReview、Gap、StopDecision 的权威位置稳定；
+- Planner/Skill 能准确区分 primary resource、representation、landing page 和 metadata；
+- 真实 OpenClaw 能完成 Search → Inspect → Present → Select → Confirm → Acquire → Archive → Recover；
+- benchmark 与 critical invariants 已成为后续修改的稳定 release gate；
+- 公共 Tool 继续保持领域级入口，不因扩平台重新退化为脚本型 Tool 集合；
+- Registry、Capability、runtime、Skill、Schema、测试和文档之间没有已知语义漂移。
+
+达到该边界只表示“核心骨架可以稳定演进”，不表示产品能力、资料库体验或平台覆盖已经完成。
+
+### 后续阶段一：产品能力成熟
+
+0029 之后优先进入产品能力成熟阶段，而不是直接把主要精力切到远程化或多租户部署。
+这一阶段延续 2026-08-08 归档路线中“稳定扩平台与持续质量优化”的原始目标，并补回用户侧
+Library/Viewer 闭环。
+
+#### 1. Platform Expansion
+
+在不改变核心 Tool/authority 架构的前提下，逐步新增或强化：
+
+- Platform Adapter：提高发现覆盖、来源质量和平台特征表达；
+- Inspector：补强版本、Representation、availability、auth/policy 和可比较证据；
+- Acquisition Provider：只为通过 capability/readiness/policy 门槛的平台增加真实获取能力；
+- 平台能力必须继续走 Descriptor → Readiness → Resolution/Representation → Eligibility →
+  Plan/Execution → exact Provider → Outcome，不为“多支持一个平台”建立旁路。
+
+扩平台的完成标准不是代码存在，而是相应 benchmark、真实 E2E、readiness 与失败边界均可审计。
+
+#### 2. Library / Viewer
+
+Archive 成功不等于用户闭环完成。资料库必须从“存储资产”进一步演进为“按 Representation 正确打开和使用资源”。
+
+优先目标包括：
+
+- Representation-aware opening：Library 根据资源/Asset/Bundle 的真实表示选择正确打开方式；
+- WebBundle：底层可继续保存 ZIP/Bundle，但用户默认打开 `index.html` 或受控 primary representation，
+  不把 ZIP 文件本身当作最终阅读体验；
+- PDF / EPUB / video / audio：按真实 MIME、role、container 和平台策略提供相应查看/播放/打开入口；
+- Bundle / companion UX：主资源、字幕、封面、转写、附件等关系在资料库中可理解、可访问；
+- Library Search 返回的关系和展示信息应服务用户选择与再次使用，而不是泄露底层路径或存储细节。
+
+Viewer 是产品表现层，不得为了方便打开资源而绕过 Asset、Bundle、Archive、权限或路径安全边界。
+
+#### 3. Retrieval Quality Iteration
+
+0029 建立 benchmark 后，后续检索改进以 benchmark 为主回归入口：
+
+- 提升 Top-N relevance、Gap/Clarify 准确率、Inspect efficiency 和来源多样性；
+- 降低 Premature Present、Unnecessary Replan、Forbidden Display 和错误 capability promise；
+- 新增平台、Adapter、Inspector、Provider 或 Skill 规则时同步增加相应 gold/negative cases；
+- 不通过放宽 gold、增加随机重试、扩大 timeout 或静默 fallback 换取指标改善。
+
+#### 4. Capability Readiness Expansion
+
+随着真实平台验证积累，把平台从 `code_present` / experimental / auth_required 等中间状态逐步推进到
+可审计的 `production_ready`。状态提升必须来自当期环境的真实证据，而不是 Registry 布尔值、fixture
+通过或历史成功记录。
+
+产品能力成熟阶段不预先绑定单一计划编号。进入某个明确工作包时，再从 evergreen 路线创建新的
+`.agent/plans/<next-id>-*.md`，避免为了路线图先制造一批长期 pending 计划。
+
+### 后续阶段二：平台化部署
+
+只有在核心架构稳定、产品能力成熟路径明确后，才把主要开发重心转向教育平台的远程化和生产部署：
+
+- 远程 Streamable HTTP MCP；
+- 独立 session / credential service；
+- remote storage 与运行目录治理；
+- 网络隔离与受控出网；
+- multi-tenant authentication / authorization；
+- audit、quota、rate limit 与运维可观测性。
+
+远程化不是当前本地 MVP 的默认前置，也不能通过扩大本地 Tool catalog 替代真实平台化设计。
+平台化工作可以提前做必要预研，但不得以部署基础设施取代 Platform Expansion、Library/Viewer、
+Retrieval Quality Iteration 或 Capability Readiness Expansion 的产品成熟工作。
 
 ## 发布与变更门槛
 
