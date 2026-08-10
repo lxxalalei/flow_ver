@@ -50,7 +50,7 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 - 站点只表示“优先发现来源”，不证明内容正确、适合当前用途、当前可访问或可获取；
 - 某站点搜索失败只表示这条 discovery route 没拿到结果，不等于资源不存在，也不能触发 acquisition fallback。
 
-当前可优先参考的稳定来源线索：
+当前保留的 curated preferred source 线索：
 
 | 场景 | 来源线索 |
 | --- | --- |
