@@ -39,7 +39,7 @@ NNNN-short-topic.md
 
 ## 推荐模板
 
-```markdown
+````markdown
 # 计划标题
 
 - 状态：in_progress
@@ -146,7 +146,7 @@ Scope drift detected?:
 ## 结果
 
 - 完成后填写改动摘要、验证结果、未验证项和剩余风险。
-```
+````
 
 ## 状态要求
 
