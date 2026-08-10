@@ -58,6 +58,12 @@ Plan/Execution 绑定 exact Provider。Provider 失败时保留真实失败，�
 
 `web_capture` / web materialization 是明确的获取机制，只在当前 descriptor、readiness、representation 和 policy 允许时执行，不是所有平台失败后的兜底。
 
+## 幂等、变更与重新确认
+
+- 同一个逻辑请求因超时/响应丢失而重试时，复用该请求原有的 idempotency key；请求参数、选择或操作目标发生变化时使用新 key。
+- Tool 返回结构化失败时，不假定对应状态转换已经成功。响应不确定时先查询 Flow/Job 等服务端事实，再决定是否重试。
+- 用户修改 Selection、建立新的 Presentation、Plan 过期/失效或服务端重新校验发现冲突时，不沿用旧 Plan/确认；重新 `resource_download_prepare`，向用户展示新的实际计划并再次获得明确确认。
+
 ## Job 与结果
 
 Job 是异步状态，可能 queued/running/cancelling/succeeded/failed/cancelled；Bundle 可以 partial，但 partial 不等于 Job 新状态。
