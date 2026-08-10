@@ -39,6 +39,14 @@ Inspect 完成后重新读取当前事实，并重新做 SemanticReview / Gap �
 - identity/版本仍然模糊，需要 Clarify 或 StopWithGap；
 - 内容不相关，淘汰候选。
 
+### 结果语义边界
+
+- `FEATURE_NOT_SUPPORTED` / unsupported 表示当前没有可用 Inspector 路线，不等于资源不存在、不可用或不相关；候选若仍有价值，只能按“未核验”继续判断。
+- Inspection 只确认到部分事实时，明确哪些信息仍 unknown，并降低推荐/承诺强度；不要用标题、平台名或模型推断补齐。
+- 本次没有形成足够 Resolution 时保持“暂未核验”，不能改写成“应该可用”或“已经失效”。
+- AUTH_REQUIRED 表示需要合法会话后再确认；policy blocked 保留为策略阻断，不换 Generic/浏览器路线绕过。
+- 缓存/历史 Resolution 若由服务端返回，只能按其记录时间和实际字段使用；不能把复用历史事实说成“刚刚重新检查”。
+
 ## Inspect 预算
 
 优先 Inspect Top-K 高潜候选，不全量检查。若连续检查无法关闭关键 Gap，应停止扩大 Inspect，改为 Replan、Clarify 或 StopWithGap。
