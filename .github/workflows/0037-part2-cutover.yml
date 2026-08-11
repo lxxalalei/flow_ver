@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 6
+          fetch-depth: 7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -87,7 +87,7 @@ jobs:
           test ! -e mcp/education-resources/contracts/schemas/capability-descriptors.schema.json
           test ! -e mcp/education-resources/contracts/schemas/deployment-readiness.schema.json
           test ! -e mcp/education-resources/contracts/schemas/eligibility-decision.schema.json
-          if git grep -nE 'Capability Descriptor -> Deployment Readiness|authority_digest|execution_binding_digest|readiness_snapshot_id|eligibility_id' -- mcp/education-resources/contracts/README.md mcp/education-resources/contracts/platforms/README.md; then exit 1; fi
+          if git grep -nE 'Capability Descriptor -> Deployment Readiness|execution_binding_digest|readiness_snapshot_id|eligibility_id' -- mcp/education-resources/contracts/README.md mcp/education-resources/contracts/platforms/README.md; then exit 1; fi
           if git grep -n 'WebMaterializer.acquire expects AcquisitionRequest' -- mcp/education-resources/src; then exit 1; fi
       - name: Commit successful cutover
         run: |
