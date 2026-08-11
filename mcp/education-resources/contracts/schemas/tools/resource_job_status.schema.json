@@ -3,336 +3,120 @@
   "$id": "https://quanxiao.example/contracts/education-resource/schemas/tools/resource_job_status.schema.json",
   "title": "resource_job_status contract",
   "oneOf": [
-    {
-      "$ref": "#/$defs/input"
-    },
-    {
-      "$ref": "#/$defs/output"
-    }
+    {"$ref": "#/$defs/input"},
+    {"$ref": "#/$defs/output"}
   ],
   "$defs": {
     "input": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "contract_version",
-        "flow_id",
-        "job_id"
-      ],
+      "required": ["contract_version", "flow_id", "job_id"],
       "properties": {
-        "contract_version": {
-          "$ref": "../common.schema.json#/$defs/contract_version"
-        },
-        "flow_id": {
-          "$ref": "../common.schema.json#/$defs/flow_id"
-        },
-        "job_id": {
-          "$ref": "../common.schema.json#/$defs/job_id"
-        }
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "job_id": {"$ref": "../common.schema.json#/$defs/job_id"}
       }
     },
     "progress": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "percent",
-        "completed_items",
-        "total_items"
-      ],
+      "required": ["percent", "completed_items", "total_items"],
       "properties": {
-        "percent": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100
+        "percent": {"type": "integer", "minimum": 0, "maximum": 100},
+        "completed_items": {"type": "integer", "minimum": 0},
+        "total_items": {"type": "integer", "minimum": 0, "maximum": 50},
+        "message": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "strategy", "provider"],
+      "properties": {
+        "scope": {"$ref": "../common.schema.json#/$defs/capability_scope"},
+        "strategy": {"$ref": "../common.schema.json#/$defs/capability_strategy"},
+        "provider": {"$ref": "../common.schema.json#/$defs/provider_ref"}
+      }
+    },
+    "execution_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "strategy", "provider", "representation_id", "revalidated_at"],
+      "properties": {
+        "scope": {"$ref": "../common.schema.json#/$defs/capability_scope"},
+        "strategy": {"$ref": "../common.schema.json#/$defs/capability_strategy"},
+        "provider": {"$ref": "../common.schema.json#/$defs/provider_ref"},
+        "representation_id": {"$ref": "../common.schema.json#/$defs/representation_id"},
+        "revalidated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+      }
+    },
+    "outcome_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome_id", "resource_id", "status", "planned", "started_at"],
+      "properties": {
+        "outcome_id": {"$ref": "../common.schema.json#/$defs/actual_outcome_id"},
+        "resource_id": {"$ref": "../common.schema.json#/$defs/resource_id"},
+        "status": {"$ref": "../common.schema.json#/$defs/outcome_status"},
+        "planned": {"$ref": "#/$defs/route"},
+        "execution": {"$ref": "#/$defs/execution_route"},
+        "actual": {"$ref": "#/$defs/route"},
+        "bundle_id": {"$ref": "../common.schema.json#/$defs/bundle_id"},
+        "asset_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {"$ref": "../common.schema.json#/$defs/asset_id"}
         },
-        "completed_items": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "total_items": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 50
-        },
-        "message": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 512
-        }
+        "failure": {"$ref": "../common.schema.json#/$defs/item_failure"},
+        "started_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
+        "completed_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
       }
     },
     "success": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "contract_version",
-        "ok",
-        "flow_id",
-        "plan_id",
-        "presentation_id",
-        "presented_version",
-        "selection_version",
-        "selection_digest",
-        "plan_digest",
-        "job_id",
-        "status",
-        "progress",
-        "assets",
-        "failures",
-        "updated_at"
+        "contract_version", "ok", "flow_id", "plan_id", "presentation_id",
+        "presented_version", "selection_version", "selection_digest", "plan_digest",
+        "job_id", "status", "progress", "assets", "failures", "updated_at"
       ],
       "properties": {
-        "contract_version": {
-          "$ref": "../common.schema.json#/$defs/contract_version"
-        },
-        "ok": {
-          "const": true
-        },
-        "flow_id": {
-          "$ref": "../common.schema.json#/$defs/flow_id"
-        },
-        "plan_id": {
-          "$ref": "../common.schema.json#/$defs/plan_id"
-        },
-        "presentation_id": {
-          "$ref": "../common.schema.json#/$defs/presentation_id"
-        },
-        "presented_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_digest": {
-          "$ref": "../common.schema.json#/$defs/selection_digest"
-        },
-        "job_id": {
-          "$ref": "../common.schema.json#/$defs/job_id"
-        },
-        "status": {
-          "$ref": "../common.schema.json#/$defs/job_status"
-        },
-        "completion": {
-          "$ref": "../common.schema.json#/$defs/bundle_completion"
-        },
-        "progress": {
-          "$ref": "#/$defs/progress"
-        },
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
+        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
+        "presented_version": {"type": "integer", "minimum": 1},
+        "selection_version": {"type": "integer", "minimum": 1},
+        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
+        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
+        "job_id": {"$ref": "../common.schema.json#/$defs/job_id"},
+        "status": {"$ref": "../common.schema.json#/$defs/job_status"},
+        "completion": {"$ref": "../common.schema.json#/$defs/bundle_completion"},
+        "progress": {"$ref": "#/$defs/progress"},
         "assets": {
           "type": "array",
           "maxItems": 50,
-          "items": {
-            "$ref": "../common.schema.json#/$defs/asset_summary"
-          }
+          "items": {"$ref": "../common.schema.json#/$defs/asset_summary"}
         },
         "failures": {
           "type": "array",
           "maxItems": 50,
-          "items": {
-            "$ref": "../common.schema.json#/$defs/item_failure"
-          }
+          "items": {"$ref": "../common.schema.json#/$defs/item_failure"}
         },
         "outcomes": {
           "type": "array",
           "maxItems": 50,
-          "items": {
-            "$ref": "#/$defs/outcome_projection"
-          }
+          "items": {"$ref": "#/$defs/outcome_projection"}
         },
-        "updated_at": {
-          "$ref": "../common.schema.json#/$defs/timestamp"
-        },
-        "plan_digest": {
-          "$ref": "../common.schema.json#/$defs/plan_digest"
-        },
-        "authority_digest": {
-          "$ref": "../common.schema.json#/$defs/authority_digest"
-        }
+        "updated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
       }
     },
     "output": {
       "oneOf": [
-        {
-          "$ref": "#/$defs/success"
-        },
-        {
-          "$ref": "../common.schema.json#/$defs/error_result"
-        }
+        {"$ref": "#/$defs/success"},
+        {"$ref": "../common.schema.json#/$defs/error_result"}
       ]
-    },
-    "outcome_projection": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "outcome_id",
-        "resource_id",
-        "status",
-        "planned",
-        "started_at",
-        "outcome_digest"
-      ],
-      "properties": {
-        "outcome_id": {
-          "$ref": "../common.schema.json#/$defs/actual_outcome_id"
-        },
-        "resource_id": {
-          "$ref": "../common.schema.json#/$defs/resource_id"
-        },
-        "status": {
-          "$ref": "../common.schema.json#/$defs/outcome_status"
-        },
-        "planned": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "scope",
-            "strategy",
-            "provider",
-            "plan_binding_digest"
-          ],
-          "properties": {
-            "scope": {
-              "$ref": "../common.schema.json#/$defs/capability_scope"
-            },
-            "strategy": {
-              "$ref": "../common.schema.json#/$defs/capability_strategy"
-            },
-            "provider": {
-              "$ref": "../common.schema.json#/$defs/provider_ref"
-            },
-            "plan_binding_digest": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            }
-          }
-        },
-        "execution": {
-          "description": "Present only when the persisted Outcome references a valid immutable execution binding. Legacy readable Outcomes created before execution authority was introduced omit this object rather than fabricating a digest.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "binding_digest"
-          ],
-          "properties": {
-            "binding_digest": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "scope": {
-              "$ref": "../common.schema.json#/$defs/capability_scope"
-            },
-            "strategy": {
-              "$ref": "../common.schema.json#/$defs/capability_strategy"
-            },
-            "provider": {
-              "$ref": "../common.schema.json#/$defs/provider_ref"
-            },
-            "capability": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "capability_id",
-                "descriptor_version",
-                "descriptor_digest",
-                "registry_version",
-                "registry_digest",
-                "readiness_snapshot_id",
-                "readiness_digest"
-              ],
-              "properties": {
-                "capability_id": {
-                  "$ref": "../common.schema.json#/$defs/capability_id"
-                },
-                "descriptor_version": {
-                  "$ref": "../common.schema.json#/$defs/component_version"
-                },
-                "descriptor_digest": {
-                  "$ref": "../common.schema.json#/$defs/canonical_digest"
-                },
-                "registry_version": {
-                  "$ref": "../common.schema.json#/$defs/component_version"
-                },
-                "registry_digest": {
-                  "$ref": "../common.schema.json#/$defs/canonical_digest"
-                },
-                "readiness_snapshot_id": {
-                  "$ref": "../common.schema.json#/$defs/readiness_snapshot_id"
-                },
-                "readiness_digest": {
-                  "$ref": "../common.schema.json#/$defs/canonical_digest"
-                }
-              }
-            },
-            "eligibility": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "eligibility_id",
-                "decision_digest"
-              ],
-              "properties": {
-                "eligibility_id": {
-                  "$ref": "../common.schema.json#/$defs/eligibility_id"
-                },
-                "decision_digest": {
-                  "$ref": "../common.schema.json#/$defs/canonical_digest"
-                }
-              }
-            },
-            "source_fingerprint": {
-              "$ref": "../common.schema.json#/$defs/source_fingerprint"
-            },
-            "revalidated_at": {
-              "$ref": "../common.schema.json#/$defs/timestamp"
-            }
-          }
-        },
-        "actual": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "scope",
-            "strategy",
-            "provider"
-          ],
-          "properties": {
-            "scope": {
-              "$ref": "../common.schema.json#/$defs/capability_scope"
-            },
-            "strategy": {
-              "$ref": "../common.schema.json#/$defs/capability_strategy"
-            },
-            "provider": {
-              "$ref": "../common.schema.json#/$defs/provider_ref"
-            }
-          }
-        },
-        "bundle_id": {
-          "$ref": "../common.schema.json#/$defs/bundle_id"
-        },
-        "asset_ids": {
-          "type": "array",
-          "maxItems": 50,
-          "items": {
-            "$ref": "../common.schema.json#/$defs/asset_id"
-          }
-        },
-        "failure": {
-          "$ref": "../common.schema.json#/$defs/item_failure"
-        },
-        "started_at": {
-          "$ref": "../common.schema.json#/$defs/timestamp"
-        },
-        "completed_at": {
-          "$ref": "../common.schema.json#/$defs/timestamp"
-        },
-        "outcome_digest": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        }
-      }
     }
   }
 }
