@@ -16,41 +16,40 @@
 
 Registry、Adapter、ProviderSpec 或历史实现存在，都不能单独证明某个平台当前可用、某个候选存在具体 Representation，或一次获取已经成功。
 
-## 1. Active 边界与机器版本
+## 1. Active 边界
 
 | 项目 | 当前事实 |
 | --- | --- |
 | 唯一用户入口 | `skills/learning-resource-flow/` |
-| MCP 服务 | `mcp/education-resources/`，Python stdio MCP |
-| MCP server | `education-resources`；实现 metadata `0.2.0` |
+| MCP | `mcp/education-resources/`，Python stdio MCP |
+| MCP server | `education-resources`；metadata `0.2.0` |
 | 公共契约 | `contract_version=1.0.0` |
-| 公共工具目录 | `catalog_version=1.6.0`，仍为 13 个领域级 Tool |
-| 平台 Registry | 固定平台身份与检索声明；不作为获取成功证明 |
-| 分类体系 | `contracts/taxonomy/learning-v1.json` |
-| SQLite | 最新 active migration `8` |
+| Tool catalog | `catalog_version=1.6.0`，13 个领域级 Tool |
+| 分类 | `contracts/taxonomy/learning-v1.json` |
+| SQLite | active migration `8` |
 | Active 获取服务 | `simple_service.py` |
-| Active 获取状态 | `simple_storage.py` 中 `acquisition_plan_items` / `job_items` / `execution_outcomes` |
-| 获取规划 | `acquisition/planner.py` 中轻量 `ProviderSpec` + `AcquisitionPlanner` |
-| Provider 路由 | exact `(provider_id, provider_version)`；失败不静默换 Provider |
-| Legacy | `legacy/skill-pipeline-v1/` 只读；0037 前的 capability authority 代码仍暂留源码作迁移兼容，不再是新写入真值 |
+| Active 获取存储 | `simple_storage.py` |
+| 获取规划 | `acquisition/planner.py` 的 `ProviderSpec` / `AcquisitionPlanner` |
+| Provider 路由 | exact `(provider_id, provider_version)`；失败不 silent fallback |
 
-### Active 主链
+Active 主链：
 
 ```text
 用户自然语言
   -> learning-resource-flow Skill
-  -> education-resources stdio MCP
+  -> education-resources MCP
   -> Search / Inspect
   -> Resolution / Representation
-  -> Prepare Plan
+  -> AcquisitionPlan
   -> 用户明确确认
-  -> Start Job
+  -> Job / JobItem
   -> exact Provider
-  -> Outcome + Asset/Bundle
+  -> Outcome
+  -> Asset / Bundle
   -> Archive
 ```
 
-### 当前业务状态链
+业务状态只保留：
 
 ```text
 FlowTask
@@ -58,25 +57,16 @@ FlowTask
   -> Presentation
   -> Selection
   -> Resolution / Representation
-  -> AcquisitionPlan / PlanItem
+  -> Plan / PlanItem
   -> Job / JobItem
   -> Outcome
   -> AssetBundle / Asset
   -> Archive
 ```
 
-其中：
+## 2. 0037 已删除的获取权威链
 
-- `Resolution / Representation` 回答“候选真正有哪些可获取表示”；
-- `PlanItem` 只保存本次确认所需的 `resource / representation / scope / strategy / exact Provider`；
-- `JobItem` 是 Start 重验证后对 PlanItem 的服务端执行快照；
-- `Outcome` 只记录实际执行结果，不再承担状态防伪职责。
-
-## 2. 0037 获取模型简化
-
-### 已从 Active 持久链移除
-
-以下对象不再作为新业务状态写入：
+以下对象已经退出 Active 新写入和公共契约：
 
 - Capability Descriptor binding；
 - Deployment Readiness Snapshot；
@@ -86,40 +76,35 @@ FlowTask
 - `execution_binding_digest`；
 - `outcome_digest`。
 
-Capability 不再是一条需要逐层证明的状态链。它被降级成 Provider 路由配置：当前 Representation 能否由某个 Provider 以某种 Strategy 执行。
+Capability 现在只回答一个运行时问题：当前 Representation 能否由某个明确 Provider 以某个 Strategy 执行。
 
-### ProviderSpec
+Prepare 根据 fresh Representation 生成 Plan；Start 再读取当前 Resolution，确认：
 
-当前获取规划核心是轻量 `ProviderSpec`：
+- Selection / Plan 仍有效；
+- `representation_id` 仍存在且核心语义未漂移；
+- evidence 当前有效；
+- Plan 指定的 exact Provider 当前仍注册并支持该 scope/strategy。
 
-```text
-platform
-+ resource / representation shape
-+ scope
-+ strategy
-+ provider_id / provider_version
-```
+这些是业务校验，不生成 Readiness ID、Eligibility ID 或 digest。
 
-Prepare 根据 fresh Representation 选择一条明确路线；Start 再读取当前 Resolution，确认 Representation 仍存在且核心字段未漂移，并确认 exact Provider 当前仍注册且支持该 scope/strategy。
+旧 `capability.py` 的约 71KB authority 实现已经删除，只保留一个 tiny fail-fast shim，防止旧 Service 基座被误用于获取流程。Active `simple_service` 不创建或调用 `CapabilityCoordinator`。
 
-这两个时点的检查是业务校验，不生成 Readiness ID、Eligibility ID 或 digest。
+## 3. 当前 ProviderSpec 路线
 
-### 当前已声明的简化路线
-
-当前 0037 planner 至少包含：
+当前简化 Planner 至少声明：
 
 1. generic document primary → `direct_file` → `generic-direct@1.0.0`；
 2. generic webpage primary → `web_materialize` → `generic-web-materializer@1.0.0`；
 3. generic webpage landing → `web_materialize` → `generic-web-materializer@1.0.0`；
-4. SmartEdu document primary → `direct_file` → `smartedu-resource@1.0.0`，前提是该 Provider 在当前部署实际注册。
+4. SmartEdu document primary → `direct_file` → `smartedu-resource@1.0.0`，仅当前部署实际注册时可用。
 
-“配置里存在”不等于平台生产可用；真实网络、认证、策略和内容获取仍由 0028 验收。
+ProviderSpec 存在不等于平台 production-ready。真实网络、认证、策略、许可和内容输出仍由 0028 验收。
 
-## 3. 正文网页与 landing page
+## 4. 正文网页与 landing page
 
-0037 修正了此前真实 E2E 暴露出的语义问题：
+网页的业务角色和获取机制分开判断。
 
-- 如果网页本身就是用户选择的文章/正文资源，它可以是：
+如果网页本身就是用户选择的文章/教程/图文正文：
 
 ```text
 kind=webpage
@@ -128,67 +113,59 @@ scope=primary_resource
 strategy=web_materialize
 ```
 
-- 如果网页只是导航、详情、预览或跳转入口，则仍然是：
+如果只是导航、详情、预览或跳转入口：
 
 ```text
 role=landing
 scope=landing_page
 ```
 
-`web_materialize` 是“如何保存网页”的执行机制，不决定这个网页在业务上是 primary 还是 landing。
+`web_materialize` 只描述“如何保存网页”，不能自动把网页降级成 landing page，也不能把 landing page 冒充正文资源。
 
-## 4. `source_fingerprint` 与文件元数据
+## 5. `source_fingerprint` 与文件元数据
 
-`source_fingerprint` 继续保留，但只承担资源身份与 Resolution cache 关联作用。它不是 Plan、Job 或 Outcome 的权威凭证。
+`source_fingerprint` 只承担资源身份与 Resolution cache 关联作用，不是 Plan/Job/Outcome 的防伪凭证。
 
-文件 `sha256` 和 `byte_size` 继续作为 Asset 元数据、索引和现有去重信息保存，但按照 0030 的既定决定：
+文件 `sha256` / `byte_size` 继续作为 Asset 元数据、索引和去重信息，但 0030 的决定继续有效：
 
 - 不因为 Provider 声明大小与实际大小不一致拒绝已经生成的文件；
 - 不因为声明 SHA-256 与实际文件不一致拒绝文件；
-- 不恢复每资源/Bundle 下载字节上限作为通用获取门禁。
+- 不恢复每资源/Bundle 通用下载字节上限作为成功门禁。
 
-网页解析自己的内存/DOM/图片数量等资源保护边界属于具体处理器实现，不等同于通用文件下载大小门禁。
+网页解析器自身的内存、DOM、图片数量等保护边界属于具体处理器资源保护，不等于通用文件大小验收门禁。
 
-## 5. 公共 MCP 工具
+## 6. 公共 MCP 工具
 
-公共 Tool 数量不变，仍为 13 个：
+公共 Tool 数量仍为 13：
 
-| 工具 | 作用 |
-| --- | --- |
-| `resource_flow_start` | 创建 FlowTask |
-| `resource_flow_status` | 恢复当前 Flow 快照 |
-| `resource_search` | 搜索并保存不可变 ResultSet |
-| `resource_presentation_save` | 固化实际展示集合和顺序 |
-| `resource_selection_save` | 保存用户选择 |
-| `resource_download_prepare` | 基于 Selection + fresh Representation 生成 Plan |
-| `resource_download_start` | 用户确认后重验证并创建 Job |
-| `resource_job_status` | 查询 Job、Outcome、Asset/Bundle |
-| `resource_job_cancel` | 请求取消 Job |
-| `resource_archive` | 归档 ready Asset |
-| `resource_library_search` | 查询资料库 |
-| `resource_browse_creator` | 浏览创作者内容并形成 ResultSet |
-| `resource_inspect` | 核验候选并产生/刷新 Resolution |
+`resource_flow_start`、`resource_flow_status`、`resource_search`、`resource_presentation_save`、`resource_selection_save`、`resource_download_prepare`、`resource_download_start`、`resource_job_status`、`resource_job_cancel`、`resource_archive`、`resource_library_search`、`resource_browse_creator`、`resource_inspect`。
 
-`resource_download_start` 不再接受 `authority_digest`。Prepare 的 PlanItem 和 JobStatus 的 Outcome 也不再暴露 capability/readiness/eligibility 或多层 binding digest。
+当前公共契约中：
 
-## 6. 仍然保留的业务与安全不变量
+- `resource_download_start` 不接受 `authority_digest`；
+- Prepare PlanItem 不暴露 capability/readiness/eligibility/binding digest；
+- FlowStatus current Plan/Job 不暴露 `authority_digest`；
+- JobStatus Outcome 不暴露 plan/execution/outcome digest。
 
-简化获取链不等于取消必要边界。以下规则继续保留：
+`selection_digest` / `plan_digest` 继续存在，只用于当前选择与确认计划的服务端内容标识和幂等关系，不构成多层 capability authority chain，也不传给 Provider。
 
-- 下载严格执行 `prepare -> 用户明确确认 -> start`；
-- Agent 不能提交任意本地路径、脚本、解释器或 Provider 来替代服务端 Plan；
-- Selection / Presentation / Plan 版本与幂等关系仍由服务端校验；
-- 有显式 Representation evidence 时，Prepare 和 Start 都要求 evidence 当前有效；
-- Start 必须再次读取 Resolution，确认 representation 仍存在且关键语义没有漂移；
-- Router 只执行 Plan 中的 exact Provider，不因失败静默切换 generic Provider；
+## 7. 仍保留的业务与安全不变量
+
+简化不等于取消必要边界：
+
+- `prepare -> 用户明确确认 -> start`；
+- Agent 不能提交任意本地路径、脚本、解释器或 Provider 替代服务端 Plan；
+- Selection / Presentation / Plan 版本与幂等关系由服务端校验；
+- Start 重新核验当前 Resolution / Representation；
+- Router 只执行 Plan 的 exact Provider；
 - Job 支持 queued/running/cancelling/succeeded/failed/cancelled；
-- Asset 必须由服务端任务目录生成，归档只接受 `asset_id`；
-- SSRF、逐跳重定向、受控输出目录、取消、超时、内容类型与真实格式检查继续保留；
+- Asset 只能来自服务端受控 Job 目录；Archive 只接受 ready `asset_id`；
+- SSRF、逐跳重定向、路径逃逸、取消、超时、真实 MIME/格式检查继续保留；
 - 不绕过登录、验证码、付费墙、DRM 或明确访问控制。
 
-## 7. SQLite migration 8
+## 8. SQLite migration 8
 
-migration 8 新增三张 Active 获取表：
+migration 8 新增 Active 获取表：
 
 ```text
 acquisition_plan_items
@@ -196,27 +173,27 @@ job_items
 execution_outcomes
 ```
 
-它们只保存业务执行所需字段，不包含 Descriptor/Readiness/Eligibility/digest 列。
+这些表只保存业务执行需要的字段，不包含 Descriptor/Readiness/Eligibility/digest 列。
 
-为了已有 v7 数据可恢复，migration 8 会从旧 `download_plan_items`、`job_execution_items`、`acquisition_outcomes` 做一次降维 backfill。旧 v6/v7 authority 表目前仍可能存在于升级后的 SQLite 中，但 0037 Active 新路径不再向这些表写入新的 authority 事实。
+已有 v7 数据可从旧 `download_plan_items`、`job_execution_items`、`acquisition_outcomes` 降维 backfill。旧 v6/v7 authority 表目前仍可能存在于升级数据库中，但 0037 新路径不再向它们写入新 authority 事实。
 
-后续完成兼容期后，应通过独立 cleanup migration 删除不再被读取的旧表，而不是让两套模型长期共存。
+兼容期结束后需要独立 cleanup migration 物理删除无读取者的旧表。
 
-## 8. 当前代码过渡边界
+## 9. 代码过渡边界
 
-0037 当前采用安全切换而不是一次性重写所有成熟逻辑：
+当前采用安全切换而不是一次性重写成熟搜索/归档代码：
 
-- `server.py` 已指向 `simple_service.ResourceService`；
-- `simple_service.py` 复用旧 Service 中成熟的搜索、Inspect、任务取消和归档辅助逻辑，但覆盖获取初始化、Prepare、Start 和 Outcome projection；
-- `simple_storage.py` 复用旧 Store 的检索、Resolution、Asset/Archive 基础能力，但覆盖获取 Plan/JobItem/Outcome 和归档关系校验；
-- `acquisition/simple.py` 保留旧 Provider 的类型兼容，但 Provider-facing 输入已经不再暴露 authority 字段；
-- 0037 前的 `capability.py`、旧 acquisition authority 表和部分旧测试仍存在源码中，尚未物理删除。
+- `server.py` 指向 `simple_service.ResourceService`；
+- `simple_service.py` 复用旧 Service 的 Search/Inspect/Job lifecycle/Archive 辅助逻辑，但覆盖 acquisition 初始化、Prepare、Start 和 Outcome projection；
+- `simple_storage.py` 复用旧 Store 的 Retrieval/Resolution/Asset/Archive 基础能力，但覆盖 acquisition Plan/JobItem/Outcome 与归档关系；
+- `acquisition/simple.py` 仍通过旧 Request 类型 slot 兼容部分 Provider 的 `isinstance`，但 Provider-facing `to_dict()` 已不暴露 authority 字段；
+- inherited `_run_download_job` 仍使用少量兼容字段名，这一层将在 0037 下一 cleanup milestone 直接改成 `job_items`。
 
-因此当前正确描述是：**Active 获取状态已经简化，历史实现仍处于待清理兼容期**，不能声称整个仓库已经彻底删除所有旧 authority 代码。
+因此当前准确状态是：**业务获取状态链已经简化并通过离线闭环，代码文件布局仍有兼容期残留。**
 
-## 9. 检索边界
+## 10. Agent / 检索边界
 
-检索侧保持既定分权：
+Skill 已同步到新获取模型，但搜索分权保持不变：
 
 ```text
 MCP Search -> immutable ResultSet + factual coverage
@@ -224,44 +201,70 @@ MCP Inspect -> Resolution / Representation facts
 Skill -> private SemanticReview -> Gap -> StopDecision
 ```
 
-候选数量、标题命中、平台数量和 coverage 不能单独触发 Present。常规任务仍由 Skill 在有限轮次内决定 Replan / Clarify / StopWithGap / Present。
+候选数量、标题命中、平台数量和 coverage 不能单独触发 Present。常规任务仍在有限 Search 轮次内由 Skill 决定 Replan / Clarify / StopWithGap / Present，并只对会改变决策的高潜候选做 Selective Inspect。
 
-`retrieval/adaptive.py` 继续只作为离线 calibration/helper，不成为生产语义裁判。
+0037 没有把搜索质量判断搬回 Python 硬编码。
 
-## 10. 当前执行顺序
+## 11. 测试治理
 
-当前优先顺序调整为：
+只验证旧实现实体的测试已经移出 Active 测试面，包括 CapabilityAuthority、Readiness Snapshot、Eligibility/digest binding、Job execution authority storage 等测试。
 
-1. **0037 Acquisition State Simplification**：完成 Active 获取模型切换、契约同步、兼容清理和定向验证；
-2. **0028 Real OpenClaw and Real Platform E2E**：用简化后的模型重新跑 Search → Inspect → Present → Select → Confirm → Acquire → Archive → Recover；
-3. **0029 Retrieval Benchmark and Release Gate**：建立检索质量和真实业务行为发布门禁；
-4. 平台能力扩展、Library/Viewer 与后续部署。
+平台 Search/Inspect Adapter 注册类测试继续保留，因为它们仍约束真实业务能力。
 
-0036 中“先恢复平台能力再决定是否减法”的顺序已被 0037 的产品决策覆盖；0036 中具体平台恢复目标仍可继续使用，但不能重新扩展旧 capability authority 链，也不能重新引入 0030 已删除的通用文件大小/哈希验收门禁。
+`test_mcp_stdio.py` 没有被删除，而是迁移为新契约，继续验证完整业务闭环。
 
-## 11. 已完成验证与未验收项
+## 12. 已完成验证
 
-0037 已完成一次隔离 GitHub Actions 定向验证：
+最终临时 GitHub Actions run `31514845872` 已通过：
 
-- Python 3.12 环境安装当前 MCP 包成功；
-- active package `compileall` 成功；
-- `contracts/` 下 JSON 全部可解析；
-- 0037 定向测试通过，覆盖：简化 Request、正文网页 primary route、migration 8、新表无 authority digest、Start 签名无 `authority_digest`、下载相关公共 Schema 不再暴露旧链。
+- 安装当前 MCP 包；
+- `compileall` active package；
+- 解析 `contracts/` 下所有 JSON；
+- `test_acquisition_simplification_0037.py`；
+- `test_mcp_stdio.py`。
 
-仍未完成：
+其中 stdio 测试真实覆盖离线：
 
-- 全仓旧 authority 专项测试的清理/迁移；
-- 旧 `capability.py` 与 v6/v7 authority 表的物理删除；
-- 真实 OpenClaw 端到端重新部署与用户闭环；
+```text
+13 Tool discovery
+  -> Flow
+  -> Search
+  -> Inspect
+  -> Presentation
+  -> Selection
+  -> Prepare
+  -> Start
+  -> Job
+  -> Outcome / Asset
+  -> Archive
+  -> Library search
+```
+
+这证明当前简化模型可以完成离线 MCP 业务闭环，但不能证明真实互联网平台、合法会话或默认 OpenClaw Agent 已通过。
+
+## 13. 当前执行顺序
+
+1. **0037 Acquisition State Simplification**：完成兼容层和旧表 cleanup，并跑真实 generic Agent 闭环；
+2. **0028 Real OpenClaw and Real Platform E2E**：基于简化模型恢复/验证真实平台；
+3. **0029 Retrieval Benchmark and Release Gate**：建立业务行为质量门禁；
+4. Platform Expansion / Library & Viewer / 后续部署。
+
+0036 已 superseded 并移入 `.agent/plans/archive/`。其中平台恢复候选仍可作为 0028 输入，但旧 architecture chain 和重新引入通用大小/哈希门禁的部分不再执行。
+
+## 14. 尚未验收
+
+- inherited runner / old AcquisitionRequest compatibility slot 的最终删除；
+- cleanup migration 删除旧 authority 表；
+- 兼容 capability/readiness/eligibility Schema/catalog 的物理清理；
+- 真实 OpenClaw generic article primary webpage 成功闭环；
 - SmartEdu 有效会话下真实 Search/Inspect/Acquire；
-- Bilibili、Douyin、Ximalaya 等平台 Provider 的后续正式接入；
+- Bilibili、Douyin、Ximalaya、CCTV、NLC、Open163、Yixi 等真实平台 Provider 恢复；
 - 0029 benchmark/release gate。
 
 ## 相关入口
 
 - [工作区入口](../README.md)
-- [文档导航](README.md)
-- [唯一 evergreen 开发路线](DEVELOPMENT_PLAN.md)
+- [开发路线](DEVELOPMENT_PLAN.md)
 - [Retrieval Authority ADR](RETRIEVAL_AUTHORITY.md)
 - [0037 当前计划](../.agent/plans/0037-acquisition-state-simplification.md)
 - [机器契约目录](../mcp/education-resources/contracts/README.md)
