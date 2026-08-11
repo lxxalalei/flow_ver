@@ -10,7 +10,7 @@
 | 项目接下来按什么顺序发展、阶段完成门槛是什么 | [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) |
 | 检索事实、语义审查、Gap 与 StopDecision 为什么这样分权 | [RETRIEVAL_AUTHORITY.md](RETRIEVAL_AUTHORITY.md) |
 | 当前正在执行什么任务 | [`.agent/plans/`](../.agent/plans/README.md) |
-| MCP 的公共工具、Schema、错误码、Capability | [`mcp/education-resources/contracts/`](../mcp/education-resources/contracts/README.md) |
+| MCP 的公共工具、Schema、平台与分类契约 | [`mcp/education-resources/contracts/`](../mcp/education-resources/contracts/README.md) |
 | MCP 服务如何安装、启动和验证 | [`mcp/education-resources/README.md`](../mcp/education-resources/README.md) |
 | Agent 运行时如何理解、检索、核验和获取资源 | [`skills/learning-resource-flow/`](../skills/learning-resource-flow/SKILL.md) |
 | 历史方案与阶段性规划 | [`archive/`](archive/README.md) |
@@ -19,13 +19,15 @@
 
 发生冲突时按以下顺序判断：
 
-1. `mcp/education-resources/contracts/` 中的机器 catalog、Schema、错误码和 capability 声明；
+1. `mcp/education-resources/contracts/` 中当前公共 catalog、Schema、错误码、平台与分类契约；
 2. `mcp/education-resources/src/education_resource_mcp/` 中的实际运行时代码和状态转换；
 3. `CURRENT_ARCHITECTURE.md` 等当前说明文档；
 4. `.agent/plans/` 当前执行计划；
 5. `docs/archive/`、`.agent/plans/archive/` 和 `legacy/` 中的历史材料。
 
-文档不能通过描述覆盖机器事实；Registry、Adapter 或历史计划存在也不能单独证明某个平台当前可用或某次获取已经成功。
+文档不能通过描述覆盖机器事实；Registry、Adapter、ProviderSpec 或历史计划存在也不能单独证明某个平台当前可用或某次获取已经成功。
+
+当前获取层不再维护 Capability Descriptor → Readiness → Eligibility → digest 的持久权威链。资源是否可执行由当前 `Resolution / Representation`、Plan 中保存的 exact Provider route，以及 Start 前运行时重验证共同决定。
 
 ## 默认阅读顺序
 
