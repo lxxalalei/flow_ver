@@ -2,121 +2,193 @@
 
 - 状态：in_progress
 - 创建日期：2026-08-11
+- 完成日期：未完成
 - 分支：`codex/growth-resource-taxonomy-rework`
 - 优先级：高于 0036 中“恢复平台后再决定是否减法”的顺序；0036 的平台恢复目标保留，但不得继续扩展 Capability Authority 链
 
 ## Goal
 
-把当前获取链从“权威证明系统”收敛为资源获取业务系统，同时保留真正影响业务正确性的边界：
+把获取链从“权威证明系统”收敛为资源获取业务系统：
 
 ```text
 Selection
   -> Resolution / Representation
   -> AcquisitionPlan
   -> 用户确认
-  -> Job + JobItem snapshot
+  -> Job / JobItem
   -> exact Provider
   -> Outcome
   -> Asset / Bundle
   -> Archive
 ```
 
-Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为运行时持久状态；Plan/Execution/Outcome 不再依赖多层 SHA-256 binding digest。
+Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为新运行时持久状态；Plan / Job / Outcome 不依赖多层 SHA-256 binding digest。
 
 ## Product decisions
 
 ### 保留
 
-- `Resolution / Representation`：它回答“候选真正有哪些可获取表示”。
-- `AcquisitionPlan`：它回答“用户确认后准备获取什么、用什么策略和 Provider”。
-- `Job` 与按资源的 `JobItem` 快照：异步任务和多资源执行需要持久化成员关系。
-- `Outcome`：记录实际成功、失败、partial、Provider 与 Asset/Bundle 关系。
-- `source_fingerprint`：只作为资源身份和 Resolution cache key，不作为权威证明。
-- exact Provider routing：Plan 绑定的 Provider 失败后不静默切换第二个 Provider。
-- Selection/Plan 版本、用户确认、幂等、取消、SSRF、重定向、受控目录、真实格式校验。
+- `Resolution / Representation`；
+- `AcquisitionPlan`；
+- `Job` 与按资源的 `JobItem`；
+- `Outcome`；
+- `source_fingerprint`，只作资源身份和 Resolution cache key；
+- exact Provider routing；
+- Selection/Plan 版本、用户确认、幂等、取消；
+- SSRF、逐跳重定向、受控目录、真实格式与访问控制边界；
+- Asset / Bundle / Archive 关系。
 
-### 删除
+### 删除/退出 Active 新写入
 
-- 持久化 Capability Descriptor binding。
-- `Deployment Readiness Snapshot` 持久状态和 TTL 链。
-- `Eligibility Decision` 持久状态和 TTL 链。
-- `authority_digest`。
-- `plan_binding_digest` / `binding_digest`。
-- `execution_binding_digest`。
-- `outcome_digest`。
+- Capability Descriptor binding；
+- Deployment Readiness Snapshot 持久状态；
+- Eligibility Decision 持久状态；
+- `authority_digest`；
+- `plan_binding_digest` / `binding_digest`；
+- `execution_binding_digest`；
+- `outcome_digest`；
 - Provider 请求中仅用于证明上述链条的 descriptor/readiness/eligibility 字段。
 
 ### 降级为运行时逻辑
 
-- Capability：变成小型 `ProviderSpec` 配置，描述 platform / representation / scope / strategy / provider。
-- Readiness：Start 前检查 exact Provider 是否已注册且支持计划的 strategy/scope；不写数据库。
-- Eligibility：Prepare/Start 时根据 Representation 当前事实直接返回允许/阻断；不生成实体 ID。
+- Capability → 小型 `ProviderSpec`；
+- Readiness → exact Provider 当前是否注册、是否支持 strategy/scope；
+- Eligibility → Prepare/Start 根据当前 Representation 直接允许或阻断，不生成实体 ID。
 
 ## Business invariants
 
-1. Agent 仍不能提交任意本地路径、下载 URL 或 Provider 来替代服务端计划。
+1. Agent 不能提交任意本地路径、下载 URL 或 Provider 来替代服务端计划。
 2. Prepare 只能基于当前 Selection 和已 Inspect 的 Resolution。
-3. 显式 Representation evidence 存在时，Prepare 与 Start 均要求 `observed_at <= now < expires_at`。
-4. Start 必须重新读取当前 Resolution，并确认计划中的 representation 仍存在、核心字段未漂移。
-5. Start 只执行 Plan 中保存的 `provider_id + provider_version + strategy + scope`；Router 不做 silent fallback。
-6. JobItem 是 PlanItem 在 Start 成功校验后的服务端快照，不额外生成“执行权威凭证”。
-7. Outcome 只描述实际执行事实；归档根据 `Job succeeded + Asset ready + Bundle/Outcome/JobItem 关系` 判断，不比较摘要链。
-8. 网页本身就是文章正文时允许 `webpage + primary + primary_resource -> web_materialize`；landing page 仍保持 landing scope，二者不再混为一谈。
-9. 文件 SHA-256/byte_size 可作为 Asset 元数据和去重信息，但不得重新成为下载验收门禁；0030 的决定继续有效。
+3. 有显式 Representation evidence 时，Prepare / Start 都要求其当前有效。
+4. Start 重新读取当前 Resolution，确认 representation 仍存在、核心语义未漂移。
+5. Start 只执行 Plan 保存的 exact Provider route；Router 不 silent fallback。
+6. JobItem 是 PlanItem 在 Start 校验后的服务端快照，不额外生成执行凭证。
+7. Outcome 只描述实际执行事实；Archive 根据 JobItem / Outcome / Bundle / Asset 关系判断。
+8. 正文网页允许 `webpage + primary + primary_resource -> web_materialize`；landing page 保持 landing。
+9. 文件 SHA-256 / byte_size 可作 Asset 元数据与去重信息，但 0030 已删除的通用大小/哈希验收门禁不得恢复。
 
-## Implementation
+## Current architecture checkpoint
+
+当前 Active MCP 入口已变为：
+
+```text
+server.py
+  -> simple_service.ResourceService
+     -> AcquisitionPlanner / ProviderSpec
+     -> simple_storage.Store (migration 8)
+     -> simplified AcquisitionRequest / exact Router
+```
+
+为降低一次性重写风险，`simple_service` / `simple_storage` 仍复用 0037 前 Service/Store 的成熟 Search、Inspect、Job lifecycle、Asset/Archive 辅助逻辑。旧 `capability.py` 和旧 v6/v7 authority 表暂时仍存在于源码/升级库中，但新 acquisition 写入路径不再使用它们。
+
+这是一段明确的兼容期，不是最终状态。
+
+## Implemented
 
 ### Phase A — Active path cutover
 
-- 将当前 `service.py` / `storage.py` / acquisition models/router 保留为迁移参考文件，Active 文件改为薄层实现。
-- 新增 `AcquisitionPlanner`，只维护少量 ProviderSpec 并从当前 Representation 解析执行路线。
-- `ResourceService.__init__` 不再创建 `CapabilityCoordinator`。
-- `download_prepare` 生成简单 PlanItem。
-- `download_start` 不接收 `authority_digest`，只校验 Selection/Plan、fresh Resolution、Representation 与 Provider registration。
-- Router 继续 exact routing，但结果不附加 binding/source authority 字段。
+- [x] 新增 `AcquisitionPlanner` 与轻量 `ProviderSpec`。
+- [x] generic document primary → direct Provider。
+- [x] generic primary webpage → web materializer。
+- [x] generic landing webpage → web materializer。
+- [x] SmartEdu document primary → exact SmartEdu Provider（仅当前部署实际注册时可用）。
+- [x] `ResourceService.__init__` Active 路径不再创建 `CapabilityCoordinator`。
+- [x] `download_prepare` 生成简单 PlanItem。
+- [x] `download_start` 删除 `authority_digest`，重验证 Selection / Plan / Resolution / Representation / Provider route。
+- [x] Router 继续 exact routing；Provider-facing `to_dict()` 不暴露旧 authority 字段。
+- [ ] 将继承的旧 `_run_download_job` 改成直接消费 `job_items` 的纯简化实现，移除内部兼容参数名。
 
 ### Phase B — Persistence simplification
 
-数据库 migration 8：
+migration 8 已新增：
 
-- `download_plan_items` 只保留 `resource/resolution/representation/scope/strategy/provider/source_fingerprint/representation_json`。
-- 用 `job_items` 代替 `job_execution_items`，只保存 PlanItem 的执行快照与 `revalidated_at`。
-- `acquisition_outcomes` 删除 plan/execution/outcome digest 字段。
-- 删除 `capability_readiness_snapshots` 与 `eligibility_decisions` 表。
-- 既有 v7 行迁移到简化表，不能凭空补造新的 authority evidence。
+```text
+acquisition_plan_items
+job_items
+execution_outcomes
+```
 
-### Phase C — Contract / docs cleanup
+- [x] 新 PlanItem 不含 capability/readiness/eligibility/binding digest。
+- [x] JobItem 只保存执行快照与 `revalidated_at`。
+- [x] 新 Outcome 不含 plan/execution/outcome digest。
+- [x] v7 Plan/Job/Outcome 可降维 backfill 到新表。
+- [x] 新 Archive 关系校验使用 JobItem / Outcome / Bundle / Asset graph。
+- [ ] 兼容期结束后用 cleanup migration 删除 `capability_readiness_snapshots`、`eligibility_decisions`、旧 `download_plan_items` / `job_execution_items` / `acquisition_outcomes` 中不再需要的 authority 面。
 
-- `resource_download_start` 删除 `authority_digest`。
-- PlanItem schema 删除 capability / eligibility / binding digest 组。
-- Outcome schema 删除 `outcome_digest` 与 execution binding 结构。
-- CURRENT_ARCHITECTURE / DEVELOPMENT_PLAN / Skill 说明改为简单获取链。
-- `capability.py` 与 capability descriptor schemas 在所有 Active import 清零后移入历史或删除；不得留下第二套运行真值。
+### Phase C — Public contract / docs
+
+- [x] `resource_download_start` 删除 `authority_digest`。
+- [x] PlanItem Schema 删除 capability / eligibility / binding digest 组。
+- [x] JobStatus Outcome projection 删除 plan/execution/outcome digest 与 capability/readiness/eligibility 结构。
+- [x] `actual-outcome.schema.json` 简化。
+- [x] Tool catalog 升至 `1.6.0`，Tool 数仍为 13。
+- [x] README / MCP README / Contracts README / CURRENT_ARCHITECTURE / DEVELOPMENT_PLAN / compatibility 已同步。
+- [ ] `resource_flow_status.schema.json` 中仍有旧 `authority_digest` 可选属性，需在最终 contract cleanup 移除。
+- [ ] Skill 中 capability/readiness/eligibility 文案仍需按新架构收口。
+- [ ] Active runtime 对旧 `capability.py` 的 import 仍需清零。
 
 ## Validation
 
-定向验证优先，不因本次改造默认跑耗时全仓回归：
+本次不默认运行全仓历史测试；旧 capability-authority 专项测试验证的是本次已废弃实现，不能成为要求恢复旧链的门禁。
 
-1. 新数据库从 migration 0 -> 8，旧 v7 数据 -> 8。
-2. Prepare：generic document primary、generic webpage primary、generic landing page、SmartEdu document 路由正确。
-3. Prepare：无 Resolution、stale evidence、无匹配 Provider 明确失败。
-4. Start：Selection 改变、Plan 过期、Representation 消失/漂移、Provider 未注册均不创建 Job。
-5. Start：成功时只创建一个 Job，并把 PlanItem 复制为 JobItem。
-6. Router：exact Provider；失败不切 generic fallback。
-7. Outcome：成功/失败/partial/取消无需任何 digest 即可恢复。
-8. Archive：只接受 succeeded Job 的 ready Asset，且 Asset 必须属于对应 JobItem/Outcome/Bundle。
-9. 文章正文网页能以 `primary_resource + web_materialize` 获取，不再被强制降为 landing page。
-10. `git diff --check`、Python compile、相关 acquisition/service/storage/contract tests。
+已执行一次隔离 GitHub Actions 定向验证：
+
+| Validation | Result | Proves | Does not prove |
+| --- | --- | --- | --- |
+| Python 3.12 package install | pass | 当前包依赖可安装 | 真实平台可用 |
+| `compileall` active package | pass | 当前 Python 源码可编译 | 业务全链路正确 |
+| parse all contract JSON | pass | 当前 JSON 语法完整 | 所有 Schema 语义均被实例覆盖 |
+| `test_acquisition_simplification_0037.py` | pass | simplified Request、primary webpage route、migration 8、新表无 authority digest、Start 无 authority_digest、主要下载 Schema 已简化 | 真实 OpenClaw / 真实网络 / Archive 全闭环 |
+
+临时验证 workflow 已删除，避免后续每次小 push 自动重复跑测试。
+
+## Remaining validation
+
+1. 新库 migration 0 → 8 的更完整 CRUD；
+2. v7 → 8 带真实旧数据升级；
+3. Prepare/Start 的 stale Resolution、selection drift、provider missing；
+4. Job succeeded/partial/failed/cancelled；
+5. Archive succeeded Job ready Asset；
+6. 真实 OpenClaw generic article primary webpage 闭环；
+7. 再根据改动范围决定是否跑更大 regression。
+
+## Milestone checkpoint
+
+```text
+Original goal still unchanged?: yes
+Non-goals still respected?: yes
+Business invariants still true?: targeted validation only; real Agent pending
+New abstraction introduced?: one small ProviderSpec/Planner, replacing several state entities
+New source of truth introduced?: no; migration 8 simplifies acquisition persistence
+Fallback added?: no
+Data truncation added?: no
+Unrelated files changed?: docs/contracts only for alignment
+Actual user flow affected?: yes, acquisition model and article webpage semantics
+Actual user flow validated?: not yet in real OpenClaw
+Scope drift detected?: old authority cleanup remains staged, explicitly tracked
+```
 
 ## Completion record
 
 ```text
-[ ] Active path cutover
-[ ] persistence migration 8
-[ ] public schema cleanup
-[ ] targeted tests
-[ ] integration tests
-[ ] docs aligned
+[x] Active path cutover
+[x] persistence migration 8 active tables
+[x] public download schema cleanup (except flow_status optional legacy field)
+[x] targeted tests
+[ ] acquisition integration tests
+[x] main docs aligned
+[ ] Skill aligned
 [ ] obsolete capability authority code removed from Active imports
+[ ] old authority tables physically cleaned up
 [ ] real Agent/user-flow revalidated
 ```
+
+## Completion condition
+
+本计划只有在以下都满足后才可改为 `completed`：
+
+- Active runtime 不再依赖旧 CapabilityCoordinator；
+- 公共 current Schema 不再暴露 authority/readiness/eligibility digest；
+- 兼容期旧表有明确 cleanup 处置；
+- 关键 acquisition integration 测试通过；
+- 至少一个真实 generic 用户回合完成 Search → Inspect → Select → Confirm → Acquire → Archive → Recover。
