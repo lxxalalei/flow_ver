@@ -15,7 +15,7 @@ from .models import (
     SearchFilters,
     SearchTask,
 )
-from .service import ResourceService
+from .simple_service import ResourceService
 
 
 CONTRACT_VERSION = "1.0.0"
@@ -42,7 +42,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "resources actually shown with resource_presentation_save, then save only the "
             "user-selected display positions. Downloads require prepare, explicit user "
             "confirmation, then start. Use resource_flow_status to recover durable state. "
-            "Never invent IDs, positions, paths, commands, or download URLs."
+            "Never invent IDs, positions, paths, commands, Providers, or download URLs."
         ),
     )
 
@@ -69,11 +69,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         filters: SearchFilters | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Search across multiple platforms in parallel into a durable ResultSet.
-
-        Each SearchTask specifies one platform and one or more queries.
-        Platforms run in parallel; queries within a platform run serially.
-        """
+        """Search across multiple platforms in parallel into a durable ResultSet."""
         return _invoke(
             lambda: resource_service.search(
                 flow_id,
@@ -98,13 +94,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         creator_id: str,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """Browse a creator's full content list (social-media platforms only).
-
-        Fetches all videos/posts from a specific creator's homepage.
-        Only adapters implementing search_creator are supported (douyin,
-        bilibili, zhihu, weibo). Education/resource platforms return
-        FEATURE_NOT_SUPPORTED.
-        """
+        """Browse a creator's content list when the platform supports it."""
         return _invoke(
             lambda: resource_service.browse_creator(
                 flow_id,
@@ -194,7 +184,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         selection_digest: str,
         options: DownloadOptions | None = None,
     ) -> dict[str, Any]:
-        """Prepare a bounded Plan bound to the current Selection without downloading."""
+        """Prepare a Plan from the current Selection without downloading."""
         return _invoke(
             lambda: resource_service.download_prepare(
                 flow_id,
@@ -220,9 +210,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         plan_digest: str,
         confirmation_token: str,
         idempotency_key: str,
-        authority_digest: str | None = None,
     ) -> dict[str, Any]:
-        """Start an asynchronous download after explicit user confirmation."""
+        """Start an asynchronous Job after explicit user confirmation."""
         return _invoke(
             lambda: resource_service.download_start(
                 flow_id,
@@ -234,7 +223,6 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
                 selection_version=selection_version,
                 selection_digest=selection_digest,
                 plan_digest=plan_digest,
-                authority_digest=authority_digest,
             ),
             flow_id=flow_id,
             plan_id=plan_id,
