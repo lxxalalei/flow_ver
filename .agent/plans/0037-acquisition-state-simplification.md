@@ -22,7 +22,7 @@ Selection
   -> Archive
 ```
 
-Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为新运行时持久状态；Plan / Job / Outcome 不依赖多层 SHA-256 binding digest。
+Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为运行时业务状态；Plan / Job / Outcome 不依赖多层 SHA-256 binding digest。
 
 ## Product decisions
 
@@ -38,7 +38,7 @@ Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为�
 - SSRF、逐跳重定向、受控目录、真实格式与访问控制边界；
 - Asset / Bundle / Archive 关系。
 
-### 删除/退出 Active 新写入
+### 删除
 
 - Capability Descriptor binding；
 - Deployment Readiness Snapshot 持久状态；
@@ -47,7 +47,8 @@ Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为�
 - `plan_binding_digest` / `binding_digest`；
 - `execution_binding_digest`；
 - `outcome_digest`；
-- Provider 请求中仅用于证明上述链条的 descriptor/readiness/eligibility 字段。
+- Provider 请求中仅用于证明上述链条的 descriptor/readiness/eligibility 字段；
+- 独立 capability descriptor / deployment readiness / eligibility current contract 文件。
 
 ### 降级为运行时逻辑
 
@@ -69,19 +70,21 @@ Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为�
 
 ## Current architecture checkpoint
 
-当前 Active MCP 入口：
+当前 Active MCP 获取入口：
 
 ```text
 server.py
   -> simple_service.ResourceService
      -> AcquisitionPlanner / ProviderSpec
-     -> simple_storage.Store (migration 8)
-     -> simplified AcquisitionRequest / exact Router
+     -> simple_storage.Store (migration 9)
+     -> simplified AcquisitionRequest
+     -> exact AcquisitionRouter
+     -> Provider
 ```
 
-为降低一次性重写风险，`simple_service` / `simple_storage` 仍复用 0037 前 Service/Store 的成熟 Search、Inspect、Job lifecycle、Asset/Archive 辅助逻辑。这是兼容期，不是最终文件布局。
+`simple_service` / `simple_storage` 仍复用旧 Service/Store 中成熟的 Search、Inspect、通用 Job 生命周期、Asset/Bundle 和 Archive 辅助能力，但 **Active acquisition 的 Prepare / Start / Runner / JobStatus / PlanItem / JobItem / Outcome 已不再依赖旧 authority 状态链**。
 
-旧 `capability.py` 的约 71KB authority 实现已物理删除，只剩 tiny fail-fast shim 给旧 Service 基座解析 import；Active `simple_service` 不创建或调用 `CapabilityCoordinator`。
+旧 `capability.py` 的大型实现已删除，仅保留 fail-fast shim 防止旧获取入口被误用。当前轻量 `AcquisitionRequest` 是独立 DTO，不继承旧 Request，也没有 capability/readiness/eligibility/digest slot。
 
 ## Implemented
 
@@ -95,13 +98,15 @@ server.py
 - [x] Active `ResourceService.__init__` 不再创建 `CapabilityCoordinator`。
 - [x] `download_prepare` 生成简单 PlanItem。
 - [x] `download_start` 删除 `authority_digest`，重验证 Selection / Plan / Resolution / Representation / Provider route。
-- [x] Router 继续 exact routing；Provider-facing `to_dict()` 不暴露旧 authority 字段。
-- [x] 旧 `capability.py` authority implementation 删除并改为 fail-fast shim。
-- [ ] 将继承的旧 `_run_download_job` 改成直接消费 `job_items` 的纯简化实现，移除内部兼容参数名和旧 Request slot。
+- [x] `_run_download_job` 直接消费 `job_items`，不再构造 capability/readiness/eligibility 兼容字段。
+- [x] `job_status` 读取 `job_items` / `execution_outcomes`。
+- [x] `AcquisitionRequest` 改为只含执行业务事实的独立 DTO。
+- [x] `WebMaterializer` 不再要求旧 Request concrete class。
+- [x] Router 保持 exact routing；Provider 失败不 silent fallback。
 
-### Phase B — Persistence simplification
+### Phase B — Persistence cleanup
 
-migration 8 已新增：
+migration 8 创建并 backfill：
 
 ```text
 acquisition_plan_items
@@ -109,119 +114,146 @@ job_items
 execution_outcomes
 ```
 
+migration 9 在 backfill 完成后物理删除旧 acquisition authority 表：
+
+```text
+job_execution_items
+acquisition_outcomes
+download_plan_items
+eligibility_decisions
+capability_readiness_snapshots
+```
+
 - [x] 新 PlanItem 不含 capability/readiness/eligibility/binding digest。
 - [x] JobItem 只保存执行快照与 `revalidated_at`。
 - [x] 新 Outcome 不含 plan/execution/outcome digest。
-- [x] v7 Plan/Job/Outcome 可降维 backfill 到新表。
-- [x] 新 Archive 关系校验使用 JobItem / Outcome / Bundle / Asset graph。
-- [ ] 兼容期结束后用 cleanup migration 删除 `capability_readiness_snapshots`、`eligibility_decisions`、旧 `download_plan_items` / `job_execution_items` / `acquisition_outcomes` 中不再需要的 authority 面。
+- [x] v7 Plan/Job/Outcome 先降维 backfill，再删除旧表。
+- [x] Archive 关系校验使用 JobItem / Outcome / Bundle / Asset graph。
+- [x] Active Job success/failure/cancellation recovery 使用新 Outcome 表。
+
+说明：`storage.py` 仍保留历史 migration 代码，使旧数据库可以升级；它不是 migration 9 后的 Active acquisition source of truth。
 
 ### Phase C — Public contract / Agent / docs
 
 - [x] `resource_download_start` 删除 `authority_digest`。
 - [x] PlanItem Schema 删除 capability / eligibility / binding digest 组。
+- [x] FlowStatus current Plan/Job 不暴露 `authority_digest`。
 - [x] JobStatus Outcome projection 删除 plan/execution/outcome digest 与 capability/readiness/eligibility 结构。
 - [x] `actual-outcome.schema.json` 简化。
-- [x] `resource_flow_status.schema.json` 删除旧可选 `authority_digest`。
-- [x] Tool catalog 升至 `1.6.0`，Tool 数仍为 13。
-- [x] README / MCP README / Contracts README / CURRENT_ARCHITECTURE / DEVELOPMENT_PLAN / compatibility 同步。
-- [x] `learning-resource-flow/SKILL.md` 与 `references/acquisition.md` 改为新获取链，同时保留原有 Search/SemanticReview/Gap/StopDecision/Selective Inspect 规则。
-- [x] 0036 superseded 并归档，避免后续 Agent 按旧架构继续。
+- [x] Tool catalog 为 `1.6.0`，Tool 数仍为 13。
+- [x] Skill 与 acquisition reference 使用 `Representation -> Plan -> JobItem -> exact Provider -> Outcome`。
+- [x] 删除 current contract 中独立的：
+  - `contracts/capabilities/capability-descriptors.json`；
+  - `capability-descriptor.schema.json`；
+  - `capability-descriptors.schema.json`；
+  - `deployment-readiness.schema.json`；
+  - `eligibility-decision.schema.json`。
+- [x] `contracts/platforms/README.md` 改为 ProviderSpec / Representation / exact Provider 路由说明。
 
 ### Phase D — Tests
 
-已从 Active 测试面删除只验证旧实现的测试：
+已删除只验证旧 authority 实现的专项测试；平台 Search/Inspect Adapter 注册类测试继续保留。
 
-- `test_capability_authority.py`；
-- `test_authority_error_contract.py`；
-- `test_capability_contracts.py`；
-- `test_capability_truth_negative.py` 与其 fixture；
-- `test_job_execution_authority_storage.py`；
-- `test_registry_readiness.py`。
-
-平台 Search/Inspect 注册类测试（如 AdapterDescriptor）保留，因为它们仍约束真实平台业务能力。
-
-`test_mcp_stdio.py` 已迁移为新契约，继续验证完整业务闭环，而不是删除测试绕过问题。
+`test_mcp_stdio.py` 保留并迁移为新契约，因为它验证真实业务控制面，而不是内部实现细节。
 
 ## Validation
 
-已经完成两级验证。
-
 ### Milestone 1 — simplified state
 
-隔离 GitHub Actions：
+已通过：
 
-| Validation | Result |
-| --- | --- |
-| Python 3.12 package install | pass |
-| `compileall` active package | pass |
-| parse all contract JSON | pass |
-| `test_acquisition_simplification_0037.py` | pass |
-| Active Service initializes after CapabilityCoordinator retirement | pass |
+- Python 3.12 package install；
+- active package `compileall`；
+- current JSON contract parse；
+- `test_acquisition_simplification_0037.py`；
+- Active Service 在 CapabilityCoordinator 退役后正常初始化。
 
-### Milestone 2 — MCP business round trip
+### Milestone 2 — first full MCP round trip
 
-最终临时 GitHub Actions run `31514845872`：
+GitHub Actions run `31514845872` 已通过：
+
+```text
+13 Tool discovery
+-> Flow
+-> Search
+-> Inspect
+-> Present
+-> Select
+-> Prepare
+-> Start
+-> Job
+-> Archive
+-> Library Search
+```
+
+### Milestone 3 — compatibility cleanup / migration 9
+
+GitHub Actions run `31517757764` 已通过，且只有全部检查成功后才提交 `ff2a7044fa26a48491e5c3dac9fed5ee7ffd380d`。
 
 | Validation | Result | What it proves |
 | --- | --- | --- |
-| install current service | pass | 当前依赖可安装 |
-| compile active package | pass | 当前 Python 代码可导入/编译 |
-| parse all contract JSON | pass | current JSON contract 无语法断裂 |
-| simplified acquisition tests | pass | migration 8 / Planner / request / public schema 关键行为 |
-| `test_mcp_stdio.py` | pass | 13 Tool + Flow → Search → Inspect → Present → Select → Prepare → Start → Job → Archive → Library 完整离线业务闭环 |
+| patch/cutover application | pass | 第二阶段修改可完整应用 |
+| current package install | pass | 当前依赖和包结构可安装 |
+| `compileall` | pass | Active Python 代码可编译 |
+| parse all current contract JSON | pass | 删除旧 contract 后引用面无 JSON 语法断裂 |
+| `test_acquisition_simplification_0037.py` | 7/7 pass | standalone Request、migration 9、旧表删除、Planner/contract 关键行为 |
+| `test_mcp_stdio.py` | 2/2 pass | 简化后仍能完成完整离线 MCP 业务闭环 |
+| obsolete contract checks | pass | 五个旧 capability/readiness/eligibility current contract artifacts 已物理删除 |
 
-临时 workflow 已删除，避免后续每个小 push 重复跑里程碑测试。
+验证过程中发现并修正了一个真实兼容问题：`WebMaterializer` 曾通过 `isinstance` 强制要求旧 `AcquisitionRequest` concrete class。该检查已删除；Router 负责请求边界，Provider 只消费执行事实。
 
-该验证仍不能证明真实互联网平台、合法会话或默认 OpenClaw Agent 已通过。
+临时 GitHub Actions workflow 已随成功 cutover 提交一起删除，不会在后续小改动中重复运行。
 
-## Remaining validation / cleanup
+## Remaining work
 
-1. v7 → 8 带真实旧数据升级和 cleanup migration；
-2. inherited `_run_download_job` / old AcquisitionRequest compatibility slot 彻底简化；
-3. 旧 authority 表和兼容 capability schema/catalog 物理删除；
-4. 根据剩余 diff 跑必要的 acquisition/storage 定向 regression；
-5. 真实 OpenClaw generic article primary webpage：Search → Inspect → Select → Confirm → Acquire → Archive → Recover；
-6. 完成后回到 0028 平台真实 E2E。
+第二阶段兼容清理已经完成。0037 目前只剩真实用户链验收：
+
+1. 在实际 OpenClaw 环境重新部署当前 MCP/Skill；
+2. 用 generic 正文网页完成真实：
+   `Search -> Inspect -> Present -> Select -> Prepare -> 用户确认 -> Start -> Job -> Archive -> Recover`；
+3. 核对正文网页确实走 `primary_resource + web_materialize`，而非 landing page；
+4. 成功后关闭 0037，回到 0028 的真实平台 E2E / Provider 恢复。
+
+不在 0037 中继续为了清理名称而重写成熟 Search/Inspect/Asset/Archive 基座；只有真实调用仍能触发旧 authority 行为时才继续删除对应代码。
 
 ## Milestone checkpoint
 
 ```text
 Original goal still unchanged?: yes
 Non-goals still respected?: yes
-Business invariants still true?: offline business E2E passed; real platform pending
-New abstraction introduced?: one small ProviderSpec/Planner replacing several state entities
-New source of truth introduced?: no; migration 8 simplifies acquisition persistence
+Business invariants still true?: yes; offline full round trip passed after physical cleanup
+New abstraction introduced?: no new abstraction in part 2
+New source of truth introduced?: no; migration 9 removes the obsolete one
 Fallback added?: no
 Data truncation added?: no
-Unrelated files changed?: no; docs/contracts/tests aligned with acquisition decision
-Actual user flow affected?: yes
-Actual user flow validated?: offline MCP full round trip yes; real OpenClaw no
-Scope drift detected?: compatibility cleanup remains explicitly staged
+Unrelated files changed?: no
+Actual user flow affected?: yes, acquisition execution boundary simplified
+Actual user flow validated?: offline MCP yes; real OpenClaw pending
+Scope drift detected?: no
 ```
 
 ## Completion record
 
 ```text
 [x] Active path cutover
-[x] persistence migration 8 active tables
+[x] persistence migration 8 business tables
+[x] migration 9 legacy authority table cleanup
 [x] public current schema cleanup
 [x] Agent Skill aligned
 [x] obsolete authority implementation tests removed
 [x] acquisition offline integration / stdio business E2E
 [x] main docs aligned
 [x] old CapabilityCoordinator implementation removed
-[ ] inherited runner/request compatibility removed
-[ ] old authority tables/schema compatibility physically cleaned up
+[x] inherited runner/request compatibility removed
+[x] old acquisition authority tables/current schemas physically cleaned up
 [ ] real Agent/user-flow revalidated
 ```
 
 ## Completion condition
 
-本计划只有在以下都满足后才改为 `completed`：
+0037 在以下最后条件满足后改为 `completed`：
 
-- Active acquisition code不再依赖旧 CapabilityCoordinator 实现；
-- 公共 current Schema 不再暴露 authority/readiness/eligibility digest；
-- 兼容期旧表/旧 Request 有明确 cleanup；
-- 关键 acquisition integration 测试通过；
-- 至少一个真实 generic 用户回合完成 Search → Inspect → Select → Confirm → Acquire → Archive → Recover。
+- 至少一个真实 generic 用户回合在当前部署完成：
+  `Search -> Inspect -> Present -> Select -> Confirm -> Acquire -> Archive -> Recover`；
+- 该回合的正文网页语义为 `primary_resource`，并由 exact web materializer 执行；
+- 真实验证没有暴露仍可触发的旧 authority 路径。
