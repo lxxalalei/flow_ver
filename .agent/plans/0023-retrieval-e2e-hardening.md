@@ -60,11 +60,15 @@ Python unit test 冒充。
   `production_ready=fail` 为 `16/16`。
 - 公开 stdio 子进程 E2E 为 `8/8`：六条业务/控制面场景加两条重启/认证恢复场景；Selection/Plan
   失效、取消、partial、无 primary、策略拒绝、跨 Flow 归档限制和无副作用重放均已有进程级证据。
-- 当前全量 unittest 为 `493/493`，独立 stdio E2E、隔离 `compileall`、contracts JSON、Markdown
-  本地链接和 `git diff --check` 均通过；这些结果仍不等于真实平台 Acquisition 成功。
-- 当前 OpenClaw 未注册 `session-manager`，education-resources 未配置 standalone store bridge，部署
-  runtime 也未安装对应包；受控 legacy sessions 目录为空。0028 Step E 因此只记录精确 blocked 与恢复
-  条件，不安装、不登录，也不把离线 AUTH fixture 当成真实会话恢复。
+- 前一检查点全量 unittest 为 `493/493`；本次 direct-import 变更另有 session-manager `67` 项
+  `OK (skipped=5)`、受影响 education bridge/SmartEdu `32/32`、隔离 `compileall`、Skill/Markdown 与
+  `git diff --check` 验证。新增测试后的 education 全量回归尚未重跑；上述结果仍不等于真实平台
+  Acquisition 成功。
+- 当前 OpenClaw 已注册 `session-manager`，education-resources 已配置 standalone store bridge，部署
+  runtime 可导入 0.4.0 包，且两个 MCP 的共享 store 配置一致；4 个 session Tool 与原 13 个教育业务 Tool
+  均完成 live probe。用户明确授权的 SmartEdu canonical direct import 已保存为 `stored/no_probe`，但 fresh
+  真实 Agent Search 返回认证 HTTP 403、0 候选且未到达 Inspect，因此 0028 Step E 继续 blocked；不得
+  自动重放当前值，也不得把安装、保存、probe 或离线 AUTH fixture 当成真实会话恢复。
 - 0023 继续保持 `blocked`：当前真实文章 Presentation 有两个公开候选，必须先由用户明确选择；
   Prepare 后还要展示 Plan 并获得一次独立确认，才可 Start。用户选择与确认之前不得为了验收制造
   Selection、Plan、Job、Asset 或 Archive。

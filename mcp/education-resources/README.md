@@ -96,7 +96,8 @@ EDUCATION_RESOURCE_MCP_SEARXNG_URL=http://127.0.0.1:8888 \
 - 服务端强制执行超时、重试/并发、流式大小、数量、内容类型和真实文件格式校验，并清理取消
   或失败的临时产物。
 - 不绕过登录、验证码、付费墙、DRM 或其他访问控制。需要认证时由独立 `session-manager`
-  合法完成登录；凭据不进入 Skill、工具 JSON、日志或仓库。
+  合法完成浏览器捕获；用户明确指定平台、用途并授权时，也可由它接受一次 canonical direct import。
+  凭据不进入 `education-resources`、其他 Tool、日志、计划或仓库，也不得回显或失败后自动重放。
 - 工具不接受 shell 命令、脚本、解释器、任意下载 URL 或本地文件路径。Archive 只接受服务端
   生成且经过状态与权威校验的 `asset_id`（以及所属 Job 绑定）。大文件和二进制不进入模型上下文。
 - 持久开发数据与源码分离；测试脚本将数据、HOME、临时目录和 bytecode 缓存隔离到原生 Linux

@@ -394,6 +394,16 @@ class WindowsDpapiTests(unittest.TestCase):
             self.assertNotIn(token_secret, public_json)
             self.assertNotIn("session_data", public_json)
 
+    def test_login_guide_describes_explicit_direct_import_boundary(self) -> None:
+        with _home_temp_directory() as temp_dir:
+            guide = SessionStore(Path(temp_dir) / "data").login_guide("smartedu")
+            notes = "\n".join(guide["security_notes"])
+
+            self.assertIn("明确指定平台、用途和保存授权", notes)
+            self.assertIn("resource_session_save", notes)
+            self.assertIn("不得与浏览器捕获混用", notes)
+            self.assertIn("不得索取或代填账号、密码、验证码", notes)
+
     def test_account_and_password_fields_are_rejected_recursively(self) -> None:
         with _home_temp_directory() as temp_dir:
             store = SessionStore(Path(temp_dir) / "data")

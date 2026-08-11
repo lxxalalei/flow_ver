@@ -85,4 +85,4 @@
 
 工具响应丢失、上下文压缩、OpenClaw/MCP 重启或当前状态不确定时，优先读取 `resource_flow_status` / `resource_job_status` 等服务端事实；不要从聊天文本猜测业务状态。
 
-需要认证时说明原因并交给合法的 session-manager 流程；不要在对话中索取或复制 Cookie、Token、浏览器档案。
+需要认证时说明原因并交给合法的 session-manager 流程；不要索取账号、密码、验证码或 MFA。用户主动提供合法 Cookie/Token，并明确指定受支持平台、用途和保存授权时，只能将原值一次性直送 `resource_session_save`，不得复述、展示、记录、转发或失败后自动重放。

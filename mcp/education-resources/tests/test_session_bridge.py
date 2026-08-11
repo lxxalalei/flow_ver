@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,9 +10,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from education_resource_mcp.adapters.smartedu import SmartEduSearchAdapter
 from education_resource_mcp.config import Settings
 from education_resource_mcp.session_bridge import create_session_store
 from education_resource_mcp.sessions import SessionStore as LegacySessionStore
+
+
+STANDALONE_SESSION_MANAGER_AVAILABLE = (
+    importlib.util.find_spec("session_manager") is not None
+)
 
 
 class FakeStandaloneStore:
@@ -52,6 +59,60 @@ class SessionBridgeTests(unittest.TestCase):
         imported.assert_called_once_with("session_manager.store")
         self.assertIsInstance(store, FakeStandaloneStore)
         self.assertEqual(store.data_dir, session_dir)
+
+    @unittest.skipUnless(
+        STANDALONE_SESSION_MANAGER_AVAILABLE,
+        "openclaw-session-manager is required for the real bridge integration test",
+    )
+    def test_real_bridge_feeds_canonical_smartedu_token_to_adapter(self) -> None:
+        from session_manager.store import SessionStore as StandaloneSessionStore
+
+        with tempfile.TemporaryDirectory(
+            prefix="education-session-bridge-", dir=Path.home()
+        ) as raw:
+            root = Path(raw)
+            data_dir = root / "education"
+            session_dir = root / "session-manager"
+            secret = "synthetic-standalone-bridge-token"
+            StandaloneSessionStore(session_dir).save(
+                "smartedu",
+                {"tokens": {"accessToken": secret}},
+                idempotency_key="bridge-direct-import-save-01",
+            )
+            settings = self._settings(
+                data_dir,
+                session_manager_data_dir=session_dir,
+            )
+            bridged_store = create_session_store(settings)
+            adapter = SmartEduSearchAdapter(bridged_store, settings)
+            response = {
+                "data": {
+                    "list": [
+                        {
+                            "id": "bridge-resource-001",
+                            "title": "分数的初步认识",
+                            "description": "合成桥接测试",
+                            "tab_code": "qualityCourse",
+                            "search_resource_type": "course",
+                            "resource_type": "elite_lesson",
+                            "tags": [],
+                        }
+                    ]
+                }
+            }
+
+            with patch.object(
+                adapter,
+                "_post_search",
+                return_value=response,
+            ) as post_search:
+                results, error = adapter.search("分数的初步认识", 5)
+
+        self.assertIsNone(error)
+        self.assertGreaterEqual(len(results), 1)
+        headers = post_search.call_args.args[2]
+        self.assertEqual(headers["Authorization"], f"Bearer {secret}")
+        self.assertEqual(headers["accessToken"], secret)
 
     def test_configured_store_never_silently_falls_back_when_dependency_missing(
         self,

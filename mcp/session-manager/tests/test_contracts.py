@@ -140,6 +140,28 @@ class ContractCatalogTests(unittest.TestCase):
             self.assertIs(entry["retriable"], False)
             self.assertTrue(entry["description"])
 
+    def test_direct_import_invalid_payload_recovery_is_fail_closed(self) -> None:
+        skill = (
+            SERVICE_ROOT
+            / "distribution"
+            / "skills"
+            / "session-login-flow"
+            / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        workflow = (
+            SERVICE_ROOT
+            / "distribution"
+            / "skills"
+            / "session-login-flow"
+            / "references"
+            / "login-workflow.md"
+        ).read_text(encoding="utf-8")
+
+        for text in (skill, workflow):
+            self.assertIn("For direct import", text)
+            self.assertIn("without replaying or asking the user to resend", text)
+            self.assertIn("fresh explicit authorization", text)
+
 
 @unittest.skipUnless(JSONSCHEMA_AVAILABLE, "jsonschema is required for contract validation")
 class JsonSchemaContractTests(unittest.TestCase):
@@ -231,7 +253,18 @@ class JsonSchemaContractTests(unittest.TestCase):
         }
         self.assert_contract("resource_session_save", example)
 
-    def test_broad_capture_contract_rejects_unknown_top_level_and_non_string_storage(self) -> None:
+    def test_canonical_smartedu_direct_import_input_matches_contract(self) -> None:
+        example = {
+            "contract_version": "1.0.0",
+            "platform": "smartedu",
+            "session_data": {
+                "tokens": {"accessToken": "synthetic-direct-import-token"}
+            },
+            "idempotency_key": "contract-direct-import-save-01",
+        }
+        self.assert_contract("resource_session_save", example)
+
+    def test_session_input_contract_rejects_unknown_fields_and_non_string_storage(self) -> None:
         path = (
             CONTRACTS_ROOT
             / "schemas"
@@ -249,6 +282,14 @@ class JsonSchemaContractTests(unittest.TestCase):
                 "contract_version": "1.0.0",
                 "platform": "smartedu",
                 "session_data": {"browser_capture": {}},
+            },
+            {
+                "contract_version": "1.0.0",
+                "platform": "smartedu",
+                "session_data": {
+                    "tokens": {"accessToken": "synthetic-direct-import-token"},
+                    "headers": {"Authorization": "not-a-canonical-input"},
+                },
             },
             {
                 "contract_version": "1.0.0",

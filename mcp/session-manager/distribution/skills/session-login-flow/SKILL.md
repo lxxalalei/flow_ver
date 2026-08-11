@@ -1,6 +1,6 @@
 ---
 name: session-login-flow
-description: Guide OpenClaw users through platform session checks, opening the official login page, explicitly waiting for “已登录”, broadly capturing browser-visible cookies plus official-origin Web Storage, and letting the session-manager MCP extract and securely persist only the platform credentials it needs. Use for platform login, Cookie/session capture, SmartEdu token capture, expired sessions, re-login, or session deletion. Never request, accept, autofill, narrate, or echo credentials.
+description: Guide OpenClaw users through platform session checks, browser login/capture, explicitly authorized canonical Cookie/Token direct import, minimal persistence, validation, re-login, and deletion. Never request or autofill accounts, passwords, CAPTCHA, SMS codes, or MFA, and never narrate or echo session values.
 ---
 
 # Session Login Flow
@@ -26,14 +26,32 @@ mutation. A read-only status check may still proceed.
 2. Treat `not_required` as public access. Treat `stored` as local structure only; only
    `probe_status=valid` is remote confirmation. Normalize an omitted probe result to
    `probe_status=no_probe` in the explanation.
-3. For each platform needing login, call `resource_session_login_guide`. Its `login_url` and
+3. Unless the user already satisfies the explicit direct-import branch below, call
+   `resource_session_login_guide` for each platform needing login. Its `login_url` and
    `probe_supported` are authoritative. `cookie_domains`, `storage_keys`, and
    `storage_key_patterns` are **server extraction hints, not browser-side capture allowlists**.
 4. Open `login_url`. Tell the user to finish login in that OpenClaw-controlled browser and reply
    exactly **“已登录”**. End the turn and wait. Do not replace this gate with a timeout, URL change,
    page text, Cookie observation, or an ambiguous reply such as “好了”.
-5. Never ask for, accept, paste, or type a username, password, CAPTCHA, SMS/authenticator code,
-   Cookie, or Token. If the user posts one, do not repeat or use it; direct them to the browser.
+5. Never ask for, accept, paste, or type a username, password, CAPTCHA, SMS/authenticator code, QR
+   content, or MFA. The only non-browser exception is the explicit direct-import branch below.
+
+## Explicit canonical direct import
+
+Use this branch only when the user voluntarily provides a legally obtained Cookie/Token, names one
+supported platform and authentication purpose, and explicitly authorizes local saving. Do not solicit
+the value. Check status/platform support, generate one unique `idempotency_key`, and send the canonical
+value once only as `resource_session_save.session_data`.
+
+- Accept only existing canonical `cookies` or platform `tokens` shapes; never accept arbitrary headers,
+  files, browser profiles, passwords, CAPTCHA/MFA material, or guessed/transformed fields.
+- Never combine direct import with browser capture. Never reproduce the value in narration, screenshots,
+  logs, temporary files, plans, or any non-save tool call.
+- If save fails, times out, or its response is uncertain, do not replay it or ask the user to resend.
+  Read authoritative status without the value, stop, and require fresh explicit authorization for any
+  later write.
+- After save, report only status/count/revision metadata. `stored/no_probe` is local evidence only;
+  downstream platform Search/Inspect must still prove that the session works.
 
 ## Capture after “已登录”
 
@@ -71,7 +89,8 @@ Only continue after the explicit confirmation.
 
    Examples are structural placeholders only. Never put real captured values in chat, narration,
    screenshots, logs, temporary files, or any non-save tool call.
-5. Generate a unique `idempotency_key`. Reuse it only for a retry that extracts the same credential.
+5. Generate a unique `idempotency_key`. Reuse it only after establishing that a retry is safe and uses
+   the exact same browser capture; never automatically replay an uncertain write.
    The MCP fingerprints the minimized result, so unrelated browser-state noise may change safely.
    Omit `expires_at` unless one reliable expiry applies to the complete platform session.
 6. The MCP may receive broad browser data, but it must apply platform-specific domain/key/pattern
@@ -104,10 +123,13 @@ uses the POSIX backend even when OpenClaw itself runs on Windows. Never downgrad
 
 - Re-login: delete the platform session with a new idempotency key, then run the login flow.
 - Delete only: delete that platform only; never reset the whole browser profile.
-- `SESSION_EMPTY`: keep/reopen the official tab, ask the user to complete remaining redirect or
-  consent, then allow one fresh capture. Do not ask for manual Cookie export.
-- `SESSION_PAYLOAD_INVALID`: do not print the captured item. Reopen and retry once; persistent failure
-  means the platform extractor or browser capture shape needs updating.
+- `SESSION_EMPTY`: for browser capture, keep/reopen the official tab, ask the user to complete remaining
+  redirect or consent, then allow one fresh capture. Do not solicit manual Cookie export. For direct
+  import, stop without replaying or asking the user to resend.
+- `SESSION_PAYLOAD_INVALID`: never print the submitted item. For browser capture only, reopen the
+  official page and retry once; persistent failure means the extractor or capture shape needs updating.
+  For direct import, read status and stop without replaying or asking the user to resend; any later write
+  requires fresh explicit authorization.
 - `SECURE_STORAGE_UNAVAILABLE`: stop immediately; do not recapture, probe, or write plaintext.
 - `probe_status=invalid`: offer one clean re-login unless already authorized; never auto-loop.
 - `probe_status=probe_error`: preserve the saved record and report inconclusive verification.

@@ -78,6 +78,14 @@ class McpStdioTests(unittest.TestCase):
                         initialized = await session.initialize()
                         self.assertEqual(initialized.server_info.name, "session-manager")
                         self.assertEqual(initialized.server_info.version, "0.4.0")
+                        self.assertIn(
+                            "explicitly names the supported platform",
+                            initialized.instructions or "",
+                        )
+                        self.assertIn(
+                            "resource_session_save",
+                            initialized.instructions or "",
+                        )
 
                         listed = await session.list_tools()
                         self.assertEqual(
@@ -240,6 +248,86 @@ class McpStdioTests(unittest.TestCase):
                             self.assertNotIn(secret, serialized_smartedu)
                         self.assertNotIn("session_data", serialized_smartedu)
                         self.assertNotIn("local_storage", serialized_smartedu)
+
+                        direct_secret = "stdio-smartedu-direct-token-must-not-leak"
+                        direct_saved = await session.call_tool(
+                            "resource_session_save",
+                            {
+                                "contract_version": "1.0.0",
+                                "platform": "smartedu",
+                                "session_data": {
+                                    "tokens": {"accessToken": direct_secret}
+                                },
+                                "idempotency_key": "stdio-smartedu-direct-save-01",
+                            },
+                        )
+                        self.assertFalse(direct_saved.is_error)
+                        self.assertTrue(direct_saved.structured_content["ok"])
+                        self.assertEqual(
+                            direct_saved.structured_content["status"], "stored"
+                        )
+                        self.assertEqual(
+                            direct_saved.structured_content["stored_credential_count"],
+                            1,
+                        )
+                        self.assertNotIn(
+                            direct_secret,
+                            json.dumps(
+                                direct_saved.model_dump(mode="json"),
+                                ensure_ascii=False,
+                            ),
+                        )
+
+                        invalid_secret_marker = (
+                            "stdio-invalid-direct-token-must-not-leak"
+                        )
+                        invalid_saved = await session.call_tool(
+                            "resource_session_save",
+                            {
+                                "contract_version": "1.0.0",
+                                "platform": "smartedu",
+                                "session_data": {
+                                    "tokens": {
+                                        "accessToken": invalid_secret_marker + "\x00"
+                                    }
+                                },
+                                "idempotency_key": "stdio-smartedu-invalid-save-01",
+                            },
+                        )
+                        self.assertFalse(invalid_saved.is_error)
+                        self.assertFalse(invalid_saved.structured_content["ok"])
+                        self.assertEqual(
+                            invalid_saved.structured_content["error"]["code"],
+                            "SESSION_PAYLOAD_INVALID",
+                        )
+                        self.assertNotIn(
+                            invalid_secret_marker,
+                            json.dumps(
+                                invalid_saved.model_dump(mode="json"),
+                                ensure_ascii=False,
+                            ),
+                        )
+
+                        direct_status = await session.call_tool(
+                            "resource_session_status",
+                            {
+                                "contract_version": "1.0.0",
+                                "platforms": ["smartedu"],
+                                "deep": False,
+                            },
+                        )
+                        self.assertFalse(direct_status.is_error)
+                        self.assertEqual(
+                            direct_status.structured_content["sessions"][0]["status"],
+                            "stored",
+                        )
+                        self.assertNotIn(
+                            direct_secret,
+                            json.dumps(
+                                direct_status.model_dump(mode="json"),
+                                ensure_ascii=False,
+                            ),
+                        )
 
                         smartedu_deleted = await session.call_tool(
                             "resource_session_delete",

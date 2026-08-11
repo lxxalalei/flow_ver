@@ -4,13 +4,14 @@
 `skills/learning-resource-flow/` 或 `mcp/education-resources/`：
 
 - `session-manager` MCP：平台注册表、登录状态、服务端凭据提取、安全本地保存、探活和删除。
-- `session-login-flow` Skill：把 MCP 与 OpenClaw Browser 串成“检测 → 打开官方登录页 →
-  显式等待用户回复‘已登录’ → 浏览器宽捕获 → MCP 最小化保存 → 按支持情况探活”的流程。
+- `session-login-flow` Skill：默认把 MCP 与 OpenClaw Browser 串成“检测 → 打开官方登录页 →
+  显式等待用户回复‘已登录’ → 浏览器宽捕获 → MCP 最小化保存 → 按支持情况探活”的流程；也约束
+  用户明确授权的 canonical Cookie/Token direct import。
 
 MCP 自己不能操作浏览器；Skill 负责要求宿主使用 OpenClaw Browser。两者一起安装后，
 OpenClaw 才会在缺少登录态时主动打开浏览器、提示用户登录，并在用户明确确认后捕获会话。
 
-## 0.4.0 的捕获模型
+## 0.4.0 的会话输入模型
 
 浏览器侧不再按 Cookie 名、域名或固定 storage key 预过滤：
 
@@ -25,14 +26,19 @@ OpenClaw 才会在缺少登录态时主动打开浏览器、提示用户登录�
 因此“浏览器能抓到什么都交给 MCP”不等于“全部保存”。宽捕获只存在于一次
 `resource_session_save` 的输入通道中，落盘前一定会做平台化最小化。
 
-兼容旧调用：已有 `{"cookies": [...]}` 和
-`{"tokens": {"accessToken": "<normalized>"}}` 输入继续支持。
+已有 canonical `{"cookies": [...]}` 和 `{"tokens": {"accessToken": "<normalized>"}}`
+输入继续支持。用户主动提供其合法获得的 Cookie/Token，并明确指定受支持平台、认证用途和保存授权时，
+Agent 可把 canonical 值一次性直送 `resource_session_save.session_data`。direct import 不得与同一次
+browser capture 混合，也不接受任意 Header、文件、浏览器档案或未声明字段。
 
 ## 能力与安全边界
 
-- 用户始终在浏览器中自行输入账号、密码、验证码，或完成扫码/MFA。
-- Agent 不索取、不接收、不代填、不回显账号、密码、验证码、Cookie 或 Token；用户误发时
-  也不得把这些值用于捕获或保存。
+- 默认登录路径中，用户始终在浏览器中自行输入账号、密码、验证码，或完成扫码/MFA。
+- Agent 不索取、不接收或代填账号、密码、验证码、扫码内容、短信码或 MFA。仅在用户主动提供合法
+  Cookie/Token，并明确指定平台、用途和保存授权时，才可执行上述一次性 direct import。
+- 浏览器捕获或 direct import 的原值都不得复述、展示、截图、写入临时文件、日志、计划、仓库或
+  任何非 `resource_session_save` Tool。save 失败或响应不确定时不得自动重放或要求用户重发；先查
+  权威 status 并停止，后续写入需要新的明确授权。
 - `cookie_domains`、`storage_keys`、`storage_key_patterns` 是 MCP 的提取提示，不是浏览器侧
   allowlist；Skill 不应据此缩小浏览器返回的数据。
 - MCP 对总字节数、Cookie 数、storage 条目数、字段长度、origin 和域名边界做限制。
@@ -43,7 +49,7 @@ OpenClaw 才会在缺少登录态时主动打开浏览器、提示用户登录�
   本项目的窗口化 Browser 测试和正式本地运行优先采用**原生 Windows OpenClaw + 原生 Windows MCP**。
 - DPAPI 密文只能由同一 Windows 用户上下文解密；它不能防御已在该用户上下文中运行的
   恶意进程，管理员级进程也属于边界外威胁。
-- Cookie/Token 仍会从浏览器工具经过 Agent/MCP 参数通道。更强隔离需要未来由宿主 Plugin
+- Cookie/Token 仍会从浏览器工具或 direct import 经过 Agent/MCP 参数通道。更强隔离需要未来由宿主 Plugin
   直接捕获并仅返回不透明 `capture_id`。
 - 不绕过验证码、付费墙、DRM 或访问控制。
 
@@ -53,7 +59,7 @@ OpenClaw 才会在缺少登录态时主动打开浏览器、提示用户登录�
 |---|---:|---|
 | `resource_session_status` | 否 | 返回状态和登录/捕获元数据；`deep=true` 时按支持情况主动探活。 |
 | `resource_session_login_guide` | 否 | 返回官方登录入口、捕获方式和服务端提取提示。 |
-| `resource_session_save` | 是 | 接受浏览器宽捕获或旧 canonical 输入，提取、最小化并原子保存；支持幂等键。 |
+| `resource_session_save` | 是 | 接受浏览器宽捕获或明确授权的 canonical direct import，提取、最小化并原子保存；支持幂等键。 |
 | `resource_session_delete` | 是 | 删除单个平台的本地会话；支持幂等键。 |
 
 所有工具使用 `contract_version: "1.0.0"`；catalog 版本为 `1.1.0`。MCP 永远不在响应中
@@ -93,7 +99,8 @@ Web Storage 平台同时提交当前官方 origin 的存储快照：
 }
 ```
 
-这些都是结构占位符，不能替换为真实凭据写入文档、日志或对话。`storage_origin` 必须是当前
+这些都是结构占位符，不能替换为真实凭据写入文档、日志或叙述。用户明确授权 direct import 时，
+原值只能出现在一次 save 输入中。`storage_origin` 必须是当前
 页面真实的 `location.origin`，只能使用 HTTP(S)、不能带 userinfo/path/query/fragment，并且
 必须按 DNS label 边界匹配平台官方域名。
 
@@ -218,7 +225,7 @@ openclaw skills info session-login-flow --json
 
 ## 用户体验与自动串行流程
 
-登录请求的预期流程：
+默认浏览器登录请求的预期流程：
 
 1. Agent 调状态和登录指南。
 2. 缺少登录态时，用 OpenClaw Browser 打开 MCP 返回的官方 `login_url`。
@@ -228,6 +235,10 @@ openclaw skills info session-login-flow --json
    local/session storage，并立即调用 `resource_session_save`。
 5. MCP 提取并只保存最小凭据；Agent 再查状态和可用探针，只报告元数据和结论。
 6. 多平台请求会自动打开下一个缺失平台，但每个平台都必须单独等待一次“已登录”。
+
+direct import 分支只在用户主动给出合法 Cookie/Token，并明确指定平台、用途和保存授权时启用：先查
+状态和平台支持，再生成唯一幂等键，把 canonical 值一次性直送 `resource_session_save`，随后重新查
+状态。不得打开浏览器捕获来混合补全，不得自动重放；`stored/no_probe` 仍须由下游 fresh 平台请求验证。
 
 如果 Browser、MCP 或 Skill 任一缺失，Agent 必须说明缺少的能力，不得假装完成。
 

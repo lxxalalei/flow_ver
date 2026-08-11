@@ -10,6 +10,16 @@ user says “已登录” → verify official tab → broad browser capture → 
 Browser observations never replace the explicit confirmation. Each platform in a multi-platform run
 has its own confirmation gate.
 
+An alternative branch exists only when the user voluntarily supplies a legally obtained canonical
+Cookie/Token, names the supported platform and purpose, and explicitly authorizes saving:
+
+```text
+status/platform check → one immediate canonical save → status/probe
+```
+
+Do not solicit the value, combine this branch with browser capture, or automatically replay an
+uncertain save.
+
 ## Broad capture contract
 
 The browser/Skill may submit all cookies returned by the controlled browser context. For a storage
@@ -44,7 +54,7 @@ All values are placeholders. Web Storage values are strings; JSON remains a stri
 inside the platform extractor. `storage_origin` must be the active page's `location.origin`, not a URL
 invented from platform metadata.
 
-Legacy canonical inputs remain supported:
+Canonical direct-import inputs remain supported:
 
 ```json
 {"cookies": ["<cookie objects>"]}
@@ -54,7 +64,9 @@ Legacy canonical inputs remain supported:
 {"tokens": {"accessToken": "<already normalized value>"}}
 ```
 
-Do not combine user-pasted credentials with a browser capture.
+Use them only with the user's explicit platform-, purpose-, and save-specific authorization. Do not
+accept arbitrary headers, files, browser profiles, account passwords, CAPTCHA/MFA material, or unknown
+fields, and do not combine direct import with a browser capture.
 
 ## Server-side extraction
 
@@ -94,15 +106,17 @@ Only `probe_status=valid` is remote confirmation.
 
 ### No platform credential extracted
 
-Keep or reopen the official login page, ask the user to finish any redirect/consent step, and require
-one new “已登录” before recapturing. Do not ask for a Cookie or Token paste and do not broaden server
-patterns ad hoc.
+For browser capture, keep or reopen the official login page, ask the user to finish any redirect/consent
+step, and require one new “已登录” before recapturing. Do not solicit a Cookie/Token or broaden server
+patterns ad hoc. For direct import, stop without replaying or asking the user to resend; read status and
+require fresh explicit authorization before any later write.
 
 ### Matching storage record is malformed or conflicting
 
-The MCP returns `SESSION_PAYLOAD_INVALID` without the value. Retry once from a freshly loaded official
-page. Persistent failure requires an extractor update; never print the raw storage record for
-debugging in chat.
+The MCP returns `SESSION_PAYLOAD_INVALID` without the value. For browser capture only, retry once from
+a freshly loaded official page; persistent failure requires an extractor update. For direct import,
+read status and stop without replaying or asking the user to resend; any later write requires fresh
+explicit authorization. Never print the raw submitted value for debugging in chat.
 
 ### Save succeeds but the probe is invalid
 
@@ -117,5 +131,6 @@ credentials.
 
 ## Credential-channel limitation
 
-Captured values still cross Agent/MCP arguments. They must go only to the immediate save call and
-must never be narrated or forwarded. This is not equivalent to an opaque host-side capture channel.
+Browser-captured and explicitly authorized direct-import values still cross Agent/MCP arguments. They
+must go only to the immediate save call and must never be narrated, logged, or forwarded. This is not
+equivalent to an opaque host-side capture channel.

@@ -75,7 +75,12 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
             "capturing browser cookies and same-origin storage. Pass the broad "
             "browser capture directly to resource_session_save; the MCP performs "
             "authoritative platform extraction and minimal persistence. Then check status. "
-            "Never ask the user to paste credentials and never echo captured values."
+            "Never request, accept, or autofill accounts, passwords, CAPTCHA, SMS codes, "
+            "or MFA. If the user voluntarily supplies a legally obtained canonical Cookie "
+            "or Token and explicitly names the supported platform, purpose, and permission "
+            "to save it, send it once only as resource_session_save session_data. Never "
+            "echo, narrate, log, forward, mix with browser capture, or automatically replay "
+            "credential values."
         ),
     )
 
@@ -115,12 +120,14 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
         expires_at: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """Securely persist host-captured cookies or storage tokens.
+        """Securely persist host-captured or explicitly authorized canonical session data.
 
         The browser may submit broad cookies and same-origin storage maps. Platform
         extractors enforce domains, key patterns, required fields, and minimal
-        persistence server-side; unrelated captured entries are discarded. Responses never
-        include credential values. Reuse an ``idempotency_key`` for safe retry.
+        persistence server-side; unrelated captured entries are discarded. A trusted host
+        may submit a user's explicitly authorized canonical Cookie/Token for the named
+        platform. Responses never include credential values. Reuse an ``idempotency_key``
+        only when the caller has established the prior request's exact outcome.
         """
         return _invoke(
             lambda: session_store.save(

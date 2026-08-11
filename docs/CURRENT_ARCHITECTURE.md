@@ -149,9 +149,12 @@ Enablement 已于 **2026-08-11** 完成。当前唯一技术顺序为：
 - 16 平台本环境 readiness 与用户文案边界已经逐项审计，当前 `production_ready=fail` 为 `16/16`。
   这表示分级完成，不表示所有网络、合法会话、版权/策略或获取路径均已成功；Adapter、Descriptor、
   fixture 和单次 probe 仍不能升级平台状态。
-- 当前 0028 OpenClaw 配置未注册独立 `session-manager`，education-resources 也未配置共享 store bridge，
-  其 runtime 未安装 session-manager 包；因此真实 AUTH_REQUIRED 恢复按环境前置条件 blocked，而不是
-  退回 legacy store、自动安装、索取凭据或把离线 marker 当作合法 session。
+- 当前 0028 OpenClaw 已注册独立 `session-manager`，education-resources 已配置同一受控 store bridge，
+  其 runtime 可导入 0.4.0 包；4 个 session Tool 与原 13 个教育业务 Tool 的 live probe 均通过。
+  用户明确授权的 SmartEdu canonical direct import 已最小保存为 `stored/no_probe`，但 fresh 真实 Agent
+  Search 返回认证 HTTP 403、0 候选，未到达 Inspect，因此真实 AUTH_REQUIRED 恢复仍 blocked。不得退回
+  legacy store、自动重放/变换当前值，或把安装、保存、probe、离线 marker 当作合法远端 session；新的
+  direct import 仍须用户明确指定平台、用途并再次授权，且不得索取密码/验证码、转发、回显或写入仓库。
 - 中断/重启、幂等、Selection/Plan 失效、取消、partial、无 primary、策略拒绝和归档限制已有真实或
   stdio 进程级证据，但真实平台 Acquisition → Asset/Bundle → Archive → Recover 尚未形成成功闭环。
 - 0028、0029 的最终 release gate，以及远程 Streamable HTTP、多租户生产隔离和正式平台部署。

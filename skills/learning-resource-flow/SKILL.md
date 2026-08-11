@@ -249,9 +249,9 @@ Platform Registry、平台名、资源类型、文件扩展名或旧 options 都
 
 ## 认证
 
-登录不属于本 Skill 或 `education-resources` 的公共控制面。遇到 AUTH_REQUIRED 时暂停当前获取/核验路径，交给独立 session-manager 的合法登录流程；会话准备好后重新读取 Flow/Resolution/Readiness 并按当前服务端事实继续。
+登录不属于本 Skill 或 `education-resources` 的公共控制面。遇到 AUTH_REQUIRED 时暂停当前获取/核验路径，交给独立 session-manager 的合法登录流程。默认使用受控浏览器；用户主动提供合法 Cookie/Token，并明确指定受支持平台、认证用途和保存授权时，可由 session-manager 执行一次 canonical direct import。会话准备好后重新读取 Flow/Resolution/Readiness 并按当前服务端事实继续。
 
-不要在 Skill、Tool JSON、日志或仓库中复制 Cookie、Token、Secret 或浏览器档案。不绕过登录、验证码、付费墙、DRM 或明确访问控制。
+不要索取或代填账号、密码、验证码、短信码或 MFA。Cookie/Token 原值不得进入本 Skill、`education-resources` Tool、其他 Tool、日志、计划或仓库；唯一例外是上述明确授权后的一次 `resource_session_save.session_data` 输入，且不得回显、与浏览器捕获混用或失败后自动重放。不绕过登录、验证码、付费墙、DRM 或明确访问控制。
 
 ## Job、恢复与取消
 

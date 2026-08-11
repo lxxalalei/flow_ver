@@ -21,12 +21,91 @@
   独立实现计划解除前置条件，不得在 0028 临时接入或用 generic/capture 替代。
 - 不新增第 14 个 MCP Tool，不恢复 legacy Skill，不让 Agent 拼接 shell、脚本、二进制或路径。
 - 所有副作用继续执行 `prepare -> 用户明确确认 -> start`；不得自动确认或重放网络副作用。
-- 认证只使用用户/平台合法授权的 session-manager/SecretRef；不得把 Cookie、Token、凭据、
-  浏览器档案、SQLite、下载资产或真实平台数据写入仓库。
+- 认证只使用用户/平台合法授权的 session-manager/SecretRef。默认通过受控浏览器捕获；用户明确指定
+  平台、用途并授权保存时，也可把其合法获得的 canonical Cookie/Token 一次性直送
+  `resource_session_save.session_data`。凭据不得进入其他 Tool、日志、计划、仓库或证据正文。
 - 不绕过验证码、登录、付费墙、DRM、robots/访问控制或版权/策略边界。
 - 不以增加超时、盲目重试、降低 SSRF/重定向/大小/MIME/magic 校验或静默 generic fallback
   换取“通过”。失败必须保持真实结构化状态。
 - OpenClaw 命令串行执行；先区分环境锁、进程、网络、认证、策略与产品功能失败，再决定动作。
+
+## 2026-08-11 Step E Direct Import Task Spec
+
+### Goal
+
+用户明确指定支持的平台、认证用途并授权保存其合法获得的 Cookie/Token 时，Agent 能通过现有
+`resource_session_save` canonical 输入完成一次最小化本地保存，并只返回非敏感状态。
+
+### Non-goals
+
+- 不接收或代填账号、密码、验证码、扫码内容、短信码或 MFA；不绕过登录、付费、DRM 或访问控制。
+- 不新增 Tool、Schema、状态源、任意 Header/文件导入或兼容层，不改变平台 policy 和 exact Provider。
+- 不把 `stored/no_probe`、合成测试或本地落盘解释为远端认证有效或 production-ready。
+
+### User / Business Behavior
+
+```text
+Given: 用户明确指定受支持平台和用途，并主动提供合法 Cookie/Token 且授权保存
+When: Agent 执行 direct import
+Then: 原值只作为一次 resource_session_save.session_data 输入，响应只含状态/计数/revision
+```
+
+### Business Invariants
+
+- 默认仍为官方页面自行登录和 Browser capture；direct import 不能与同一次 browser capture 混用。
+- Agent 不索取账号/密码/验证码/MFA，不复述、展示、截图、写临时文件或把凭据交给其他 Tool。
+- save 失败、响应不确定或验证失败时不得自动重放或要求重发；先读权威 status 后停止并重新取得授权。
+- 保存后仍须 fresh Search/Inspect、Resolution/Eligibility、新 Plan 和独立用户确认，才能 Start。
+
+### Current System Understanding
+
+- `resource_session_save` Schema 已接受平台 canonical `cookies`/`tokens`，SessionStore 负责最小化、权限、
+  幂等和不回显；无需新增机器接口。
+- session-manager 是唯一可写凭据权威源；education-resources 只读共享 store，其他 Tool 不接收凭据。
+
+### Expected Change Surface
+
+- 修改 active session-manager README/server instructions/login guide、唯一入口 Skill、当前架构/计划文档。
+- 补充 canonical SmartEdu direct-token 的 contract/stdio 行为测试；不修改契约版本与错误码。
+- 不修改 `AGENTS.md`、archive、legacy、平台 policy、Acquisition/Archive 门禁。
+
+### Acceptance Criteria
+
+```text
+AC-01: 明确授权的 canonical SmartEdu token 可保存为 stored，响应、status 与错误不含原值。
+AC-02: 账号/密码/验证码、未知字段、任意 Header/文件仍被拒绝，失败不引入自动重放语义。
+AC-03: direct import 后仍执行 session/readiness 与 fresh Resolution/Eligibility 门禁。
+```
+
+### Validation Plan
+
+- Session-manager contract、store、stdio 定向测试和 Python compileall。
+- Education-resources standalone bridge/SmartEdu Adapter 定向测试。
+- Markdown 本地链接、敏感值扫描、`git diff --check` 和 live MCP Tool/状态只读复核。
+
+### Complexity Exception
+
+No。复用现有 canonical save 输入与唯一 SessionStore 权威源。
+
+### Dependency Research
+
+No。没有新增或升级第三方依赖；继续使用已注册的 `openclaw-session-manager==0.4.0` 与现有 MCP 契约。
+
+### Completion Record
+
+```text
+[x] implemented
+[x] statically checked
+[x] targeted unit tested
+[x] subsystem/integration tested
+[x] backend E2E tested
+[x] real Agent/user-flow tested
+[ ] visual behavior inspected (not applicable)
+[ ] full repository regression tested
+
+Not validated: 有效 SmartEdu 会话下的 Search/Inspect/Resolution/Eligibility 与后续 Plan/Job 成功路径。
+Known remaining risks: 当前保存值被真实平台以认证 HTTP 403 拒绝；POSIX store 依赖 0700/0600 权限而非 Windows DPAPI。
+```
 
 ## 权威证据模型
 
@@ -47,7 +126,7 @@
 - [x] completed：B. 串行执行 OpenClaw 环境预检，证明当前工作区、唯一 Skill、13 Tool、schema/catalog、仓库外运行目录与凭据边界正确
 - [x] completed：C. 建立不含生产凭据的真实 Agent 证据采集模板和逐平台 readiness 记录，先执行无需认证平台
 - [ ] in_progress：D. 执行文章、网页物化、视频、音频、图书/版本、课程/Bundle、混合检索、恢复八类自然语言 Agent 回合
-- [ ] blocked：E. 在合法会话可用的平台验证 AUTH_REQUIRED → session ready → 新 Plan/Job 恢复；当前 session-manager 未注册、bridge 未配置且 runtime 包未安装，按精确恢复条件等待外部授权
+- [ ] blocked：E. 在合法会话可用的平台验证 AUTH_REQUIRED → session ready → 新 Plan/Job 恢复；SmartEdu canonical direct import 已保存为 `stored/no_probe`，但 fresh 真实 Search 返回认证 HTTP 403，等待新的合法有效会话
 - [x] completed：F. 验证中断、重启、幂等、Selection/Plan 失效、取消、partial、无 primary、策略拒绝与归档限制
 - [x] completed：G. 逐平台完成 readiness 分级与用户文案审计；只有完整证据通过的平台才可标 `production_ready`
 - [ ] pending：H. 运行离线 stdio/全量回归，更新 0023、CURRENT_ARCHITECTURE、DEVELOPMENT_PLAN 和运维证据，由根 Agent 完成逐项验收
@@ -76,19 +155,20 @@ openclaw mcp probe education-resources --json
 ## 2026-08-11 环境基线与预检证据
 
 - Git：branch `codex/growth-resource-taxonomy-rework`，HEAD
-  `7a3e2632c2a4d85468bf9823c61175fa1de3326e`；工作树已有用户修改，预检未覆盖、回滚或清理这些改动。
+  `0dc163adbab8cc5eb3f8700c118179614af14d9b`；工作树已有用户修改，预检未覆盖、回滚或清理这些改动。
 - 运行环境：macOS 26.5.2 arm64、OpenClaw `2026.7.1-2 (0790d9f)`、Node `v24.19.0`、
   Python `3.14.5`；默认 Agent 为 `main`，模型标识为 `deepseek/deepseek-v4-flash`。
 - Skill：仓库顶层 `skills/` 只含 `learning-resource-flow`。该 Skill 已复制到
   `/Users/arale/.openclaw/workspace/skills/learning-resource-flow`；`skills check` 将其列为 eligible、
   model-visible 和 command-visible。排除 OpenClaw 自身 `.openclaw/source-origin.json` 后，源与安装副本
-  8 个文件的当前内容摘要均为 `be82f5f57ea256c96c8442faa90b98edceb6053d55ae280f6ae8017081681cd1`。
+  8 个文件的当前内容摘要均为 `e4798e89bd8a24029454279614acba733d712e4ef89bfacf46fac66a844062a1`。
   该摘要包含真实回合后新增的 MCP 封闭工具面、版本、extend 总容量、候选可访问性、停止预算、
   重复读取保护、native platform 封闭命名空间、AUTH_REQUIRED 证据边界，以及 extend 后必须使用当前
   public resource ID 重新 Inspect 的约束、本体 unknown 不得触发登录建议，以及完整用户可见列表必须
   先于 PresentationSave、受限/重复项不得默认进入 Presentation，以及 idempotency key 只能使用合规
   ASCII 字符且不能复制脱敏缩写，以及低相关结果不能在无 Tool 证据时归因为 query 被拆分/改写的边界；
-  各证据记录继续保留其回合实际加载的旧摘要。
+  当前摘要还包含明确授权 canonical direct import 只能进入一次 `resource_session_save`、不得回显/转发/
+  自动重放的边界；各证据记录继续保留其回合实际加载的旧摘要。
 - MCP：运行时固定在仓库外
   `/Users/arale/.local/share/quanxiao/education-resource-mcp-runtime/0.2.0-9e17ea8c`，数据与资源库固定在
   `/Users/arale/.local/share/quanxiao/education-resource-mcp-e2e/0028-20260811`。配置只传递上述两个非敏感
@@ -158,14 +238,19 @@ readiness 字段只允许 `pass`、`fail`、`blocked`、`not_applicable`、`not_
 
 ### 当前逐平台 readiness（真实 Agent、平台与环境证据）
 
-- `observed_at`：`2026-08-11T01:44:01Z`
-- `environment_fingerprint`：`503b48b6a95ff812e1ac875a663009964e741e9b2d7861f267a20ef705aa2065`
+- `observed_at`：`2026-08-11T04:19:12Z`
+- `environment_fingerprint`：`981bf39dad6388e36529cff8c18e5db832787fe377ffe32dc073ac37be729fbe`
 - `evidence_ids`：`EV-0028-BASELINE-01`、`EV-0028-0027-DISPOSITION-01`、
   `EV-0028-20260811-01`、`EV-0028-20260811-02`、`EV-0028-20260811-03`
   、`EV-0028-20260811-04`、`EV-0028-20260811-05`、`EV-0028-20260811-06`、
   `EV-0028-20260811-07`、`EV-0028-20260811-08`、`EV-0028-20260811-09`、
   `EV-0028-20260811-10`、`EV-0028-20260811-11`、`EV-0028-20260811-12`、
-  `EV-0028-20260811-13`、`EV-0028-20260811-14`
+  `EV-0028-20260811-13`、`EV-0028-20260811-14`、`EV-0028-20260811-15`、
+  `EV-0028-20260811-16`
+- EV-15 只刷新安装、MCP 配置和认证状态事实；平台网络、Search、Inspect、Acquisition 与 Policy
+  字段沿用此前同一源码/运行时证据，本轮没有重新访问真实平台。
+- EV-16 新增一次明确授权的 SmartEdu canonical direct import 和 fresh 真实 Agent Search；本地保存成功，
+  但平台返回认证 HTTP 403、0 候选，未执行 Inspect，auth recovery 因此为 fail 而非 pass。
 - `runtime_component_loaded` 记为 `S/I/A`，分别代表 Search、Inspect、Acquisition；`A` 只写 exact
   Provider，不把 generic 路由或历史 downloader 源码算作平台 Provider。
 
@@ -173,9 +258,9 @@ readiness 字段只允许 `pass`、`fail`、`blocked`、`not_applicable`、`not_
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | generic | pass | not_observed | pass/pass/`generic-direct`,`generic-web-materializer` | pass | not_applicable | pass | pass | not_observed | pass | fail | `REAL_AGENT_BEHAVIOR_GATE_PASS`,`PUBLIC_READ_ONLY_PATH_PASS`,`HONEST_STOP_WITH_GAP_PASS`,`PRESENTATION_RECOVERY_PASS`,`QUERY_PRESERVATION_PASS`,`MIXED_RECALL_FAILED`,`BOOK_METADATA_ONLY`,`PRIMARY_DOCUMENT_NOT_PROVEN`,`ACQUISITION_NOT_RUN` |
 | bilibili | pass | not_observed | pass/pass/blocked | pass | not_applicable | pass | pass | blocked | blocked | fail | `SEARCH_PASS`,`INSPECT_PASS`,`LANDING_AVAILABLE`,`VIDEO_REPRESENTATION_UNKNOWN`,`NO_PRIMARY_VIDEO`,`COURSE_BUNDLE_NOT_PROVEN`,`POLICY_BLOCKED`,`DEPENDENCY_MISSING` |
-| douyin | pass | not_observed | pass/blocked/blocked | not_observed | blocked | not_observed | not_applicable | blocked | blocked | fail | `POLICY_BLOCKED`,`AUTH_REQUIRED`,`SESSION_MANAGER_NOT_CONFIGURED`,`SESSION_MANAGER_PLATFORM_UNSUPPORTED` |
-| zhihu | pass | not_observed | pass/pass/blocked | pass | blocked | blocked | not_observed | blocked | not_observed | fail | `AUTH_REQUIRED`,`CAPABILITY_NOT_DECLARED`,`SESSION_MANAGER_NOT_CONFIGURED` |
-| smartedu | pass | not_observed | pass/pass/`smartedu-resource` | pass | blocked | pass | pass | not_observed | pass | fail | `SEARCH_PASS`,`INSPECT_PARTIAL`,`LANDING_AVAILABLE`,`AUTH_REQUIRED_CANDIDATE`,`SESSION_MANAGER_NOT_CONFIGURED`,`VIDEO_DOCUMENT_REPRESENTATIONS_UNPROVEN`,`COURSE_BUNDLE_NOT_PROVEN`,`ACQUISITION_NOT_RUN` |
+| douyin | pass | not_observed | pass/blocked/blocked | not_observed | blocked | not_observed | not_applicable | blocked | blocked | fail | `POLICY_BLOCKED`,`AUTH_REQUIRED`,`SESSION_MANAGER_REGISTERED`,`SESSION_STATUS_NOT_OBSERVED`,`AUTH_RECOVERY_NOT_RUN` |
+| zhihu | pass | not_observed | pass/pass/blocked | pass | blocked | blocked | not_observed | blocked | not_observed | fail | `AUTH_REQUIRED`,`CAPABILITY_NOT_DECLARED`,`SESSION_MANAGER_REGISTERED`,`SESSION_STATUS_NOT_OBSERVED`,`AUTH_RECOVERY_NOT_RUN` |
+| smartedu | pass | not_observed | pass/pass/`smartedu-resource` | pass | fail | pass | pass | not_observed | pass | fail | `SEARCH_PASS`,`INSPECT_PARTIAL`,`LANDING_AVAILABLE`,`AUTH_REQUIRED_CANDIDATE`,`SESSION_MANAGER_REGISTERED`,`SESSION_STATUS_STORED_NO_PROBE`,`DIRECT_IMPORT_AUTHORIZED`,`AUTH_SEARCH_HTTP_403`,`AUTH_RECOVERY_FAILED`,`VIDEO_DOCUMENT_REPRESENTATIONS_UNPROVEN`,`COURSE_BUNDLE_NOT_PROVEN`,`ACQUISITION_NOT_RUN` |
 | ximalaya | pass | not_observed | pass/pass/blocked | pass | not_observed | pass | pass | blocked | blocked | fail | `SEARCH_PASS`,`INSPECT_PASS`,`LANDING_AVAILABLE`,`AUDIO_REPRESENTATION_UNKNOWN`,`NO_PRIMARY_AUDIO`,`ACQUISITION_POLICY_BLOCKED`,`AUTH_FLOW_NOT_RUN`,`DEPENDENCY_MISSING` |
 | cctv | pass | not_observed | pass/blocked/blocked | not_observed | not_observed | not_observed | not_applicable | blocked | not_observed | fail | `CAPABILITY_NOT_DECLARED` |
 | yixi | pass | not_observed | pass/blocked/blocked | not_observed | not_observed | not_observed | not_applicable | blocked | not_observed | fail | `CAPABILITY_NOT_DECLARED` |
@@ -200,7 +285,7 @@ readiness 字段只允许 `pass`、`fail`、`blocked`、`not_applicable`、`not_
 | bilibili | 已搜索并检查到落地页；视频本体尚未证实，当前获取受策略与依赖阻断。 |
 | douyin | 当前观测到合法认证要求，获取仍受策略阻断；未证明可检查或获取本体。 |
 | zhihu | 当前真实路径需要合法认证；网络可达不代表已经可搜索、检查或获取。 |
-| smartedu | 可搜索并部分检查候选；部分候选需认证，视频/文档本体和课程 Bundle 尚未证实。 |
+| smartedu | 历史回合可搜索并部分检查候选；本次直导会话后的 fresh 搜索收到认证 HTTP 403，当前不能称已登录或可获取，视频/文档本体和课程 Bundle 均未证实。 |
 | ximalaya | 可搜索并检查到落地页；音频本体尚未证实，获取受策略/依赖阻断，认证流程未运行。 |
 | cctv | 当前未观察到原生搜索、检查或获取成功路径。 |
 | yixi | 当前未观察到原生搜索、检查或获取成功路径。 |
@@ -236,13 +321,65 @@ proves: 当前环境不能合法执行 Step E；缺失条件会硬阻断而不�
 does_not_prove: 任一平台当前 session 状态、远端登录有效性、AUTH_REQUIRED 恢复、fresh Resolution/Eligibility、Plan/Job 或 Provider 成功
 ```
 
-Step E 标为 `blocked`。恢复条件是：先获得单独授权安装并注册独立 session-manager、让两个 MCP 指向
-同一受控 store 且验证包可导入；随后用户必须在官方页面自行登录并明确回复“已登录”。有可靠探针的平台
-只有 `probe_status=valid` 才能称 ready；无探针平台仍须以新的 education-resources Resolution 证明会话
-实际有效。之后必须重新 Inspect/Prepare，展示新 Plan 并再次取得独立确认，才允许 Start 新 Job。
-Douyin 当前不在 session-manager 支持表中，且 exact acquisition 仍 policy blocked；不能靠安装 session-manager
-解除，也不得切换 Cookie 抓取、generic 或 `web_capture`。离线 AUTH fixture 只证明错误/恢复状态机，不能
-证明真实人工登录、共享 store、平台接受会话或 production readiness。
+EV-14 当时将 Step E 标为 `blocked`，恢复条件包括安装/注册独立 session-manager、让两个 MCP 指向
+同一受控 store 并验证包可导入；这些环境前置条件已由 EV-15 解除。合法登录、fresh Resolution、
+新 Plan/Job 与 exact Provider 的要求没有改变。
+
+### EV-0028-20260811-15 — session-manager 安装/注册通过，会话仍缺失
+
+```text
+evidence_id: EV-0028-20260811-15
+evidence_level: real_openclaw configuration + stdio_process + embedded default Agent fallback; no authenticated real_platform request
+observed_at_utc: 2026-08-11T03:18:52Z
+environment_fingerprint: c761d49d231a074844cdfce163c05d4e7b504de2729cc50ecae89e148b1ec61c
+natural_language_goal: 安装并注册独立 session-manager，配置 education-resources 只读共享同一受控 store，并只读核对 SmartEdu 当前会话状态；禁止接收聊天 Cookie、登录、远端探活和业务副作用
+loaded_skill_and_mcp_digest: learning-resource-flow 源与安装副本 8 文件一致，当前清单摘要 488f5efc19f247724b81fc5ac5a40e068481da58db06f71d4ae799107f8995f7；education-resources runtime 0.2.0-9e17ea8c；openclaw-session-manager 0.4.0，源码摘要 0af0af196363c510b41cfdf7279f1068c1a67774746a89d70eeeb5baa70ebe12
+tool_sequence: targeted unit/bridge tests -> package install -> OpenClaw MCP add/set/reload -> config validate -> MCP status/doctor/probe -> synthetic standalone bridge Adapter smoke -> stdio status/login-guide metadata -> default Agent status
+platform_observations: 两个 MCP configured/enabled/ok；共享 store=true、owner-only mode=0700、credential file count=0；session-manager 精确发现 4 Tool 且无 diagnostics；education-resources 13 个业务 Tool 与 catalog 精确一致且无 diagnostics；合成 SmartEdu token 与 Zhihu Cookie 的跨包读取 smoke 通过；SmartEdu 真实本地 status=missing、probe_supported=false，省略的 probe_status 按契约解释为 no_probe
+human_confirmation: 安装/注册已获用户明确授权；平台登录确认 not_reached
+side_effects: state_only
+asset_archive_summary: 仅修改仓库外 Python runtime、OpenClaw MCP 配置、空私有 store 目录和独立 Agent session；没有 session save/delete、Flow、Selection、Plan、Job、Asset 或 Archive
+reason_codes: SESSION_MANAGER_INSTALLED, SESSION_MANAGER_REGISTERED, SESSION_BRIDGE_CONFIGURED, SESSION_STORE_EMPTY, SESSION_STATUS_MISSING, LEGAL_SESSION_NOT_AVAILABLE, CHAT_COOKIE_INPUT_FORBIDDEN, GATEWAY_1006_EMBEDDED_FALLBACK
+redactions_applied: 只记录版本、摘要、计数、布尔值和状态枚举；不记录 store 路径、登录 URL、Cookie、Token、session 原文、配置值或业务 ID
+proves: 安装、注册、共享 store、包可导入和 Tool 发现前置条件已经满足；无会话时保持 missing，不回退 legacy store，也不伪造 session ready
+does_not_prove: 合成 bridge smoke 不证明真实凭据；本证据也不证明 Gateway 正常回合、用户已登录、远端平台接受会话、AUTH_REQUIRED 恢复、fresh Resolution/Eligibility、Plan/Job、Provider、Asset、Archive 或 production readiness
+```
+
+### D-0028-20260811-01 — 明确授权的 canonical direct import
+
+EV-15 记录的是当时生效的“聊天凭据禁用”规则，保持原文作为历史证据。自本决策起，默认仍使用受控
+浏览器捕获；用户主动提供其合法获得的 Cookie/Token，并明确指定受支持平台、认证用途和保存授权时，
+Agent 可将 canonical 值一次性直送独立 `resource_session_save.session_data`。不得索取或代填账号、密码、
+验证码、短信码或 MFA；不得复述、展示、截图、写日志/计划/仓库、转发给其他 Tool、混入 browser
+capture，或在 save 失败/响应不确定后自动重放。此决策不改变 session/readiness、平台 policy、exact
+Provider、fresh Resolution/Eligibility、Plan 和独立确认门禁。
+
+### EV-0028-20260811-16 — direct import 已落盘，真实 SmartEdu 仍返回认证 403
+
+```text
+evidence_id: EV-0028-20260811-16
+evidence_level: local stdio credential write + real_openclaw embedded fallback + real_platform SmartEdu Search
+observed_at_utc: 2026-08-11T04:17:42Z..2026-08-11T04:19:12Z
+environment_fingerprint: 981bf39dad6388e36529cff8c18e5db832787fe377ffe32dc073ac37be729fbe
+natural_language_goal: 用户明确授权把其合法 SmartEdu canonical token 保存到既有受控 store，并只读验证是否解除 AUTH_REQUIRED；禁止选择、Presentation、Prepare、Start、下载和归档
+loaded_skill_and_mcp_digest: learning-resource-flow 源与安装副本 8 文件一致，摘要 e4798e89bd8a24029454279614acba733d712e4ef89bfacf46fac66a844062a1；education-resources runtime 0.2.0-9e17ea8c；openclaw-session-manager 0.4.0，当前 22 个 tracked source 文件摘要 6cb57d04514d611c5655685fe1a88b8e40c77fb23c3b7e886ff050b708428935
+tool_sequence: constraint/task-spec update -> session-manager 66-test suite + education bridge/SmartEdu 31 tests -> package/Skill deploy -> config/probe -> pre-save status(missing) -> exactly one resource_session_save -> status(stored/no_probe) -> real Agent session status -> new FlowStart -> SmartEdu Search -> FlowStatus; no candidate so Inspect not called
+platform_observations: direct save ok、stored_credential_count=1、discarded=0、idempotent_replay=false、response contains no credential；owner-only store/file mode=0700/0600；fresh SmartEdu Search status=failed、PARTIAL_FAILURE、authentication HTTP 403、retryable=true、candidate_count=0、coverage=empty；flow hash=752a111b1806；Gateway 1006 后 embedded DeepSeek 回合成功结束
+human_confirmation: 用户已明确指定 SmartEdu、测试用途并授权本地保存；没有下载选择或确认
+side_effects: one authorized credential_state_write + one state-only Flow; no Selection, Presentation, Plan, Job, Asset or Archive
+asset_archive_summary: no resource candidate, Resolution, Eligibility, Plan, Job, Asset or Archive；Inspect 因无 resource_id 未执行
+reason_codes: DIRECT_IMPORT_AUTHORIZED, SESSION_STORED_NO_PROBE, REAL_PLATFORM_AUTH_HTTP_403, AUTH_REQUIRED_NOT_RESOLVED, ZERO_CANDIDATES, INSPECT_NOT_RUN, NO_CREDENTIAL_REPLAY, GATEWAY_1006_EMBEDDED_FALLBACK
+redactions_applied: 不记录或回显 Token、session_data、session revision、凭据文件名、完整 Flow/ResultSet/Resource ID；只保留计数、模式、状态、HTTP 类别和 Flow hash
+proves: 明确授权 direct import 能通过唯一 save 通道最小落盘且不回显；education-resources fresh SmartEdu 路径实际发出认证请求并诚实保留 HTTP 403/零候选
+does_not_prove: stored/no_probe 不证明远端接受；本次未证明有效登录、Inspect、fresh Resolution/Eligibility、Plan/Job、Provider 成功、Asset、Archive 或 production readiness
+```
+
+Step E 继续标为 `blocked`：本地凭据已形成，但 fresh 真实 Search 的认证 HTTP 403 证明远端未接受当前
+会话。不得自动重放、变换或要求用户重发该值；恢复条件是受控浏览器形成新的合法会话，或用户对新的
+canonical 值再次给出平台/用途/保存授权。新会话仍须重新 Search/Inspect，以新的 concrete primary、
+Resolution 和 Eligibility 证明实际生效，再重新 Prepare、展示新 Plan 并取得独立确认，才允许 Start。
+Douyin 的 exact acquisition 仍 policy blocked，不得作为替代，也不得切换 generic 或 `web_capture`。
+离线 AUTH fixture 不能证明真实会话或平台接受。
 
 第一条合法无认证成功候选路径固定为：`generic` 公共图文文章的 Search → optional Inspect → Present；
 该只读路径已由 EV-0028-20260811-06 通过，且没有选择、prepare、下载或归档。下一步必须先由用户从
@@ -795,7 +932,7 @@ PYTHONPATH=src TMPDIR=/tmp TEMP=/tmp <venv-python> tests/e2e_stdio_client.py
 | 6. 16 平台 readiness | pass | 16 行与 Registry 精确一致，用户文案逐项审计，`production_ready=fail` 为 16/16。 |
 | 7. 恢复/幂等/取消等边界 | pass | Step F 的真实或进程级 E2E 与 `83/83` 定向回归通过。 |
 | 8. 文档同步 | partial | 0023、CURRENT_ARCHITECTURE、DEVELOPMENT_PLAN 和 MCP 运维说明已同步当前检查点；真实闭环后仍需最终结论更新。 |
-| 9. 最终验证 | current_pass | 当前 `493/493`、stdio E2E、compileall、JSON、Markdown links 与 diff check 通过；后续真实状态变化后必须重跑适用检查。 |
+| 9. 最终验证 | partial | 本次 direct-import 范围 session-manager 运行 67 项并 `OK (skipped=5)`，受影响 education bridge/SmartEdu `32/32`，两侧 compileall、Skill 校验、Markdown links 与 diff check 通过；新增测试后的 education 全量回归和完整 stdio E2E 尚未重跑。 |
 | 10. 根验收完成 | fail | 条件 3、4、8 尚未通过；0028 与 0023 不能标 completed。 |
 
 ## 结果
@@ -808,4 +945,5 @@ PYTHONPATH=src TMPDIR=/tmp TEMP=/tmp <venv-python> tests/e2e_stdio_client.py
   选择前，本计划不会擅自越过该闸门。
 - 0027 的离线通过、generic 只读成功和各平台失败路径都不代表真实获取、真实归档、其他平台或
   production readiness 已通过；Step F 的进程级恢复与边界验证、Step G 的逐平台分级与文案审计已完成，
-  Step E 已按当前环境精确标为 `blocked`，Step H 仍未完成。
+  Step E 的安装/注册/共享 store 与 direct-import 通道已通过，但当前 SmartEdu 会话被真实平台以认证
+  HTTP 403 拒绝，因此继续精确标为 `blocked`；Step H 仍未完成。

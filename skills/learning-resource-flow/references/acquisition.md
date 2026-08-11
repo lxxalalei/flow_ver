@@ -100,4 +100,4 @@ Job 是异步状态，可能 queued/running/cancelling/succeeded/failed/cancelle
 
 ## 安全
 
-不绕过登录、验证码、付费墙、DRM、版权或访问控制；不把 Cookie/Token/Secret 写入 Skill、工具参数、日志或仓库；网络、重定向、大小、MIME/magic 和路径边界由 MCP 服务端强制执行。
+不绕过登录、验证码、付费墙、DRM、版权或访问控制；不把 Cookie/Token/Secret 写入本 Skill、`education-resources` 或其他工具参数、日志、计划或仓库。唯一例外是用户明确指定平台、用途并授权后，由独立 session-manager 接受一次 canonical `resource_session_save` 输入；不得回显、混用 browser capture 或失败后自动重放。网络、重定向、大小、MIME/magic 和路径边界由 MCP 服务端强制执行。
