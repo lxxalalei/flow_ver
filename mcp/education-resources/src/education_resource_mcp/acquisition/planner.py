@@ -100,8 +100,8 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
             {"article", "book", "course", "dataset", "document", "other"}
         ),
     ),
-    # When the article itself is a webpage, materialised HTML is the primary
-    # resource rather than a landing-page fallback.
+    # When the page itself is the selected article/resource, materialised HTML
+    # is the primary resource. A navigation/preview page remains landing_page.
     ProviderSpec(
         platform_id="generic",
         scope="primary_resource",
@@ -126,6 +126,11 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         containers=frozenset({"html"}),
     ),
 )
+
+
+def _fingerprint_key(value: Any) -> str:
+    text = str(value or "")
+    return text[7:] if text.startswith("sha256:") else text
 
 
 def _resolved_mapping(resolution: Mapping[str, Any]) -> dict[str, Any]:
@@ -314,7 +319,7 @@ class AcquisitionPlanner:
                     "strategy": spec.strategy.kind,
                     "provider_id": spec.provider_id,
                     "provider_version": spec.provider_version,
-                    "source_fingerprint": source_fingerprint(resource),
+                    "source_fingerprint": _fingerprint_key(source_fingerprint(resource)),
                     "representation": snapshot,
                 }
             )
@@ -342,7 +347,9 @@ class AcquisitionPlanner:
                 "REPRESENTATION_DRIFT",
                 "资源表示已经变化，请重新检查并准备获取",
             )
-        if str(plan_item.get("source_fingerprint") or "") != source_fingerprint(resource):
+        if _fingerprint_key(plan_item.get("source_fingerprint")) != _fingerprint_key(
+            source_fingerprint(resource)
+        ):
             raise AcquisitionPlanningError(
                 "RESOLUTION_STALE", "资源身份已经变化，请重新搜索并检查"
             )
