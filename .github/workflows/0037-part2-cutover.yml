@@ -15,15 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Recover and apply staged patch script
         run: |
-          git show HEAD^:.github/workflows/0037-part2-cutover.yml \
-            | sed -n "/python - <<'PY'/,/^          PY$/p" \
-            | sed '1d;$d;s/^          //' > /tmp/0037-part2-cutover.py
+          git show HEAD^^:.github/workflows/0037-part2-cutover.yml \
+            | awk 'BEGIN{capture=0} /python - <<'\''PY'\''/{capture=1; next} capture && /^          PY$/{exit} capture{print}' \
+            | sed 's/^          //' > /tmp/0037-part2-cutover.py
           python /tmp/0037-part2-cutover.py
       - name: Install service
         run: |
@@ -32,8 +32,7 @@ jobs:
       - name: Compile current package
         run: python -m compileall -q mcp/education-resources/src
       - name: Parse current JSON contracts
-        run: |
-          python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('mcp/education-resources/contracts').rglob('*.json')]"
+        run: python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('mcp/education-resources/contracts').rglob('*.json')]"
       - name: Validate simplified state and runtime
         working-directory: mcp/education-resources
         run: |
