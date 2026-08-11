@@ -61,6 +61,22 @@ Platform Registry 的 `acquire=true`、历史 strategy、平台名、URL 或扩�
 Bundle 兼容事实；它们不是当前可执行 capability，缺少 exact binding 时 generic Provider
 不得接管。
 
+0027 对现有实现的当前处置如下；这张表解释为什么没有新增机器 descriptor，不替代上述 JSON
+机器权威，也不表示真实平台验收已经开始：
+
+| 平台/机制 | 当前结构化状态 | 不登记 executable route 的主要原因 |
+|---|---|---|
+| Bilibili video | `policy_blocked`, `dependency_missing` | 未有匹配任意视频获取的官方授权/API；现有内部网页接口不可作为契约，live 环境也缺 ffmpeg |
+| Douyin video | `policy_blocked`, `auth_required` | 官方接口受应用 capability 和用户授权范围约束；现有 Cookie/a_bogus 网页路线不能替代官方授权 |
+| Ximalaya audio | `policy_blocked`, `auth_required`, `dependency_missing` | 官方合作/API/SDK 权限未具备；现有网页协议会产生 album 到首曲的语义漂移，live Python 也缺 Crypto |
+| Anna/Libgen book | `policy_blocked` | 没有逐作品许可事实或受控镜像/逐跳网络政策；Inspection 只证明 metadata/landing |
+| generic `web_capture` | `unsupported` | 当前只校验初始 URL，未拦截每次 redirect/subresource；Chrome 路径与 websocket 依赖也未进入 readiness |
+
+以上路线的机器行为是“不声明能力”：Capability 选择返回结构化 `CAPABILITY_NOT_DECLARED`，默认
+`ResourceService` 不注册对应 Provider，Router 也不会跨 Provider、scope 或 strategy 接管。未来解除
+某项阻断时，必须先补齐 descriptor、runtime readiness、concrete Representation、Eligibility、exact
+Provider 和 Outcome 测试，不能只修改本表或 Platform Registry 的历史字段。
+
 认证字段只描述当前 Adapter 的会话需求。它与 `sessions.py` 的登录态捕获、探测和存储
 Registry 分离；不得从某个平台存在 Session 配置反推其搜索或下载一定需要认证。
 

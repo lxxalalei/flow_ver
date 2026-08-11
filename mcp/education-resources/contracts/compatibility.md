@@ -40,11 +40,23 @@ Eligibility 或 Job Execution authority 时，只能读取安全投影：
 真实摘要并重新校验；它不是 fallback，也不降低权限、来源、Provider、strategy、scope 或
 Representation 检查强度。
 
-## 已知契约漂移（本文件不修复）
+## 运行中 Outcome 的兼容说明
 
-当前 runtime 的 Acquisition Outcome 在执行中可能使用 `status="running"`，而公共
-`outcome_status` Schema 当前枚举未包含 `running`。这是已知契约漂移，后续应独立修复；本轮不修改
-任何 JSON/Schema，也不把文档删减当作机器契约或 runtime 已修复的证据。
+公共 `outcome_status` Schema 已接受 runtime 实际持久化和投影的 `status="running"`。这是对既有
+执行中状态的机器契约对齐，不新增 Job 状态、不改变终态语义，也不改变
+`contract_version=1.0.0`；旧客户端若本地复制了更窄的枚举，仍须刷新当前 Schema 后再读取运行中
+Outcome。
+
+## ResultSet extend 容量与 provenance 校正
+
+`resource_search.limit` 的既有语义是新不可变 ResultSet 的总容量；`mode=extend` 时 base 候选也占用
+该容量。客户端若希望在已有 8 个候选的快照上保留最多 8 个本轮新候选，应请求 `limit=16`，并继续
+受当前服务端 `max_search_results` 上限约束；重复使用 `limit=8` 不构成新增容量。
+
+当前 runtime 将 `provenance.new_displayable_count` 校正为应用总容量后实际进入新 ResultSet 的本轮
+新候选数。此前创建的持久 ResultSet 不做静默重写，其历史字段可能反映截断前的 `new_unique_count`；
+恢复这类旧 Flow 时应以当前 `candidates` 为可展示事实，必要时从当前 ResultSet 建立新的有界 extend。
+字段名称、输入输出形状和 `contract_version=1.0.0` 均未改变。
 
 相关语义见 [`domain-contract.md`](domain-contract.md)；当前架构与检索权威分别见
 [`CURRENT_ARCHITECTURE.md`](../../../docs/CURRENT_ARCHITECTURE.md) 和

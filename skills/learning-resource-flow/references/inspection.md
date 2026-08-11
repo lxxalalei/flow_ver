@@ -26,6 +26,11 @@ Inspect 的目标是确认“这个候选到底是什么、关键事实是什么
 
 Inspection 产生或刷新独立的 Resolution/Representation 事实，不改写旧 ResultSet，也不自动把候选升级为“推荐”“可下载”或“primary available”。
 
+成功 `extend` 后，新的 immutable ResultSet 成为当前绑定，public `resource_id` 也以新快照为准。旧
+ResultSet 的 Resolution 不会自动迁移成当前 Resolution；后续要展示、选择或据此下结论时，必须从当前
+Search 响应或一次 `resource_flow_status` 取得当前 ID 并重新 Inspect。优先在 Search 收敛后做最终 Inspect，
+避免把早期探索性 Resolution 当成当前权威事实。
+
 ## Inspection 后必须重审
 
 Inspect 完成后重新读取当前事实，并重新做 SemanticReview / Gap 判断。不能沿用 Inspect 前的乐观结论。

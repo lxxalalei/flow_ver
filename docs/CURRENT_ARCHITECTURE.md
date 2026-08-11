@@ -1,6 +1,6 @@
 # 当前架构事实
 
-> 快照日期：2026-08-10
+> 快照日期：2026-08-11
 >
 > 本文是当前工作树的人类可读事实快照，不是第二套运行时契约。
 
@@ -105,10 +105,15 @@ Static Capability Descriptor
   platform/resource/scope/strategy/Provider/Inspector 声明。两者都不证明 deployment readiness、
   candidate Representation、当前 Eligibility 或 Provider 成功。
 - 当前源码包含多平台 Search/Inspect/Acquisition Adapter；其中 Registry/Adapter 已注册不等于
-  平台已通过真实网络、合法会话、版权/策略和用户闭环验收。获取能力接入由当前 0027 继续完成。
+  平台已通过真实网络、合法会话、版权/策略和用户闭环验收。0027 已完成逐项正式接入或结构化阻断；
+  真实环境与用户闭环证据由当前 0028 验收。
 - 获取路线必须保持同一条 descriptor → readiness → resolution → eligibility → plan → execution →
   exact provider → outcome 链；禁止按平台名、资源类型或失败结果隐式切换 generic Provider，
   `web_capture` 也不是静态失败或认证失败的自动 fallback。
+- 当前机器 catalog 的可执行设计面仍只有 generic direct、generic landing materialize 和 SmartEdu
+  direct。Bilibili、Douyin、Ximalaya、Anna/Libgen 与 `web_capture` 经 0027 审计后分别保持
+  policy/auth/dependency/unsupported 阻断；没有 descriptor 和 exact Provider 时以
+  `CAPABILITY_NOT_DECLARED` fail closed，不能被 Platform Registry 的历史 `acquire=true` 覆盖。
 
 ## 4. 安全和持久化不变量
 
@@ -116,6 +121,8 @@ Static Capability Descriptor
   来源、选择、计划、权限、状态、幂等键和 authority digest。
 - Job 是异步资源；状态至少区分 `queued`、`running`、`cancelling`、`succeeded`、`failed`、
   `cancelled`。Bundle 的 `completion=partial` 表示成员不完整，不新增 Job `partial` 状态。
+- Acquisition Outcome 在单项执行中可为 `running`；公共 `outcome_status` Schema 已接受该既有
+  runtime 状态，但它不替代 Job 生命周期，也不赋予客户端创建或改写 Outcome 的权限。
 - `resource_archive` 只接受服务端返回的 `asset_id`，不接受模型提供的文件路径；二进制和大文件
   不进入模型上下文或 Tool JSON。
 - 网络只允许 `http`/`https`，必须执行 SSRF、逐跳重定向、域名/策略、超时、重试、并发、大小、
@@ -124,28 +131,30 @@ Static Capability Descriptor
 
 ## 5. 当前执行顺序
 
-0025 Platform Capability Contract Alignment 已于 **2026-08-10** 完成。当前唯一技术顺序为：
+0025 Platform Capability Contract Alignment 已于 **2026-08-10** 完成，0027 Platform Acquisition
+Enablement 已于 **2026-08-11** 完成。当前唯一技术顺序为：
 
-1. **0027 Platform Acquisition Enablement**（当前执行）：把现有平台获取实现接入冻结的能力权威链，
-   完成精确 Provider、依赖/认证/readiness、内容校验、取消和结构化失败边界；不允许 generic takeover。
-2. **0028 Real OpenClaw and Real Platform E2E**（后续）：在合法会话和真实网络边界内，验证默认 Agent
+1. **0028 Real OpenClaw and Real Platform E2E**（当前执行）：在合法会话和真实网络边界内，验证默认 Agent
    从自然语言完成 Search → Inspect → Present → Select → Confirm → Acquire → Archive → Recover。
-3. **0029 Retrieval Benchmark and Release Gate**（再后续）：建立版本化离线 benchmark、质量/真实性指标、
+2. **0029 Retrieval Benchmark and Release Gate**（后续）：建立版本化离线 benchmark、质量/真实性指标、
    critical invariant 和可审查发布门禁；真实 Agent 证据与离线分数分层报告。
 
 ## 6. 已知未验收边界
 
 以下事项当前不能声称完成：
 
-- 默认 OpenClaw Agent 的完整自然语言教育资源业务回合；doctor/probe 只能证明配置、进程、协议和
-  工具发现链，不等于最终用户闭环。
-- 各平台真实网络、合法会话、登录/认证、版权/策略和获取 readiness；Adapter 或 descriptor 存在不等于
-  `production_ready`。
-- 真实平台 Search → Inspect → Acquisition → Asset/Bundle → Archive → Recover 的逐平台证据矩阵，
-  包括失败、取消、幂等、重启和部分结果。
-- runtime 的 Acquisition Outcome 可出现 `status="running"`，但公共 `outcome_status` Schema 尚未包含
-  `running`；这是待独立修复的机器契约漂移，不能视为已解决或稳定公共能力。
-- 0027、0028、0029 的最终 release gate，以及远程 Streamable HTTP、多租户生产隔离和正式平台部署。
+- 默认 OpenClaw Agent 的完整自然语言教育资源业务回合尚未完成。0028 已验证合法 generic 文章
+  Search → Inspect → Present、多个真实平台失败/恢复路径和状态恢复，但真实 Select → Confirm →
+  Acquire → Archive 仍等待用户明确选择与随后独立确认；doctor/probe 不等于该闭环。
+- 16 平台本环境 readiness 与用户文案边界已经逐项审计，当前 `production_ready=fail` 为 `16/16`。
+  这表示分级完成，不表示所有网络、合法会话、版权/策略或获取路径均已成功；Adapter、Descriptor、
+  fixture 和单次 probe 仍不能升级平台状态。
+- 当前 0028 OpenClaw 配置未注册独立 `session-manager`，education-resources 也未配置共享 store bridge，
+  其 runtime 未安装 session-manager 包；因此真实 AUTH_REQUIRED 恢复按环境前置条件 blocked，而不是
+  退回 legacy store、自动安装、索取凭据或把离线 marker 当作合法 session。
+- 中断/重启、幂等、Selection/Plan 失效、取消、partial、无 primary、策略拒绝和归档限制已有真实或
+  stdio 进程级证据，但真实平台 Acquisition → Asset/Bundle → Archive → Recover 尚未形成成功闭环。
+- 0028、0029 的最终 release gate，以及远程 Streamable HTTP、多租户生产隔离和正式平台部署。
 
 ## 相关入口
 

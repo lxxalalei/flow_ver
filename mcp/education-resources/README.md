@@ -113,6 +113,11 @@ EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh all
 EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh e2e
 ```
 
+`e2e` 使用隔离临时目录和离线 fixture，通过真实 MCP stdio 子进程调用当前 13 个公共 Tool；它用于验证
+控制面、重启、认证恢复、取消、partial、策略和归档边界，不访问真实平台。即使全量与 E2E 均通过，
+也不能据此把某个平台标为 production-ready。真实 Agent、真实网络、合法会话和人工确认验收由
+[0028 执行计划](../../.agent/plans/0028-real-openclaw-platform-e2e.md)单独记录。
+
 具备 OpenClaw 环境时，再运行 MCP doctor/probe；应以当前工具目录和诊断结果为准，不以旧日志或
 旧测试数字判断当前状态：
 

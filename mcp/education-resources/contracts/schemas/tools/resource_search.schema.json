@@ -128,6 +128,7 @@
           "$ref": "#/$defs/bounded_count"
         },
         "new_displayable_count": {
+          "description": "New unique candidates from this search round that remain in the persisted ResultSet after applying the immutable snapshot's total-capacity limit.",
           "$ref": "#/$defs/bounded_count"
         }
       }
@@ -370,6 +371,7 @@
           "$ref": "#/$defs/SearchFilters"
         },
         "limit": {
+          "description": "Total candidate capacity of the new immutable ResultSet. In extend mode this capacity includes candidates copied from the base ResultSet; it is not an incremental quota.",
           "type": "integer",
           "minimum": 1,
           "maximum": 50,

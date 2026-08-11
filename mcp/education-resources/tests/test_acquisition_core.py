@@ -471,6 +471,45 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertEqual(materializer.calls, 1)
         self.assertEqual(browser.calls, 0)
 
+    def test_missing_generic_materializer_does_not_cross_route_to_generic_direct(self) -> None:
+        direct = _DirectProvider(self.root)
+        router = AcquisitionRouter([
+            _registration(direct, provider_id="generic-direct"),
+        ])
+
+        result = router.acquire(
+            self._request(
+                "web_materialize",
+                provider_id="generic-web-materializer",
+                planned_scope="landing_page",
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual("PROVIDER_UNAVAILABLE", result.failure.code)  # type: ignore[union-attr]
+        self.assertEqual([], direct.calls)
+        self.assertIsNone(result.provider_id)
+
+    def test_missing_generic_direct_does_not_cross_route_to_materializer(self) -> None:
+        materializer = _Materializer(self.root)
+        router = AcquisitionRouter([
+            _registration(
+                materializer,
+                provider_id="generic-web-materializer",
+                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+                scopes=("landing_page",),
+            ),
+        ])
+
+        result = router.acquire(
+            self._request("direct_file", provider_id="generic-direct")
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual("PROVIDER_UNAVAILABLE", result.failure.code)  # type: ignore[union-attr]
+        self.assertEqual(0, materializer.calls)
+        self.assertIsNone(result.provider_id)
+
     def test_registry_gates_unknown_version_and_scope_without_provider_calls(self) -> None:
         provider = _DirectProvider(self.root)
         router = AcquisitionRouter([

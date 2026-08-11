@@ -22,7 +22,9 @@ Python unit test 冒充。
 - [x] completed：执行 MCP stdio probe、13 工具/Schema/绑定/幂等/安全断言和完整本地回归
 - [x] completed：2026-08-08 当前环境串行执行 OpenClaw config/status/doctor/probe；配置有效、MCP doctor 为 ok、probe 精确发现 13 个 `resource_*` Tool 且无 diagnostics
 - [x] completed：更新 Skill、MCP、架构、开发计划和总体规划的 E2E 证据与剩余风险
-- [ ] blocked：默认 Agent 的完整自然语言教育资源业务回合与真实平台网络/readiness 矩阵尚未验收；0023 不把 stdio 固定夹具或 MCP probe 冒充最终用户闭环
+- [ ] blocked：默认 Agent 的真实 Select → Confirm → Acquire → Archive 闭环与合法平台认证恢复尚未验收；
+  真实只读/失败回合和 16 平台 readiness 分级已由 0028 记录，但 0023 不把它们或 stdio fixture
+  冒充完整用户闭环
 
 ## E2E 矩阵
 
@@ -50,3 +52,19 @@ Python unit test 冒充。
 - `openclaw mcp doctor education-resources --probe`：`ok`。
 - `openclaw mcp probe education-resources --json`：13 个 Tool，`diagnostics=[]`。
 - 上述命令必须串行执行；并行执行曾出现 CLI 锁竞争式长时间无输出，不能据此误判 MCP 不可用。
+
+## 2026-08-11 与 0028 的当前衔接
+
+- 0028 已在真实默认 Agent/平台边界完成文章只读路径，以及视频、音频、图书/版本、课程/Bundle、
+  混合检索和中断恢复的诚实失败/恢复证据；16 个平台均完成本环境分级和用户文案审计，当前
+  `production_ready=fail` 为 `16/16`。
+- 公开 stdio 子进程 E2E 为 `8/8`：六条业务/控制面场景加两条重启/认证恢复场景；Selection/Plan
+  失效、取消、partial、无 primary、策略拒绝、跨 Flow 归档限制和无副作用重放均已有进程级证据。
+- 当前全量 unittest 为 `493/493`，独立 stdio E2E、隔离 `compileall`、contracts JSON、Markdown
+  本地链接和 `git diff --check` 均通过；这些结果仍不等于真实平台 Acquisition 成功。
+- 当前 OpenClaw 未注册 `session-manager`，education-resources 未配置 standalone store bridge，部署
+  runtime 也未安装对应包；受控 legacy sessions 目录为空。0028 Step E 因此只记录精确 blocked 与恢复
+  条件，不安装、不登录，也不把离线 AUTH fixture 当成真实会话恢复。
+- 0023 继续保持 `blocked`：当前真实文章 Presentation 有两个公开候选，必须先由用户明确选择；
+  Prepare 后还要展示 Plan 并获得一次独立确认，才可 Start。用户选择与确认之前不得为了验收制造
+  Selection、Plan、Job、Asset 或 Archive。

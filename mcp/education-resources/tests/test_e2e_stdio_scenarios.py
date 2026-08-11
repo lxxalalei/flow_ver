@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 
@@ -13,12 +14,267 @@ from test_e2e_process_recovery import (
     EXPECTED_TOOLS,
     begin_flow,
     call_ok,
+    inspect_titles,
+    prepare_and_start,
     select_titles,
     wait_job,
 )
 
 
 class StdioScenarioE2ETests(unittest.TestCase):
+    def test_new_presentation_invalidates_selection_and_prepared_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            with RawMcpClient(Path(raw_dir), mode="standard") as client:
+                flow, search = begin_flow(client, "invalidate-e2e")
+                title = "恐龙视频课"
+                inspected = inspect_titles(
+                    client, flow, search, [title], "invalidate-e2e"
+                )
+                self.assertEqual("resolved", inspected[0]["resolution_status"])
+                presentation, selection = select_titles(
+                    client, flow, search, [title], "invalidate-e2e"
+                )
+                binding = {
+                    "presentation_id": presentation["presentation_id"],
+                    "presented_version": presentation["presented_version"],
+                    "selection_version": selection["selection_version"],
+                    "selection_digest": selection["selection_digest"],
+                }
+                plan = call_ok(
+                    client,
+                    "resource_download_prepare",
+                    {
+                        "flow_id": flow["flow_id"],
+                        "idempotency_key": "invalidate-e2e-prepare-key-001",
+                        **binding,
+                        "options": {
+                            "preferred_container": "mp4",
+                            "max_bytes_per_resource": 512 * 1024,
+                        },
+                    },
+                )
+
+                article = next(
+                    item
+                    for item in search["candidates"]
+                    if item["title"] == "恐龙网页图文"
+                )
+                replacement = call_ok(
+                    client,
+                    "resource_presentation_save",
+                    {
+                        "flow_id": flow["flow_id"],
+                        "result_set_id": search["result_set_id"],
+                        "displayed_resource_ids": [article["resource_id"]],
+                        "idempotency_key": "invalidate-e2e-present-key-002",
+                    },
+                )
+                self.assertGreater(
+                    replacement["presented_version"], presentation["presented_version"]
+                )
+
+                stale_selection = client.call(
+                    "resource_selection_save",
+                    {
+                        **CONTRACT,
+                        "flow_id": flow["flow_id"],
+                        "idempotency_key": "invalidate-e2e-select-key-002",
+                        "presentation_id": presentation["presentation_id"],
+                        "presented_version": presentation["presented_version"],
+                        "selected_positions": [1],
+                    },
+                )
+                self.assertFalse(stale_selection["ok"])
+                self.assertEqual(
+                    "PRESENTATION_VERSION_CONFLICT", stale_selection["error"]["code"]
+                )
+
+                status = call_ok(
+                    client,
+                    "resource_flow_status",
+                    {"flow_id": flow["flow_id"]},
+                )
+                self.assertIsNone(status["current_selection"])
+                self.assertEqual("invalidated", status["current_plan"]["status"])
+                self.assertIsNone(status["current_job"])
+
+                stale_start = client.call(
+                    "resource_download_start",
+                    {
+                        **CONTRACT,
+                        "flow_id": flow["flow_id"],
+                        "plan_id": plan["plan_id"],
+                        **binding,
+                        "plan_digest": plan["plan_digest"],
+                        "authority_digest": plan["authority_digest"],
+                        "confirmation_token": plan["confirmation_token"],
+                        "idempotency_key": "invalidate-e2e-start-key-001",
+                    },
+                )
+                self.assertFalse(stale_start["ok"])
+                self.assertEqual(
+                    "SELECTION_VERSION_CONFLICT", stale_start["error"]["code"]
+                )
+                after_rejection = call_ok(
+                    client,
+                    "resource_flow_status",
+                    {"flow_id": flow["flow_id"]},
+                )
+                self.assertIsNone(after_rejection["current_job"])
+
+    def test_policy_blocked_inspection_cannot_create_plan_or_job(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            with RawMcpClient(Path(raw_dir), mode="standard") as client:
+                flow, search = begin_flow(client, "policy-e2e")
+                title = "策略阻止恐龙百科"
+                inspected = inspect_titles(client, flow, search, [title], "policy-e2e")
+                self.assertEqual(
+                    "policy_blocked",
+                    inspected[0]["resolved_resource"]["availability"]["status"],
+                )
+                presentation, selection = select_titles(
+                    client, flow, search, [title], "policy-e2e"
+                )
+                rejected = client.call(
+                    "resource_download_prepare",
+                    {
+                        **CONTRACT,
+                        "flow_id": flow["flow_id"],
+                        "idempotency_key": "policy-e2e-prepare-key-001",
+                        "presentation_id": presentation["presentation_id"],
+                        "presented_version": presentation["presented_version"],
+                        "selection_version": selection["selection_version"],
+                        "selection_digest": selection["selection_digest"],
+                        "options": {
+                            "preferred_container": "pdf",
+                            "max_bytes_per_resource": 512 * 1024,
+                        },
+                    },
+                )
+                self.assertFalse(rejected["ok"])
+                self.assertEqual("ELIGIBILITY_REQUIRED", rejected["error"]["code"])
+                self.assertTrue(rejected["error"]["retriable"])
+                status = call_ok(
+                    client,
+                    "resource_flow_status",
+                    {"flow_id": flow["flow_id"]},
+                )
+                self.assertIsNone(status["current_plan"])
+                self.assertIsNone(status["current_job"])
+
+    def test_running_job_can_be_cancelled_without_archivable_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            with RawMcpClient(Path(raw_dir), mode="restart") as client:
+                flow, search = begin_flow(client, "cancel-e2e", topic="重启")
+                title = "重启阻塞图书"
+                inspect_titles(client, flow, search, [title], "cancel-e2e")
+                presentation, selection = select_titles(
+                    client, flow, search, [title], "cancel-e2e"
+                )
+                started = prepare_and_start(
+                    client,
+                    flow,
+                    presentation,
+                    selection,
+                    "cancel-e2e",
+                    container="pdf",
+                )
+
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    running = call_ok(
+                        client,
+                        "resource_job_status",
+                        {"flow_id": flow["flow_id"], "job_id": started["job_id"]},
+                    )
+                    if running["status"] == "running":
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail("blocking fixture job did not enter running state")
+
+                cancelled = call_ok(
+                    client,
+                    "resource_job_cancel",
+                    {
+                        "flow_id": flow["flow_id"],
+                        "job_id": started["job_id"],
+                        "idempotency_key": "cancel-e2e-job-key-001",
+                        "reason": "用户取消隔离夹具任务",
+                    },
+                )
+                self.assertIn(cancelled["status"], {"cancelling", "cancelled"})
+                terminal = wait_job(client, flow["flow_id"], started["job_id"])
+                self.assertEqual("cancelled", terminal["status"])
+                self.assertEqual([], terminal["assets"])
+                status = call_ok(
+                    client,
+                    "resource_flow_status",
+                    {"flow_id": flow["flow_id"]},
+                )
+                self.assertEqual("cancelled", status["current_job"]["status"])
+                self.assertEqual([], status["current_job"]["asset_ids"])
+                self.assertNotIn("resource_archive", status["allowed_next_actions"])
+
+    def test_cross_flow_archive_is_rejected_before_valid_origin_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            with RawMcpClient(Path(raw_dir), mode="standard") as client:
+                source_flow, source_search = begin_flow(client, "archive-source-e2e")
+                title = "恐龙视频课"
+                inspect_titles(
+                    client,
+                    source_flow,
+                    source_search,
+                    [title],
+                    "archive-source-e2e",
+                )
+                presentation, selection = select_titles(
+                    client,
+                    source_flow,
+                    source_search,
+                    [title],
+                    "archive-source-e2e",
+                )
+                started = prepare_and_start(
+                    client,
+                    source_flow,
+                    presentation,
+                    selection,
+                    "archive-source-e2e",
+                    container="mp4",
+                )
+                job = wait_job(client, source_flow["flow_id"], started["job_id"])
+                self.assertEqual("succeeded", job["status"])
+                asset = job["assets"][0]
+
+                foreign_flow, _ = begin_flow(client, "archive-foreign-e2e")
+                rejected = client.call(
+                    "resource_archive",
+                    {
+                        **CONTRACT,
+                        "flow_id": foreign_flow["flow_id"],
+                        "job_id": started["job_id"],
+                        "asset_id": asset["asset_id"],
+                        "idempotency_key": "archive-foreign-e2e-key-001",
+                        "metadata": {"title": "越权归档", "tags": ["拒绝"]},
+                    },
+                )
+                self.assertFalse(rejected["ok"])
+                self.assertEqual("ASSET_NOT_FOUND", rejected["error"]["code"])
+
+                archived = call_ok(
+                    client,
+                    "resource_archive",
+                    {
+                        "flow_id": source_flow["flow_id"],
+                        "job_id": started["job_id"],
+                        "asset_id": asset["asset_id"],
+                        "idempotency_key": "archive-source-e2e-key-001",
+                        "metadata": {"title": "合法归档", "tags": ["恐龙"]},
+                    },
+                )
+                self.assertEqual(asset["asset_id"], archived["asset_id"])
+
     def test_multi_resource_inspect_partial_bundle_archive_and_library(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             with RawMcpClient(Path(raw_dir), mode="standard") as client:

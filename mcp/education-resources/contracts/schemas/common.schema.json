@@ -947,6 +947,7 @@
     "outcome_status": {
       "type": "string",
       "enum": [
+        "running",
         "succeeded",
         "failed",
         "partial",

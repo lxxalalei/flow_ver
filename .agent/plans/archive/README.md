@@ -22,8 +22,7 @@
 ## 当前顶层计划
 
 - [0023-retrieval-e2e-hardening.md](../0023-retrieval-e2e-hardening.md) — blocked
-- [0027-platform-acquisition-enablement.md](../0027-platform-acquisition-enablement.md) — in_progress
-- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — pending
+- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress
 - [0029-retrieval-benchmark-release-gate.md](../0029-retrieval-benchmark-release-gate.md) — pending
 
 ## 归档索引
@@ -57,6 +56,7 @@
 | [0025-platform-capability-contract-alignment.md](0025-platform-capability-contract-alignment.md) | completed | 能力契约实施完成计划 |
 | [0025-platform-capability-contract-alignment-handoff.md](0025-platform-capability-contract-alignment-handoff.md) | completed snapshot | 0025 完成快照与 0028 交接 |
 | [0026-acquisition-call-site-migration.md](0026-acquisition-call-site-migration.md) | completed | 获取调用面迁移完成计划 |
+| [0027-platform-acquisition-enablement.md](0027-platform-acquisition-enablement.md) | completed | 现有获取实现逐项接入或结构化阻断，exact Provider 与 no-fallback 基线收口 |
 | [0030-document-authority-consolidation.md](0030-document-authority-consolidation.md) | completed | 文档权威、归档和默认阅读面收敛 |
 | [0031-document-surface-simplification.md](0031-document-surface-simplification.md) | completed | 默认阅读面与 Skill/reference 职责去重 |
 | [0032-skill-reference-compat-cleanup.md](0032-skill-reference-compat-cleanup.md) | completed | 删除旧 reference 兼容壳并保留历史路径迁移说明 |

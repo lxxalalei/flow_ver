@@ -456,6 +456,72 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
         self.assertEqual(extended["result_set_id"], status["current_result_set"]["result_set_id"])
         self.assertEqual(2, status["current_result_set"]["round"])
 
+    def test_search_extend_limit_is_total_capacity_and_reports_retained_new_items(self) -> None:
+        base_resources = [
+            {
+                "platform": "generic",
+                "title": f"基础文章 {index}",
+                "source_url": f"https://example.test/base-{index}",
+                "resource_type": "article",
+                "metadata": {},
+            }
+            for index in range(8)
+        ]
+        provider = _IntegrationProvider(
+            search_resources=base_resources,
+            creator_resources=[],
+        )
+        service = self._service(provider)
+        flow = self._flow("extend-total-capacity")
+        first = service.search(
+            flow["flow_id"],
+            "search-integration-capacity-01",
+            [{"platform": "generic", "queries": [{"query": "基础"}]}],
+            task_version=flow["task_version"],
+            limit=8,
+        )
+        base_snapshot = deepcopy(self.store.get_result_set(first["result_set_id"]))
+        provider.search_resources = [
+            {
+                "platform": "bilibili",
+                "title": "新增视频",
+                "source_url": "https://www.bilibili.com/video/BV1Capacity",
+                "resource_type": "video",
+                "metadata": {},
+            }
+        ]
+
+        saturated = service.search(
+            flow["flow_id"],
+            "search-integration-capacity-02",
+            [{"platform": "bilibili", "queries": [{"query": "新增"}]}],
+            task_version=flow["task_version"],
+            mode="extend",
+            base_result_set_id=first["result_set_id"],
+            limit=8,
+        )
+
+        self.assertEqual(8, len(saturated["candidates"]))
+        self.assertEqual({"generic"}, {item["platform"] for item in saturated["candidates"]})
+        self.assertEqual(1, saturated["provenance"]["new_unique_count"])
+        self.assertEqual(0, saturated["provenance"]["new_displayable_count"])
+
+        expanded = service.search(
+            flow["flow_id"],
+            "search-integration-capacity-03",
+            [{"platform": "bilibili", "queries": [{"query": "新增"}]}],
+            task_version=flow["task_version"],
+            mode="extend",
+            base_result_set_id=saturated["result_set_id"],
+            limit=16,
+        )
+
+        self.assertEqual(9, len(expanded["candidates"]))
+        self.assertEqual("bilibili", expanded["candidates"][-1]["platform"])
+        self.assertEqual(1, expanded["provenance"]["new_unique_count"])
+        self.assertEqual(1, expanded["provenance"]["new_displayable_count"])
+        self.assertEqual(base_snapshot, self.store.get_result_set(first["result_set_id"]))
+
     def test_search_extend_rejects_stale_base_without_provider_call(self) -> None:
         provider = _IntegrationProvider(
             search_resources=[

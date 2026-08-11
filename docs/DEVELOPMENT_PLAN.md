@@ -24,9 +24,10 @@
 ```
 
 0025 Platform Capability Contract Alignment 已于 2026-08-10 完成，是上述顺序的前置基础。
-当前 0027 不是新增产品方向，而是 2026-08-08 归档路线中原 0025 的“逐平台实际能力接入”执行面拆分：
+0027 不是新增产品方向，而是 2026-08-08 归档路线中原 0025 的“逐平台实际能力接入”执行面拆分；
+该阶段已于 2026-08-11 完成：
 0025 已完成 Descriptor、Readiness、Resolution/Representation、Eligibility、Plan/Execution、exact Provider、
-Outcome 等能力权威骨架；0027 负责让源码中已存在的平台获取实现真正进入该权威链。因此，归档路线中的
+Outcome 等能力权威骨架；0027 将可证明路线保持在该权威链，并对其余现有实现完成结构化阻断。因此，归档路线中的
 原 0026 Real OpenClaw & Platform E2E 对应当前 0028，原 0027 Retrieval Benchmark & Release Gate
 对应当前 0029。该拆分改变计划编号与颗粒度，不改变原路线的产品目标和先后依赖。
 
@@ -80,7 +81,7 @@ Outcome 等能力权威骨架；0027 负责让源码中已存在的平台获取�
 
 ## 路线阶段
 
-### 0027：Platform Acquisition Enablement（当前）
+### 0027：Platform Acquisition Enablement（completed 2026-08-11）
 
 **目标**：把源码中已存在的获取能力接入 0025 冻结的单一能力权威链，不以平台名、资源类型或
 generic Provider 猜路由，不把 landing page 或 metadata 冒充 primary resource。
@@ -99,9 +100,9 @@ generic Provider 猜路由，不把 landing page 或 metadata 冒充 primary res
 **完成门槛**：每个执行项都能从 descriptor 追溯到 fresh execution 和 persisted outcome；无权威
 链缺口时只能阻断或要求重新 Inspect/prepare；定向代码、契约、Schema、状态和安全回归通过。
 
-执行计划：[0027-platform-acquisition-enablement.md](../.agent/plans/0027-platform-acquisition-enablement.md)。
+完成计划：[0027-platform-acquisition-enablement.md](../.agent/plans/archive/0027-platform-acquisition-enablement.md)。
 
-### 0028：Real OpenClaw and Real Platform E2E（后续）
+### 0028：Real OpenClaw and Real Platform E2E（当前）
 
 **目标**：证明真实 OpenClaw 默认 Agent 能从自然语言使用唯一 Skill 和当前 MCP 完成可信闭环，
 而不是用 fixture、直接 Service 调用、MCP probe 或 Adapter 注册冒充用户验收。
@@ -118,6 +119,12 @@ generic Provider 猜路由，不把 landing page 或 metadata 冒充 primary res
 
 **完成门槛**：真实 Agent 工具调用顺序、人工确认点、服务端稳定 ID、持久化状态和面向用户的失败
 解释可追溯；未具备合法会话或真实证据的平台保持明确 blocked/unsupported，不标记为 ready。
+
+**2026-08-11 当前检查点**：环境/工具基线、合法 generic 只读路径、进程级副作用门禁和 16 平台
+readiness/用户文案审计已完成；所有平台仍为非 production-ready。文章已有两个公开候选等待用户明确
+选择，Prepare 后仍须独立确认才允许 Start。当前环境没有注册/桥接/安装独立 session-manager，Step E
+按精确恢复条件 blocked；真实网页物化/归档、合法平台认证恢复和最终文档验收仍未完成，不能由
+`493/493` 全量 unittest 或 `8/8` stdio 子进程 E2E 替代。
 
 执行计划：[0028-real-openclaw-platform-e2e.md](../.agent/plans/0028-real-openclaw-platform-e2e.md)。
 

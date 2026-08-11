@@ -51,10 +51,29 @@ class GenericWebSearchProvider:
     """Search the public web through the MCP-owned generic adapter."""
 
     descriptor = descriptor_for_platform("generic")
+    _CJK_ENGINES = ("duckduckgo", "baidu", "bing")
+    _DEFAULT_ENGINES = ("bing",)
 
     def __init__(self, settings: Settings, engines: list[str] | None = None) -> None:
         self.settings = settings
-        self.engines = engines or ["bing"]
+        self.engines = tuple(engines) if engines is not None else None
+
+    def _engines_for_query(self, query: str) -> list[str]:
+        """Choose a bounded public-search route without rewriting the query.
+
+        Bing remains the conservative default for non-CJK text.  In the live
+        0028 environment it preserved full Chinese queries but repeatedly
+        returned results for only the leading concept.  The existing
+        DuckDuckGo/Baidu routes produced relevant Chinese candidates, so CJK
+        queries try those routes first while retaining Bing as a final source.
+        Explicit test/operator engine choices continue to take precedence.
+        """
+
+        if self.engines is not None:
+            return list(self.engines)
+        if any("\u3400" <= char <= "\u9fff" for char in query):
+            return list(self._CJK_ENGINES)
+        return list(self._DEFAULT_ENGINES)
 
     def _search_single(
         self, query: str, limit: int
@@ -63,7 +82,7 @@ class GenericWebSearchProvider:
         try:
             response = generic_web.search(
                 query,
-                list(self.engines),
+                self._engines_for_query(query),
                 limit,
                 float(self.settings.search_timeout_seconds),
             )
@@ -712,9 +731,10 @@ def default_search_provider(
 ) -> SearchProvider:
     """Build the default search provider.
 
-    Uses Bing direct search by default — it is more reliable than SearXNG
-    for automated use because it avoids upstream-engine CAPTCHAs and
-    timeout cascades.  Set ``settings.searxng_base_url`` *and*
+    Uses the bounded direct-search adapter by default.  CJK queries prefer the
+    existing DuckDuckGo/Baidu routes before Bing because live E2E evidence
+    showed materially better Chinese recall; non-CJK queries keep Bing as the
+    default.  Set ``settings.searxng_base_url`` *and*
     ``settings.prefer_searxng`` to opt back into SearXNG.
 
     When *session_store* is provided, wrap the generic provider in a

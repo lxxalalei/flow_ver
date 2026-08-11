@@ -14,9 +14,17 @@
 2. **Capability Descriptor**：设计上支持的 resource/scope/strategy/provider 组合；
 3. **Deployment Readiness / Session State / Resolution / Eligibility**：当前部署、当前合法登录态、当前候选、当前权限与表示的实际事实。
 
-Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”。当前是否登录由 session-manager/实际服务状态判断；当前是否可获取必须继续进入 Readiness → Resolution/Representation → Eligibility → Plan/Execution 权威链。平台能力机器事实见 [`mcp/education-resources/contracts/`](../../../mcp/education-resources/contracts/README.md)。
+Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”。当前是否登录由 session-manager/实际服务状态判断；当前是否可获取必须继续进入 Readiness → Resolution/Representation → Eligibility → Plan/Execution 权威链。平台能力机器事实的开发/运维入口见 [`mcp/education-resources/contracts/`](../../../mcp/education-resources/contracts/README.md)。
 
-不要在本文件维护完整平台能力表、固定登录状态表或 acquisition route 快照；需要这些事实时读取机器 Registry/Descriptor 和当前服务状态。
+不要在本文件维护完整平台能力表、固定登录状态表或 acquisition route 快照。真实用户 Flow 中也不得
+通过 `read` / `exec` / MCP protocol resources 去打开仓库或运行时 Registry/Descriptor；候选和当前状态只看
+13 个业务 `resource_*` Tool 的返回。若对 native platform ID 没有明确依据，不猜测、不扫描本地文件，
+改用当前目标本来就允许的 `generic` discovery route，或 StopWithGap。
+
+当前 0028 runtime 冻结的 native platform ID 命名空间是：`generic`、`bilibili`、`douyin`、`zhihu`、
+`smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、
+`annas-archive`、`weibo`、`wechat`。这只是封闭 ID 集，不是 readiness 或 Capability 表；未列出的站点
+只能作为 `generic` query 中的来源线索，不能临时发明 native platform ID。
 
 ## 来源路线
 
@@ -44,6 +52,8 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 
 可以在 Generic Web 查询中使用 `site:域名` 做定向发现，但遵守：
 
+- `search_tasks[].platform` 固定写 `generic`，域名只放在 query 的 `site:` 中；不得把 `generic_web`、
+  域名、站点简称或来源族名称当作 platform ID；
 - 不是每轮搜索都加 `site:`；先由目标、显式来源要求或当前 Gap 判断是否需要；
 - 一条 query 最多绑定一个站点，避免把搜索范围收得不可解释；
 - 用户明确指定来源时优先尊重用户来源；
@@ -89,9 +99,16 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 
 - Registry 的 `auth_mode` / `auth_kind` 只说明平台静态认证要求；
 - 当前用户是否已有有效会话只看 session-manager 或真实工具返回，不能靠 Markdown 表或聊天记忆；
+- `auth_mode=optional`、平台常识、landing available 或 representation unknown 都不能被改写成“当前需要
+  登录”；只有当前 Search/Inspect/session Tool 明确返回 `AUTH_REQUIRED` 或等价状态才能这样断言；
 - 不默认在首次搜索前逐个平台做登录检查，避免把认证变成无必要的前置阻塞；
 - 如果 Registry 明确要求认证且用户当前任务就指定该平台，或真实搜索/Inspect 返回 AUTH_REQUIRED，再进入 session-manager 流程；
 - 对 optional auth，当前公开结果已经足够完成任务时不主动打断用户登录；只有结果明显不足、且合法登录很可能改变当前 Gap 时，才把登录作为一个可选下一步；
+- `representation=unknown`、只有 landing available 或没有 current Resolution 都不能单独证明登录会改变
+  Gap，因此不能据此建议 session-manager；用户明确要求“无需登录”时，除非用户主动放宽该约束，
+  否则登录不是当前任务的合法继续路径；
+- 用户明确要求公开、无需登录或可直接阅读时，`AUTH_REQUIRED` 候选不满足该条件，不能计入要求的
+  来源数量；只能作为受限备选或 Gap 解释，不以“平台公开可搜索”替代正文当前可访问；
 - 登录完成后重新读取 Flow/当前服务状态，不把“已登录”直接推导成搜索、Inspect 或获取成功。
 
 ## 认证与策略

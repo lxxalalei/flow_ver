@@ -754,6 +754,39 @@ class CapabilityContractTests(unittest.TestCase):
             with self.subTest(status=status):
                 assert_invalid(self, validator_for("actual-outcome"), value)
 
+    def test_running_outcome_matches_runtime_and_job_status_projection(self) -> None:
+        common_schema = load_json(SCHEMA_ROOT / "common.schema.json")
+        self.assertEqual(CONTRACT_VERSION, common_schema["$defs"]["contract_version"]["const"])
+        self.assertIn("running", common_schema["$defs"]["outcome_status"]["enum"])
+
+        running_outcome = actual_outcome_fixture("running")
+        running_outcome.pop("failure")
+        assert_valid(self, validator_for("actual-outcome"), running_outcome)
+
+        running_projection = job_status_outcome_fixture()
+        running_projection["status"] = "running"
+        for terminal_field in ("actual", "bundle_id", "asset_ids", "completed_at"):
+            running_projection.pop(terminal_field)
+        status_success = {
+            "contract_version": CONTRACT_VERSION,
+            "ok": True,
+            "flow_id": FLOW_ID,
+            "plan_id": PLAN_ID,
+            "presentation_id": PRESENTATION_ID,
+            "presented_version": 1,
+            "selection_version": 1,
+            "selection_digest": "1" * 64,
+            "plan_digest": "2" * 64,
+            "job_id": JOB_ID,
+            "status": "running",
+            "progress": {"percent": 50, "completed_items": 0, "total_items": 1},
+            "assets": [],
+            "failures": [],
+            "outcomes": [running_projection],
+            "updated_at": OBSERVED_AT,
+        }
+        assert_valid(self, tool_validator("resource_job_status"), status_success)
+
     def test_plan_item_accepts_legacy_or_complete_authority_shape_only(self) -> None:
         validator = validator_for("plan-item")
         assert_valid(self, validator, legacy_v1_4_plan_item_fixture())

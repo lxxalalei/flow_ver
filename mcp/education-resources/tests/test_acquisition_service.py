@@ -227,6 +227,21 @@ class AcquisitionServiceTests(unittest.TestCase):
         self.assertEqual(status["status"], "succeeded")
         self.assertEqual(len(status["assets"]), 1)
         self.assertEqual(status["assets"][0]["media_type"], "application/zip")
+        self.assertEqual(1, len(status["outcomes"]))
+        outcome = status["outcomes"][0]
+        self.assertEqual(
+            {
+                "provider_id": "generic-web-materializer",
+                "version": "1.0.0",
+                "scope": "landing_page",
+            },
+            outcome["planned"]["provider"],
+        )
+        self.assertEqual("landing_page", outcome["planned"]["scope"])
+        self.assertEqual("web_materialize", outcome["planned"]["strategy"])
+        self.assertEqual(outcome["planned"]["provider"], outcome["actual"]["provider"])
+        self.assertEqual(outcome["planned"]["scope"], outcome["actual"]["scope"])
+        self.assertEqual(outcome["planned"]["strategy"], outcome["actual"]["strategy"])
         asset_id = status["assets"][0]["asset_id"]
         asset = self.service.store.get_asset(asset_id)
         self.assertIsNotNone(asset)

@@ -1,9 +1,9 @@
 """Render web pages into standard visual-archive files via Chrome DevTools Protocol.
 
-This module drives a fresh headless Chrome instance over CDP using only the
-standard library plus ``websocket-client`` (already a dependency of this
-package).  It is used for web-page resources whose content is rendered by
-JavaScript and therefore cannot be captured with a plain HTTP GET.
+This module drives a fresh headless Chrome instance over CDP using the standard
+library plus the lazily imported ``websocket-client`` package.  The latter is
+not part of the service's current required dependency set because browser
+capture is not registered as an executable default capability.
 
 Supported output formats, all produced natively by Chromium:
 
@@ -17,10 +17,11 @@ own user-data dir and is terminated once rendering finishes.  We deliberately do
 not attach to a shared Chrome (e.g. the one OpenClaw drives) so a render job can
 never disturb an interactive session.
 
-Security follows the same rules as :class:`PublicHttpDownloader`: the target URL
-is validated by the shared outbound policy before navigation, output paths stay
-inside the job directory via ``ensure_within_root``, and every produced file is
-checked against the configured size limit.
+The adapter validates the initial target URL before navigation, keeps output
+paths inside the job directory via ``ensure_within_root``, and checks produced
+files against the configured size limit.  It does not yet intercept every
+redirect and subresource request, so it must remain unregistered until that
+outbound-policy boundary and its runtime dependencies are implemented.
 """
 
 from __future__ import annotations

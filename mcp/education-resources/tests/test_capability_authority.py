@@ -139,9 +139,28 @@ class CapabilityAuthorityTests(unittest.TestCase):
                 "cap_smartedu_document_primary_direct_v1",
             }.issubset(descriptor_ids)
         )
-        with self.assertRaises(CapabilityAuthorityError) as raised:
-            self.coordinator.select_descriptor("bilibili", resource_type="video")
-        self.assertEqual("CAPABILITY_NOT_DECLARED", raised.exception.code)
+        for platform, resource_type in (
+            ("bilibili", "video"),
+            ("douyin", "video"),
+            ("ximalaya", "audio"),
+            ("annas-archive", "book"),
+        ):
+            with self.subTest(platform=platform):
+                with self.assertRaises(CapabilityAuthorityError) as raised:
+                    self.coordinator.select_descriptor(
+                        platform,
+                        resource_type=resource_type,
+                    )
+                self.assertEqual("CAPABILITY_NOT_DECLARED", raised.exception.code)
+
+        with self.assertRaises(CapabilityAuthorityError) as capture:
+            self.coordinator.select_descriptor(
+                "generic",
+                resource_type="article",
+                scope="landing_page",
+                strategy="web_capture",
+            )
+        self.assertEqual("CAPABILITY_NOT_DECLARED", capture.exception.code)
 
     def test_scope_classification_does_not_upgrade_weak_evidence(self) -> None:
         self.assertEqual(

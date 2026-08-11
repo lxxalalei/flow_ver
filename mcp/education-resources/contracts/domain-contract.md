@@ -44,8 +44,10 @@ MCP 服务端拥有上述状态、稳定 ID、版本、摘要、失败事实和�
 
 1. 客户端只提交服务端生成的 opaque `flow_id`、`resource_id`、`plan_id`、`job_id`、`asset_id`
    等 ID，以及契约允许的用户输入；不提交路径、脚本、命令、内部存储键或服务端摘要。
-2. Search/browse 创建 ResultSet；实际展示后必须保存 Presentation；Selection 只接受当前
-   Presentation 的位置和绑定。
+2. Search/browse 创建 ResultSet；`resource_search.limit` 表示新不可变 ResultSet 的**总容量**，
+   `extend` 时该容量包含从当前 base 复制的候选，不是本轮新增配额。`new_displayable_count` 只统计
+   应用该总容量后仍实际保留在新 ResultSet 中的本轮新候选。实际展示后必须保存 Presentation；
+   Selection 只接受当前 Presentation 的位置和绑定。
 3. `resource_inspect` 只核验当前 Flow 中的单个 `resource_id`，来源由服务端取得；它不接受任意
    URL、路径或凭据，不下载、不归档，也不改变不可变 ResultSet。
 4. `resource_download_prepare` 绑定当前 Presentation/Selection、Resolution/Representation、
@@ -61,11 +63,11 @@ MCP 服务端拥有上述状态、稳定 ID、版本、摘要、失败事实和�
 8. `resource_flow_status` 只返回恢复所需的安全投影，不返回确认秘密、凭据、数据库/临时/下载/归档
    本地路径、请求 URL 或大对象。
 
-### 已知契约漂移
+### Acquisition Outcome 状态
 
-当前 runtime 的 Acquisition Outcome 在执行中可能为 `status="running"`，但公共
-`schemas/common.schema.json` 的 `outcome_status` 枚举当前没有 `running`。这是已知契约漂移，后续
-独立修复；本文不修改机器 Schema，也不将其误写成已解决。
+Acquisition Outcome 在执行中使用 `status="running"`；公共
+`schemas/common.schema.json` 的 `outcome_status` 已与该 runtime 状态对齐。该值只表示已启动但尚未
+终结的单项执行，不替代 Job 状态，也不允许缺少权威绑定的客户端伪造执行中 Outcome。
 
 ## 安全边界
 

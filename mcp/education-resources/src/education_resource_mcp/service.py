@@ -330,6 +330,11 @@ class ResourceService:
             [*base_candidates, *incoming_candidates],
             limit=limit,
         )
+        retained_base_count = len(deduplicate_candidates(base_candidates, limit=limit))
+        metrics["new_displayable_count"] = max(
+            0,
+            len(merged_candidates) - retained_base_count,
+        )
         resources = self._materialise_retrieval_candidates(merged_candidates)
         round_number = (
             int((base_result_set or {}).get("round") or 1) + 1
@@ -3104,6 +3109,9 @@ class ResourceService:
             "duplicate_of_base_count": duplicate_of_base,
             "duplicate_within_round_count": duplicate_within_round,
             "identity_unknown_count": identity_unknown,
+            # The caller replaces this pre-limit value after applying the
+            # immutable ResultSet's total-capacity limit.  Keeping the field in
+            # this complete shape makes the helper independently testable.
             "new_displayable_count": new_unique_count,
         }
 

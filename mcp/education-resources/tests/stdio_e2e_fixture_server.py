@@ -199,6 +199,12 @@ class FixtureInspector:
 
     def inspect(self, resource: dict) -> InspectionResult:
         resource_type = str(resource["resource_type"])
+        metadata = resource.get("metadata") or {}
+        availability = (
+            "policy_blocked"
+            if str(metadata.get("fixture_kind") or "") == "policy"
+            else "available"
+        )
         representations: list[dict] = []
         if resource_type == "video":
             representations.append(
@@ -259,7 +265,6 @@ class FixtureInspector:
                     },
                 ]
             )
-        metadata = resource.get("metadata") or {}
         public_metadata = {}
         if metadata.get("edition"):
             public_metadata["edition"] = str(metadata["edition"])
@@ -268,7 +273,7 @@ class FixtureInspector:
             resolved_resource={
                 "title": resource["title"],
                 "resource_type": resource_type,
-                "availability": {"status": "available"},
+                "availability": {"status": availability},
                 "representations": representations,
                 "metadata": public_metadata,
             },
@@ -435,6 +440,14 @@ STANDARD_RESOURCES = [
         "resource_type": "course",
         "summary": "认证恢复夹具",
         "metadata": {"fixture_kind": "auth"},
+    },
+    {
+        "platform": "generic",
+        "title": "策略阻止恐龙百科",
+        "source_url": "https://example.com/e2e/policy-blocked-book",
+        "resource_type": "book",
+        "summary": "准备阶段必须被策略门禁拒绝的夹具",
+        "metadata": {"fixture_kind": "policy", "edition": "2024"},
     },
 ]
 
