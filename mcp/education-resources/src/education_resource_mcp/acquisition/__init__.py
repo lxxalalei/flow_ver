@@ -13,7 +13,6 @@ from .models import (
     PERSISTENT_ARTIFACT_ROLES,
     AcquisitionFailure,
     AcquisitionItemFailure,
-    AcquisitionRequest,
     AcquisitionResult,
     AcquisitionStrategy,
     Artifact,
@@ -24,12 +23,15 @@ from .models import (
 )
 from ..downloader import DownloadBatchResult, DownloadItemFailure, DownloadResult
 from .router import (
-    AcquisitionRouter,
     BrowserCapture,
     DirectProvider,
     ProviderRegistration,
     WebMaterializer,
 )
+# 0037 active boundary: Provider calls carry only execution facts required by
+# the actual acquisition operation. Descriptor/readiness/eligibility digests
+# are no longer part of this seam.
+from .simple import AcquisitionRequest, AcquisitionRouter
 
 __all__ = [
     "ACQUISITION_STRATEGIES",
