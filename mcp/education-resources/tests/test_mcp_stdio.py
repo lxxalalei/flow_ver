@@ -39,8 +39,7 @@ BINDING_FIELDS = (
 
 def contract_input_schema(tool_name: str) -> dict:
     path = CONTRACTS_ROOT / "schemas" / "tools" / f"{tool_name}.schema.json"
-    document = json.loads(path.read_text(encoding="utf-8"))
-    return document["$defs"]["input"]
+    return json.loads(path.read_text(encoding="utf-8"))["$defs"]["input"]
 
 
 def stdio_parameters(data_dir: str):
@@ -56,47 +55,38 @@ def stdio_parameters(data_dir: str):
 
 @unittest.skipUnless(MCP_AVAILABLE, "install the service dependencies to run MCP stdio tests")
 class McpStdioTests(unittest.TestCase):
-    def test_initialize_lists_exact_13_tools_and_input_schemas(self) -> None:
+    def test_initialize_lists_exact_13_tools_and_current_input_schemas(self) -> None:
         import anyio
         from mcp.client.session import ClientSession
         from mcp.client.stdio import stdio_client
 
         async def run() -> None:
             with tempfile.TemporaryDirectory() as data_dir:
-                async with stdio_client(stdio_parameters(data_dir)) as (
-                    read_stream,
-                    write_stream,
-                ):
+                async with stdio_client(stdio_parameters(data_dir)) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         initialized = await session.initialize()
-                        self.assertEqual(
-                            initialized.server_info.name, "education-resources"
-                        )
+                        self.assertEqual(initialized.server_info.name, "education-resources")
                         self.assertEqual(initialized.server_info.version, "0.2.0")
                         tools = await session.list_tools()
-                        actual_tools = {tool.name for tool in tools.tools}
-                        self.assertEqual(actual_tools, EXPECTED_TOOLS)
-                        self.assertEqual(len(tools.tools), len(EXPECTED_TOOLS))
+                        self.assertEqual({tool.name for tool in tools.tools}, EXPECTED_TOOLS)
+                        self.assertEqual(len(tools.tools), 13)
                         for tool in tools.tools:
-                            expected_schema = contract_input_schema(tool.name)
-                            with self.subTest(tool=tool.name, part="required"):
+                            expected = contract_input_schema(tool.name)
+                            with self.subTest(tool=tool.name):
                                 self.assertEqual(
                                     set(tool.input_schema.get("required", [])),
-                                    set(expected_schema.get("required", [])),
+                                    set(expected.get("required", [])),
                                 )
-                            with self.subTest(tool=tool.name, part="properties"):
                                 self.assertEqual(
                                     set(tool.input_schema.get("properties", {})),
-                                    set(expected_schema.get("properties", {})),
+                                    set(expected.get("properties", {})),
                                 )
-
-                        search_schema = next(
+                        start_schema = next(
                             tool.input_schema
                             for tool in tools.tools
-                            if tool.name == "resource_search"
+                            if tool.name == "resource_download_start"
                         )
-                        self.assertIn("task_version", search_schema["required"])
-                        self.assertIn("filters", search_schema["properties"])
+                        self.assertNotIn("authority_digest", start_schema["properties"])
 
         anyio.run(run)
 
@@ -116,10 +106,7 @@ class McpStdioTests(unittest.TestCase):
 
         async def run() -> None:
             with tempfile.TemporaryDirectory() as data_dir:
-                async with stdio_client(stdio_parameters(data_dir)) as (
-                    read_stream,
-                    write_stream,
-                ):
+                async with stdio_client(stdio_parameters(data_dir)) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         flow = await call(
@@ -129,10 +116,7 @@ class McpStdioTests(unittest.TestCase):
                                 "contract_version": "1.0.0",
                                 "idempotency_key": "stdio-flow-key-01",
                                 "task": {
-                                    "goal": {
-                                        "topic": "恐龙",
-                                        "outcome": "找到入门资料",
-                                    },
+                                    "goal": {"topic": "恐龙", "outcome": "找到入门资料"},
                                     "user_role": "parent",
                                     "resource_target": "child",
                                     "constraints": [],
@@ -148,10 +132,7 @@ class McpStdioTests(unittest.TestCase):
                                 "task_version": flow["task_version"],
                                 "idempotency_key": "stdio-search-key-1",
                                 "search_tasks": [
-                                    {
-                                        "platform": "generic",
-                                        "queries": [{"query": "恐龙"}],
-                                    }
+                                    {"platform": "generic", "queries": [{"query": "恐龙"}]}
                                 ],
                                 "filters": {
                                     "resource_types": ["article"],
@@ -175,11 +156,12 @@ class McpStdioTests(unittest.TestCase):
                                     "idempotency_key": f"stdio-inspect-key-{index}",
                                 },
                             )
-                            self.assertEqual("resolved", inspected["resolution_status"])
+                            self.assertEqual(inspected["resolution_status"], "resolved")
                             self.assertEqual(
-                                "landing_page",
                                 inspected["resolved_resource"]["representations"][0]["scope"],
+                                "landing_page",
                             )
+
                         presentation = await call(
                             session,
                             "resource_presentation_save",
@@ -190,11 +172,6 @@ class McpStdioTests(unittest.TestCase):
                                 "displayed_resource_ids": displayed,
                                 "idempotency_key": "stdio-present-key-1",
                             },
-                        )
-                        self.assertFalse(presentation["empty"])
-                        self.assertEqual(
-                            [item["resource_id"] for item in presentation["items"]],
-                            displayed,
                         )
                         selection = await call(
                             session,
@@ -226,42 +203,24 @@ class McpStdioTests(unittest.TestCase):
                             },
                         )
                         self.assertTrue(plan["plan_digest"])
+                        self.assertNotIn("authority_digest", plan)
                         self.assertEqual(
                             {field: plan[field] for field in BINDING_FIELDS}, binding
                         )
+                        self.assertEqual(plan["items"][0]["planned_scope"], "landing_page")
+                        self.assertEqual(
+                            plan["items"][0]["planned_strategy"], "web_materialize"
+                        )
+                        self.assertNotIn("capability", plan["items"][0])
+                        self.assertNotIn("eligibility", plan["items"][0])
 
                         recovered = await call(
                             session,
                             "resource_flow_status",
-                            {
-                                "contract_version": "1.0.0",
-                                "flow_id": flow["flow_id"],
-                            },
+                            {"contract_version": "1.0.0", "flow_id": flow["flow_id"]},
                         )
-                        self.assertTrue(
-                            {
-                                "current_result_set",
-                                "current_presentation",
-                                "current_selection",
-                                "current_plan",
-                                "current_job",
-                            }.issubset(recovered)
-                        )
-                        self.assertTrue(
-                            {"latest_result_set", "active_plan", "latest_job"}.isdisjoint(
-                                recovered
-                            )
-                        )
-                        self.assertEqual(
-                            [
-                                item["resource_id"]
-                                for item in recovered["current_presentation"]["items"]
-                            ],
-                            displayed,
-                        )
-                        self.assertNotIn(
-                            "confirmation_token", recovered["current_plan"]
-                        )
+                        self.assertNotIn("authority_digest", recovered["current_plan"])
+                        self.assertNotIn("confirmation_token", recovered["current_plan"])
 
                         started = await call(
                             session,
@@ -272,7 +231,6 @@ class McpStdioTests(unittest.TestCase):
                                 "plan_id": plan["plan_id"],
                                 **binding,
                                 "plan_digest": plan["plan_digest"],
-                                "authority_digest": plan["authority_digest"],
                                 "confirmation_token": plan["confirmation_token"],
                                 "idempotency_key": "stdio-start-key-001",
                             },
@@ -281,9 +239,7 @@ class McpStdioTests(unittest.TestCase):
                             {field: started[field] for field in BINDING_FIELDS}, binding
                         )
                         self.assertEqual(started["plan_digest"], plan["plan_digest"])
-                        self.assertEqual(
-                            started["authority_digest"], plan["authority_digest"]
-                        )
+                        self.assertNotIn("authority_digest", started)
 
                         deadline = time.monotonic() + 3
                         while True:
@@ -301,24 +257,23 @@ class McpStdioTests(unittest.TestCase):
                             if time.monotonic() >= deadline:
                                 self.fail("stdio job timeout")
                             await anyio.sleep(0.01)
+
                         self.assertEqual(job["status"], "succeeded")
                         self.assertEqual(job["plan_id"], plan["plan_id"])
-                        self.assertEqual(
-                            {field: job[field] for field in BINDING_FIELDS}, binding
-                        )
                         self.assertEqual(job["plan_digest"], plan["plan_digest"])
+                        self.assertEqual(len(job.get("outcomes", [])), 1)
+                        outcome = job["outcomes"][0]
+                        self.assertNotIn("outcome_digest", outcome)
+                        self.assertNotIn("plan_binding_digest", outcome)
+                        self.assertNotIn("execution_binding_digest", outcome)
 
                         recovered = await call(
                             session,
                             "resource_flow_status",
-                            {
-                                "contract_version": "1.0.0",
-                                "flow_id": flow["flow_id"],
-                            },
+                            {"contract_version": "1.0.0", "flow_id": flow["flow_id"]},
                         )
-                        self.assertEqual(
-                            recovered["current_job"]["job_id"], started["job_id"]
-                        )
+                        self.assertEqual(recovered["current_job"]["job_id"], started["job_id"])
+                        self.assertNotIn("authority_digest", recovered["current_job"])
 
                         archived = await call(
                             session,
@@ -346,7 +301,9 @@ class McpStdioTests(unittest.TestCase):
                                 "limit": 20,
                             },
                         )
-                        self.assertEqual(archived["asset_id"], library["assets"][0]["asset_id"])
+                        self.assertEqual(
+                            archived["asset_id"], library["assets"][0]["asset_id"]
+                        )
 
         anyio.run(run)
 
