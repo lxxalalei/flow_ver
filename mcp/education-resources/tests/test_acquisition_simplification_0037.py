@@ -14,6 +14,8 @@ from education_resource_mcp.acquisition import (
     ProviderRegistration,
 )
 from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+from education_resource_mcp.capability import CapabilityCoordinator
+from education_resource_mcp.config import Settings
 from education_resource_mcp.simple_service import ResourceService
 from education_resource_mcp.simple_storage import Store
 
@@ -23,7 +25,51 @@ class _Materializer:
         raise AssertionError("not executed")
 
 
+class _Downloader:
+    def download(self, resource, job_id, strategy, cancel_event):  # pragma: no cover
+        raise AssertionError("not executed")
+
+
+class _SearchProvider:
+    def search(self, *args, **kwargs):  # pragma: no cover
+        return []
+
+    def browse_creator(self, *args, **kwargs):  # pragma: no cover
+        return []
+
+
+class _InspectionRouter:
+    def inspect(self, *args, **kwargs):  # pragma: no cover
+        raise AssertionError("not executed")
+
+
 class AcquisitionSimplification0037Tests(unittest.TestCase):
+    def test_retired_capability_coordinator_fails_fast(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "retired by 0037"):
+            CapabilityCoordinator()
+
+    def test_active_service_initializes_without_capability_coordinator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = Settings(
+                data_dir=root / "data",
+                database_path=root / "data" / "state.sqlite3",
+                jobs_dir=root / "data" / "jobs",
+                library_dir=root / "library",
+            )
+            service = ResourceService(
+                settings=settings,
+                search_provider=_SearchProvider(),
+                download_provider=_Downloader(),
+                inspection_router=_InspectionRouter(),
+            )
+            try:
+                self.assertFalse(hasattr(service, "capability_coordinator"))
+                self.assertIsInstance(service.store, Store)
+                self.assertIsInstance(service.acquisition_planner, AcquisitionPlanner)
+            finally:
+                service.close()
+
     def test_request_exposes_only_execution_facts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             request = AcquisitionRequest(
@@ -166,7 +212,10 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        text = json.dumps([plan, start, job], ensure_ascii=False)
+        actual = json.loads(
+            (root / "actual-outcome.schema.json").read_text(encoding="utf-8")
+        )
+        text = json.dumps([plan, start, job, actual], ensure_ascii=False)
         for deleted in (
             "authority_digest",
             "plan_binding_digest",
