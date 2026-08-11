@@ -121,13 +121,17 @@ generic Provider 猜路由，不把 landing page 或 metadata 冒充 primary res
 解释可追溯；未具备合法会话或真实证据的平台保持明确 blocked/unsupported，不标记为 ready。
 
 **2026-08-11 当前检查点**：环境/工具基线、合法 generic 只读路径、进程级副作用门禁和 16 平台
-readiness/用户文案审计已完成；所有平台仍为非 production-ready。文章已有两个公开候选等待用户明确
-选择，Prepare 后仍须独立确认才允许 Start。当前环境已安装并注册独立 session-manager、配置共享 store
-bridge，4 个 session Tool 与原 13 个教育业务 Tool 的 live probe 均通过。用户明确授权的 SmartEdu
+readiness/用户文案审计已完成；所有平台仍为非 production-ready。用户已明确选择文章候选 1；根 Agent
+在首次 Prepare 后发现过期 representation evidence 仍可命中 cache 的 P0 门禁缺口，已增加 Inspect
+refresh、Prepare/Start freshness 拒绝并以 `500/500` 全量 unittest 验证。部署后的真实 Inspect 已返回
+`cache_status=refresh` 并生成 landing-page Plan；该 Plan 随后已过期且未 Start。用户已质疑文章正文
+网页是否应按 landing page 获取，因此下一步先审计 `primary_resource` / `landing_page` 语义，再决定
+是否重新 Prepare。当前环境已安装并注册独立 session-manager、配置共享 store bridge，4 个 session
+Tool 与原 13 个教育业务 Tool 的 live probe 均通过。用户明确授权的 SmartEdu
 canonical direct import 已保存为 `stored/no_probe`，但 fresh 真实 Agent Search 返回认证 HTTP 403、
 0 候选，未到达 Inspect，因此 Step E 继续 blocked；不得自动重放当前值。默认使用受控浏览器登录；
 新的 direct import 仍须用户明确指定平台、用途并再次授权。保存不等于远端有效；真实网页物化/归档、
-合法平台认证恢复和最终文档验收仍未完成，不能由 `493/493` 全量 unittest 或 `8/8` stdio 子进程 E2E 替代。
+合法平台认证恢复和最终文档验收仍未完成，不能由 `500/500` 全量 unittest 或 `8/8` stdio 子进程 E2E 替代。
 
 执行计划：[0028-real-openclaw-platform-e2e.md](../.agent/plans/0028-real-openclaw-platform-e2e.md)。
 

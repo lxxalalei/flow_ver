@@ -65,7 +65,9 @@ Static Capability Descriptor
   -> persisted Actual Outcome
 ```
 
-`resource_inspect` 只新增或刷新候选的 Resolution/Representation，不改写不可变 ResultSet。
+`resource_inspect` 只新增或刷新候选的 Resolution/Representation，不改写不可变 ResultSet。显式
+representation evidence 使用半开有效区间 `observed_at <= now < expires_at`：过期 cache 走真实
+Inspector 并返回 `cache_status=refresh`；Prepare 和 Start 都拒绝过期或未来时间的 evidence。
 `session-manager` 是独立的会话/授权 MCP，不属于本服务的公共 catalog。
 
 ## 2. 公共 MCP 工具
@@ -144,8 +146,10 @@ Enablement 已于 **2026-08-11** 完成。当前唯一技术顺序为：
 以下事项当前不能声称完成：
 
 - 默认 OpenClaw Agent 的完整自然语言教育资源业务回合尚未完成。0028 已验证合法 generic 文章
-  Search → Inspect → Present、多个真实平台失败/恢复路径和状态恢复，但真实 Select → Confirm →
-  Acquire → Archive 仍等待用户明确选择与随后独立确认；doctor/probe 不等于该闭环。
+  Search → Inspect → Present、多个真实平台失败/恢复路径和状态恢复；用户已明确选择第 1 个文章候选，
+  过期 Resolution cache 的 P0 门禁缺口已修复并真实刷新。随后生成的 landing-page Plan 已过期且未
+  Start；用户已质疑文章正文网页是否应按 landing page 获取，下一步先审计该产品/契约语义。尚无
+  Job、Asset 或 Archive；doctor/probe 不等于该闭环。
 - 16 平台本环境 readiness 与用户文案边界已经逐项审计，当前 `production_ready=fail` 为 `16/16`。
   这表示分级完成，不表示所有网络、合法会话、版权/策略或获取路径均已成功；Adapter、Descriptor、
   fixture 和单次 probe 仍不能升级平台状态。

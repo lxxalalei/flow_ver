@@ -13,6 +13,8 @@ from education_resource_mcp.inspection import (
     InspectionRouter,
     build_default_inspection,
     build_representation_authority,
+    representation_evidence_is_fresh,
+    resolution_evidence_is_fresh,
     source_fingerprint,
 )
 
@@ -141,6 +143,51 @@ class InspectionCoreTests(unittest.TestCase):
                 technical_availability="unknown",
                 observed_at="not-a-timestamp",
             )
+
+    def test_representation_evidence_freshness_uses_half_open_expiry_boundary(self) -> None:
+        authority = build_representation_authority(
+            valid_resource(),
+            scope="landing_page",
+            role="landing",
+            technical_availability="available",
+            observed_at="2026-08-08T00:00:00Z",
+            expires_at="2026-08-08T01:00:00Z",
+        )
+        self.assertTrue(
+            representation_evidence_is_fresh(
+                authority, now="2026-08-08T00:30:00Z"
+            )
+        )
+        self.assertFalse(
+            representation_evidence_is_fresh(
+                authority, now="2026-08-08T01:00:00Z"
+            )
+        )
+        self.assertFalse(
+            representation_evidence_is_fresh(
+                authority, now="2026-08-07T23:59:59Z"
+            )
+        )
+        self.assertFalse(
+            representation_evidence_is_fresh(
+                {"evidence": {"observed_at": "invalid", "expires_at": "invalid"}},
+                now="2026-08-08T00:30:00Z",
+            )
+        )
+        self.assertTrue(
+            representation_evidence_is_fresh(
+                {"kind": "webpage"}, now="2026-08-08T00:30:00Z"
+            )
+        )
+
+        expired = copy.deepcopy(authority)
+        expired["evidence"]["expires_at"] = "2026-08-08T00:15:00Z"
+        self.assertFalse(
+            resolution_evidence_is_fresh(
+                {"representations": [authority, expired]},
+                now="2026-08-08T00:30:00Z",
+            )
+        )
 
     def test_router_exposes_read_only_runtime_inspector_inventory(self) -> None:
         router = InspectionRouter([_StubInspector("bilibili")])

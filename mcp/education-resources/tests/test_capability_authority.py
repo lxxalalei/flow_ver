@@ -6,6 +6,7 @@ they intentionally do not invoke the service or acquisition router.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 import tempfile
@@ -110,6 +111,19 @@ def landing_resolution(*, materializable: bool = True, **overrides: object) -> d
         ],
     }
     value.update(overrides)
+    return value
+
+
+def landing_resolution_with_evidence(
+    *, observed_at: str, expires_at: str
+) -> dict[str, object]:
+    value = deepcopy(landing_resolution())
+    value["representations"][0]["evidence"] = {
+        "source": "inspection",
+        "source_fingerprint": SOURCE_DIGEST,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+    }
     return value
 
 
@@ -328,6 +342,69 @@ class CapabilityAuthorityTests(unittest.TestCase):
         self.assertEqual("web_materialize", item["strategy"])
         self.assertEqual("generic-web-materializer", item["provider_id"])
         self.assertNotEqual("primary_resource", item["capability_scope"])
+
+    def test_prepare_rejects_expired_or_future_representation_evidence(self) -> None:
+        landing_resource = dict(resource(), platform="generic", resource_type="article")
+        for label, resolution, checked_at in (
+            (
+                "expired_at_boundary",
+                landing_resolution_with_evidence(
+                    observed_at="2026-08-08T00:00:00Z",
+                    expires_at="2026-08-08T01:00:00Z",
+                ),
+                "2026-08-08T01:00:00Z",
+            ),
+            (
+                "future_observed",
+                landing_resolution_with_evidence(
+                    observed_at="2026-08-08T02:00:00Z",
+                    expires_at="2026-08-08T03:00:00Z",
+                ),
+                "2026-08-08T01:00:00Z",
+            ),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(CapabilityAuthorityError) as raised:
+                    self.coordinator.prepare_resource(
+                        FLOW_ID,
+                        landing_resource,
+                        resolution,
+                        now=checked_at,
+                    )
+                self.assertEqual("RESOLUTION_STALE", raised.exception.code)
+
+        fresh = self.coordinator.prepare_resource(
+            FLOW_ID,
+            landing_resource,
+            landing_resolution_with_evidence(
+                observed_at="2026-08-08T00:00:00Z",
+                expires_at="2026-08-08T01:00:00Z",
+            ),
+            now="2026-08-08T00:30:00Z",
+        )
+        self.assertEqual("web_materialize", fresh["strategy"])
+
+    def test_start_revalidation_rejects_evidence_expired_after_prepare(self) -> None:
+        landing_resource = dict(resource(), platform="generic", resource_type="article")
+        resolution = landing_resolution_with_evidence(
+            observed_at="2026-08-08T00:00:00Z",
+            expires_at="2026-08-08T01:00:00Z",
+        )
+        item = self.coordinator.prepare_resource(
+            FLOW_ID,
+            landing_resource,
+            resolution,
+            now="2026-08-08T00:30:00Z",
+        )
+        revalidated = self.coordinator.revalidate_plan_item(
+            item,
+            landing_resource,
+            resolution,
+            flow_id=FLOW_ID,
+            now="2026-08-08T01:00:00Z",
+        )
+        self.assertFalse(revalidated.ok)
+        self.assertEqual("RESOLUTION_STALE", revalidated.code)
 
     def test_eligibility_is_independent_action_fact(self) -> None:
         descriptor = self.coordinator.select_descriptor(resource(), resource_type="document", scope="primary_resource")

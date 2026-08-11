@@ -29,6 +29,9 @@ Capability Descriptor -> Deployment Readiness
   Presentation 才能被选择。
 - `resource_download_prepare` 只准备计划；有副作用的下载必须经过“prepare -> 用户确认 ->
   start”。`resource_download_start` 会重新校验当前绑定并冻结 Job Execution Binding。
+- 显式 representation evidence 只在 `observed_at <= now < expires_at` 时有效。过期 cache 必须由
+  `resource_inspect` 真实刷新；Prepare 和 Start 都以 `RESOLUTION_STALE` 拒绝过期或未来时间的
+  evidence，不创建可确认 Plan 或 Job。
 - Job 是异步的；状态、取消、Outcome、Asset 和 Archive 由 MCP 服务端产生，模型不得伪造 ID、
   摘要、状态、Provider、下载结果或归档结果。
 - `coverage`、Resolution、Capability、Readiness、Eligibility 和 Outcome 是服务端事实，不能

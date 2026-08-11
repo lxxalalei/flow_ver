@@ -107,6 +107,53 @@ Not validated: 有效 SmartEdu 会话下的 Search/Inspect/Resolution/Eligibilit
 Known remaining risks: 当前保存值被真实平台以认证 HTTP 403 拒绝；POSIX store 依赖 0700/0600 权限而非 Windows DPAPI。
 ```
 
+## 2026-08-11 Step D Resolution Freshness Hotfix Task Spec
+
+### Goal
+
+真实用户选择进入 Prepare/Start 时，Inspect cache、Resolution/representation evidence、Eligibility
+和执行前重验证必须沿同一条未过期权威链；已经过期或时间来自未来的 representation evidence 不得
+继续生成可确认 Plan，也不得创建 Job。
+
+### Trigger
+
+用户明确选择 EV-06 Presentation 的第 1 项后，真实 `resource_selection_save` 成功，随后
+`resource_download_prepare` 生成 `landing_page` / `web_materialize` Plan。但选择前的再次 Inspect
+返回 `cache_status=hit`，沿用了已经超过 `evidence.expires_at` 的旧 Resolution。根 Agent 与只读子
+Agent 复核确认：当前 cache、Prepare 和 Start 均未检查该 evidence 时效，因此现有 Plan 冻结，不向
+用户请求确认，也不允许 Start。
+
+### Business Invariants
+
+- 未过期 evidence 的相同 Resolution 仍可命中 cache；过期或 future-observed evidence 必须真实刷新。
+- Prepare 对所选 representation 执行 `observed_at <= now < expires_at`；失败使用现有
+  `RESOLUTION_STALE`，不创建可确认 Plan。
+- Start 重复同一检查；即使 Plan 尚未过期，Resolution evidence 过期也不得创建 Job。
+- 不新增 Tool、契约版本、错误码、状态源、Provider 或 fallback；旧无 evidence 的兼容输入不在本次
+  热修复中被重新解释。
+
+### Expected Change Surface / Validation
+
+- 修改 `inspection.py`、`service.py`、`capability.py` 和相关定向测试。
+- 覆盖 fresh cache hit、expired cache refresh、future observed、`expires_at == now`、Prepare 拒绝、
+  Start 拒绝且无 Job，以及未过期 landing-page 既有闭环。
+- 定向测试通过后运行受影响全量 unittest、`compileall`、Schema/Markdown links 与
+  `git diff --check`；部署到现有隔离 runtime 后以新幂等键重新 Inspect/Prepare。
+
+### Completion Record
+
+```text
+[x] implemented
+[x] statically checked
+[x] targeted unit tested
+[x] subsystem/integration tested
+[x] backend E2E tested
+[ ] real Agent/user-flow tested
+[ ] full repository regression tested
+
+Current gate: 修复已部署，真实 Inspect 已返回 cache_status=refresh 并重新 Prepare；该 Plan 后续已过期且未 Start。先审计文章正文网页应归为 primary_resource 还是 landing_page，再生成任何新 Plan。
+```
+
 ## 权威证据模型
 
 每次真实验收记录至少包含：
@@ -382,9 +429,34 @@ Douyin 的 exact acquisition 仍 policy blocked，不得作为替代，也不得
 离线 AUTH fixture 不能证明真实会话或平台接受。
 
 第一条合法无认证成功候选路径固定为：`generic` 公共图文文章的 Search → optional Inspect → Present；
-该只读路径已由 EV-0028-20260811-06 通过，且没有选择、prepare、下载或归档。下一步必须先由用户从
-当前 Presentation 的 2 个公开候选中明确选择；Selection/Prepare 只生成权威计划，展示该计划后仍需一次
-独立的明确确认，才允许 Start 网络副作用。
+该只读路径已由 EV-0028-20260811-06 通过。用户现已从当前 Presentation 的 2 个公开候选中明确选择
+第 1 项；Selection 与修复后的 Prepare 已完成，但该 Plan 后续已过期且没有 Start。用户已质疑把文章
+正文网页归为 `landing_page` 的必要性，因此在语义审计完成前不重新 Prepare，也不请求 Start 确认。
+
+### EV-0028-20260811-17 — 用户选择、Resolution freshness P0 修复与重新 Prepare
+
+```text
+evidence_id: EV-0028-20260811-17
+evidence_level: human selection + real stdio MCP + real platform generic Inspect + offline full education regression
+observed_at_utc: 2026-08-11T07:53:49Z..2026-08-11T07:54:40Z
+environment_fingerprint: education-resources runtime 0.2.0-9e17ea8c；同一 0028 隔离数据库与资源库；13 Tool probe diagnostics=[]
+natural_language_goal: 用户从 EV-06 的两个公开候选中明确选择第 1 项；只允许 Selection/Prepare，展示新 Plan 后再独立确认 Start
+tool_sequence: FlowStatus -> SelectionSave(position 1) -> initial Prepare -> Inspect(cache hit with expired evidence) -> freeze Plan -> authority audit -> freshness implementation/tests/deploy/reload/probe -> Inspect(new key, cache_status=refresh) -> Prepare(new key) -> FlowStatus
+platform_observations: 初次 Plan 未 Start；过期 representation evidence 原可被 cache/Prepare/Start 接受，判为 P0。修复后 Inspect 真实刷新为 resolved/available，evidence observed_at=2026-08-11T07:54:40.288407Z、expires_at=2026-08-11T08:54:40.288407Z；新 Plan 为 landing_page + web_materialize + original container，effective_max_bytes=26214400，low PUBLIC_NETWORK_ACCESS risk，expires_at=2026-08-11T08:09:40.307943Z
+validation: freshness 定向 47/47；education-resources 全量 500/500；stdio fixture E2E 8/8；compileall 182 pyc；runtime 7 个同步文件逐项一致；live probe 13 Tool、diagnostics=[]；OpenClaw config valid；5 个变更 Markdown 的 29 个相对链接与 git diff check 通过
+human_confirmation: position 1 selection confirmed；Start confirmation not_reached
+side_effects: Selection、Resolution、Plan 和审计/幂等状态写入；一次公开来源 Inspect；无 Start、Job、Asset、Archive
+asset_archive_summary: no Job, Asset, AssetBundle or Archive
+reason_codes: USER_SELECTION_CONFIRMED, EXPIRED_RESOLUTION_CACHE_P0, OLD_PLAN_FROZEN, RESOLUTION_FRESHNESS_FIXED, CACHE_REFRESH_PASS, PREPARE_PASS, START_CONFIRMATION_REQUIRED
+redactions_applied: Flow/ResultSet/Presentation/Selection/Resolution/Plan/Resource ID 与 confirmation token 不进入证据；只保留 hash/状态/时间/范围/预算
+proves: 过期或 future-observed evidence 现在会在 cache、Prepare、Start 三处 fail closed；当前所选公开网页已形成新的可确认 landing-page Plan
+does_not_prove: OpenClaw 默认 Agent 已执行选择/确认；用户尚未确认 Start；未证明 Job、网页物化产物、Asset、Archive、Recover 或 production readiness
+```
+
+2026-08-11T10:05:10Z 复核时，本次 Plan 已超过 `2026-08-11T08:09:40.307943Z` 的有效期，且用户未确认
+Start；该 confirmation token 永久放弃，不得沿用或重放。下一步先审计文章 HTML 正文与
+`primary_resource` / `landing_page` 的语义及所需证据；只有审计结论支持具体获取目标时，才重新
+Inspect/Prepare、展示新 Plan 并另行取得独立确认。
 
 ### EV-0028-20260811-01 — generic 文章探索失败基线
 
@@ -927,12 +999,12 @@ PYTHONPATH=src TMPDIR=/tmp TEMP=/tmp <venv-python> tests/e2e_stdio_client.py
 | 1. 0025 完成 | pass | 0025/0027 归档 completion evidence 与本轮基线复核一致。 |
 | 2. OpenClaw/Skill/13 Tool | pass | config/status/doctor/probe 基线通过；当前配置再次 validate，唯一 active Skill 与 13 Tool digest 未漂移。 |
 | 3. 六大类真实 Agent 回合 | incomplete | 文章只读和多类失败/恢复已有证据；网页物化成功、真实媒体/正文成功链仍未完成。 |
-| 4. 副作用确认链 | not_reached | 用户尚未选择当前文章；没有真实 Prepare/Confirm/Start/Job/Archive。 |
+| 4. 副作用确认链 | partial | 用户已明确选择第 1 项；P0 修复后真实 Inspect refresh 与 Prepare 已通过，但 Plan 已过期且用户质疑 landing-page 目标。语义审计、新 Plan、独立 Start 确认、Job、Archive 尚未发生。 |
 | 5. 真实失败结构化 | pass | AUTH_REQUIRED、POLICY_BLOCKED、FEATURE_NOT_SUPPORTED、unknown/landing 与 StopWithGap 均未被 fallback 改写。 |
 | 6. 16 平台 readiness | pass | 16 行与 Registry 精确一致，用户文案逐项审计，`production_ready=fail` 为 16/16。 |
 | 7. 恢复/幂等/取消等边界 | pass | Step F 的真实或进程级 E2E 与 `83/83` 定向回归通过。 |
 | 8. 文档同步 | partial | 0023、CURRENT_ARCHITECTURE、DEVELOPMENT_PLAN 和 MCP 运维说明已同步当前检查点；真实闭环后仍需最终结论更新。 |
-| 9. 最终验证 | partial | 本次 direct-import 范围 session-manager 运行 67 项并 `OK (skipped=5)`，受影响 education bridge/SmartEdu `32/32`，两侧 compileall、Skill 校验、Markdown links 与 diff check 通过；新增测试后的 education 全量回归和完整 stdio E2E 尚未重跑。 |
+| 9. 最终验证 | pass | session-manager 运行 67 项并 `OK (skipped=5)`；education freshness 定向 `47/47`、education 全量 `500/500`、stdio fixture E2E `8/8`、compileall、Skill 校验、Markdown links 与 diff check 通过。首次定向 E2E 命令缺少 tests PYTHONPATH 而导入失败，修正调用环境后 8/8 通过。 |
 | 10. 根验收完成 | fail | 条件 3、4、8 尚未通过；0028 与 0023 不能标 completed。 |
 
 ## 结果
@@ -940,9 +1012,10 @@ PYTHONPATH=src TMPDIR=/tmp TEMP=/tmp <venv-python> tests/e2e_stdio_client.py
 - 0025、0027 与本计划 A/B/C 已完成；Step D 仍为 `in_progress`。文章已形成 2 项公开可读的真实
   Presentation；视频、音频、图书/版本、课程/Bundle、混合检索与中断恢复均已有真实失败/恢复证据，
   但不能把 landing、unknown representation、metadata、AUTH_REQUIRED 或静态 descriptor 改写为本体成功。
-- 下一条成功路径是由用户从当前文章 Presentation 明确选择后验证网页物化：Selection 与 Prepare
-  只生成权威计划；根 Agent 展示计划并再次获得独立明确确认后，才允许 Start/Job/Archive。用户尚未
-  选择前，本计划不会擅自越过该闸门。
+- 用户已从当前文章 Presentation 明确选择第 1 项；过期 Resolution evidence 的 P0 门禁缺口已修复，
+  真实 Inspect refresh 与 Selection-bound Prepare 均已通过，但该 Plan 已过期且没有 Start。用户进一步
+  质疑文章正文网页是否需要按 `landing_page` 保存；先审计 `primary_resource` / `landing_page` 语义，
+  审计前不重新 Prepare，不会创建 Job/Asset/Archive，也不会重放旧 confirmation token。
 - 0027 的离线通过、generic 只读成功和各平台失败路径都不代表真实获取、真实归档、其他平台或
   production readiness 已通过；Step F 的进程级恢复与边界验证、Step G 的逐平台分级与文案审计已完成，
   Step E 的安装/注册/共享 store 与 direct-import 通道已通过，但当前 SmartEdu 会话被真实平台以认证

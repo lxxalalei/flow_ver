@@ -60,15 +60,18 @@ Python unit test 冒充。
   `production_ready=fail` 为 `16/16`。
 - 公开 stdio 子进程 E2E 为 `8/8`：六条业务/控制面场景加两条重启/认证恢复场景；Selection/Plan
   失效、取消、partial、无 primary、策略拒绝、跨 Flow 归档限制和无副作用重放均已有进程级证据。
-- 前一检查点全量 unittest 为 `493/493`；本次 direct-import 变更另有 session-manager `67` 项
+- 当前 education-resources 全量 unittest 为 `500/500`；本次 direct-import 变更另有 session-manager `67` 项
   `OK (skipped=5)`、受影响 education bridge/SmartEdu `32/32`、隔离 `compileall`、Skill/Markdown 与
-  `git diff --check` 验证。新增测试后的 education 全量回归尚未重跑；上述结果仍不等于真实平台
+  `git diff --check` 验证。过期 representation evidence 的 cache refresh、Prepare/Start 拒绝和无 Job
+  回归已包含在全量测试中；上述结果仍不等于真实平台
   Acquisition 成功。
 - 当前 OpenClaw 已注册 `session-manager`，education-resources 已配置 standalone store bridge，部署
   runtime 可导入 0.4.0 包，且两个 MCP 的共享 store 配置一致；4 个 session Tool 与原 13 个教育业务 Tool
   均完成 live probe。用户明确授权的 SmartEdu canonical direct import 已保存为 `stored/no_probe`，但 fresh
   真实 Agent Search 返回认证 HTTP 403、0 候选且未到达 Inspect，因此 0028 Step E 继续 blocked；不得
   自动重放当前值，也不得把安装、保存、probe 或离线 AUTH fixture 当成真实会话恢复。
-- 0023 继续保持 `blocked`：当前真实文章 Presentation 有两个公开候选，必须先由用户明确选择；
-  Prepare 后还要展示 Plan 并获得一次独立确认，才可 Start。用户选择与确认之前不得为了验收制造
-  Selection、Plan、Job、Asset 或 Archive。
+- 0023 继续保持 `blocked`：用户已从两个公开文章候选中明确选择第 1 项。首次 Plan 因发现过期
+  representation evidence 门禁缺口而冻结；修复、全量验证和真实 `cache_status=refresh` 后已重新
+  Prepare，但该 Plan 已过期且未获 Start 确认。用户进一步质疑文章正文网页是否应按 `landing_page`
+  获取；下一步先审计 `primary_resource` 与 `landing_page` 的产品/契约语义，再决定是否重新
+  Inspect/Prepare。当前没有 Job、Asset 或 Archive，旧 confirmation token 不得重放。

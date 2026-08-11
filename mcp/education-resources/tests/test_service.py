@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 import sys
 import tempfile
@@ -25,7 +26,10 @@ from education_resource_mcp.errors import DomainError
 from education_resource_mcp.inspection import (
     InspectionResult,
     InspectionRouter,
+    INSPECTION_PROFILE_VERSION,
     build_default_inspection,
+    build_representation_authority,
+    source_fingerprint,
 )
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
@@ -63,7 +67,24 @@ class OfflineLandingInspector:
     version = "1.0.0"
     supported_scopes = ("landing_page",)
 
+    def __init__(
+        self,
+        *,
+        observed_at: str | None = None,
+        expires_at: str | None = None,
+    ) -> None:
+        self.observed_at = observed_at
+        self.expires_at = expires_at
+
     def inspect(self, resource: dict) -> InspectionResult:
+        authority = build_representation_authority(
+            resource,
+            scope="landing_page",
+            role="landing",
+            technical_availability="available",
+            observed_at=self.observed_at,
+            expires_at=self.expires_at,
+        )
         return InspectionResult(
             resolution_status="resolved",
             resolved_resource={
@@ -72,6 +93,7 @@ class OfflineLandingInspector:
                 "availability": {"status": "available"},
                 "representations": [
                     {
+                        **authority,
                         "scope": "landing_page",
                         "kind": "webpage",
                         "container": "html",
@@ -129,7 +151,12 @@ class ResourceServiceTests(unittest.TestCase):
         ]
         self.service = self._build_service()
 
-    def _build_service(self, *, wait_for_cancel: bool = False) -> ResourceService:
+    def _build_service(
+        self,
+        *,
+        wait_for_cancel: bool = False,
+        inspector: OfflineLandingInspector | None = None,
+    ) -> ResourceService:
         self.fixture_fetcher = OfflineLandingFetcher(
             wait_for_cancel=wait_for_cancel
         )
@@ -147,7 +174,9 @@ class ResourceServiceTests(unittest.TestCase):
                     )
                 ]
             ),
-            inspection_router=InspectionRouter([OfflineLandingInspector()]),
+            inspection_router=InspectionRouter(
+                [inspector or OfflineLandingInspector()]
+            ),
         )
 
     def tearDown(self) -> None:
@@ -447,6 +476,75 @@ class ResourceServiceTests(unittest.TestCase):
                 selection["selection_version"],
             )
         self.assertEqual(captured.exception.code, "RESOURCE_NOT_SELECTED")
+
+    def test_expired_representation_evidence_cannot_create_plan(self) -> None:
+        self.service.close()
+        self.service = self._build_service(
+            inspector=OfflineLandingInspector(
+                observed_at="2000-01-01T00:00:00Z",
+                expires_at="2000-01-01T01:00:00Z",
+            )
+        )
+        flow, _search, presentation = self._start_and_search()
+        selection = self.service.selection_save(
+            flow["flow_id"],
+            "selection-expired-evidence-0001",
+            presentation["presentation_id"],
+            presentation["presented_version"],
+            [1],
+        )
+        with self.assertRaises(DomainError) as captured:
+            self.service.download_prepare(
+                flow["flow_id"],
+                "prepare-expired-evidence-0001",
+                selection["selection_version"],
+            )
+        self.assertEqual("RESOLUTION_STALE", captured.exception.code)
+        self.assertIsNone(self.service.flow_status(flow["flow_id"])["current_plan"])
+
+    def test_evidence_expired_after_prepare_cannot_create_job(self) -> None:
+        flow, plan = self._prepare_first_candidate()
+        resource_id = plan["items"][0]["resource_id"]
+        resource = self.service.store.get_resources(flow["flow_id"], [resource_id])[0]
+        fingerprint = source_fingerprint(resource)
+        resolution = self.service.store.get_resource_resolution(
+            flow["flow_id"],
+            resource_id,
+            INSPECTION_PROFILE_VERSION,
+            fingerprint,
+        )
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        expired = deepcopy(resolution["resolved"])
+        evidence = expired["representations"][0]["evidence"]
+        evidence["observed_at"] = "2000-01-01T00:00:00Z"
+        evidence["expires_at"] = "2000-01-01T01:00:00Z"
+        self.service.store.save_resolution(
+            flow["flow_id"],
+            resource_id,
+            INSPECTION_PROFILE_VERSION,
+            fingerprint,
+            resolution["resolution_status"],
+            resolved=expired,
+            inspection=resolution["inspection"],
+            failures=resolution["failures"],
+            idempotency_key="expire-resolution-before-start-0001",
+        )
+        with self.assertRaises(DomainError) as captured:
+            self.service.download_start(
+                flow["flow_id"],
+                plan["plan_id"],
+                plan["confirmation_token"],
+                "start-expired-evidence-0001",
+                presentation_id=plan["presentation_id"],
+                presented_version=plan["presented_version"],
+                selection_version=plan["selection_version"],
+                selection_digest=plan["selection_digest"],
+                plan_digest=plan["plan_digest"],
+                authority_digest=plan["authority_digest"],
+            )
+        self.assertEqual("RESOLUTION_STALE", captured.exception.code)
+        self.assertIsNone(self.service.store.get_latest_job_for_flow(flow["flow_id"]))
 
     def test_running_job_can_be_cancelled_and_assets_are_not_archivable(self) -> None:
         self.service.close()

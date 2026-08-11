@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import threading
@@ -20,7 +21,11 @@ if str(SRC) not in sys.path:
 
 from education_resource_mcp.config import Settings
 from education_resource_mcp.errors import DomainError, ok
-from education_resource_mcp.inspection import InspectionResult, build_default_inspection
+from education_resource_mcp.inspection import (
+    InspectionResult,
+    build_default_inspection,
+    build_representation_authority,
+)
 from education_resource_mcp.inspection_registry import default_inspection_router
 from education_resource_mcp.retrieval.registry import INSPECTION_PLATFORM_IDS
 from education_resource_mcp.search import StaticSearchProvider
@@ -105,6 +110,59 @@ class UnsupportedInspector:
 
     def inspect(self, resource: dict) -> InspectionResult:
         raise AssertionError("unsupported fixture must not be called")
+
+
+class ExpiringInspector:
+    platform_id = "generic"
+    inspector_id = "expiring-inspector"
+    version = "1.0.0"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def inspect(self, resource: dict) -> InspectionResult:
+        self.calls += 1
+        now = datetime.now(timezone.utc)
+        if self.calls == 1:
+            observed = now - timedelta(hours=2)
+            expires = now - timedelta(hours=1)
+        else:
+            observed = now - timedelta(minutes=1)
+            expires = now + timedelta(hours=1)
+        authority = build_representation_authority(
+            resource,
+            scope="landing_page",
+            role="landing",
+            technical_availability="available",
+            observed_at=observed.isoformat(),
+            expires_at=expires.isoformat(),
+        )
+        return InspectionResult(
+            resolution_status="resolved",
+            resolved_resource={
+                "title": resource["title"],
+                "resource_type": resource["resource_type"],
+                "availability": {"status": "available"},
+                "representations": [
+                    {
+                        **authority,
+                        "kind": "webpage",
+                        "container": "html",
+                        "mime_type": "text/html",
+                        "role": "landing",
+                        "materializable": True,
+                    }
+                ],
+                "metadata": {},
+            },
+            inspection=build_default_inspection(
+                self.inspector_id,
+                method="stub",
+                cache_status="miss",
+                inspected_at=observed.isoformat(),
+            ),
+            failures=[],
+        )
 
 
 class InspectServiceTests(unittest.TestCase):
@@ -247,6 +305,33 @@ class InspectServiceTests(unittest.TestCase):
         self.assertEqual("hit", second["inspection"]["cache_status"])
         self.assertEqual(first["resolution_status"], second["resolution_status"])
         self.assertEqual(1, self.inspector.calls)
+
+    def test_expired_cache_runs_inspector_and_marks_refresh(self) -> None:
+        self.service.close()
+        self.inspector = ExpiringInspector()
+        from education_resource_mcp.inspection import InspectionRouter
+
+        self.service = ResourceService(
+            self.settings,
+            search_provider=StaticSearchProvider(self.resources),
+            inspection_router=InspectionRouter([self.inspector]),
+        )
+        flow, search = self._flow_and_search()
+        resource_id = search["candidates"][0]["resource_id"]
+        first = self.service.inspect(
+            flow["flow_id"], "inspect-expired-cache-01", resource_id
+        )
+        refreshed = self.service.inspect(
+            flow["flow_id"], "inspect-expired-cache-02", resource_id
+        )
+        cached = self.service.inspect(
+            flow["flow_id"], "inspect-expired-cache-03", resource_id
+        )
+        self.assertEqual("miss", first["inspection"]["cache_status"])
+        self.assertEqual("refresh", refreshed["inspection"]["cache_status"])
+        self.assertEqual("hit", cached["inspection"]["cache_status"])
+        self.assertNotEqual(first["resolution_id"], refreshed["resolution_id"])
+        self.assertEqual(2, self.inspector.calls)
 
     def test_unresolved_is_persisted_but_a_new_key_retries(self) -> None:
         self.service.close()

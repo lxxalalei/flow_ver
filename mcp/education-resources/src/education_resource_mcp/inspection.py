@@ -325,6 +325,82 @@ def _validate_timestamp(value: Any, field: str = "inspected_at") -> str:
     return timestamp
 
 
+def _authority_datetime(value: Any) -> datetime | None:
+    """Parse one authority timestamp without leaking validation exceptions.
+
+    Persisted inspection payloads have already passed the public boundary, but
+    cache recovery must still fail closed if an older or corrupted row carries
+    an invalid timestamp.  Returning ``None`` lets freshness checks reject the
+    row and force a real inspection instead of treating bad evidence as fresh.
+    """
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        candidate = value[:-1] + "+00:00" if value.endswith("Z") else value
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def representation_evidence_is_fresh(
+    representation: Mapping[str, Any] | Any,
+    *,
+    now: datetime | str | None = None,
+) -> bool:
+    """Return whether explicit representation authority is currently fresh.
+
+    ``evidence`` is additive in the public contract, so legacy representations
+    without it retain their compatibility behavior.  Once evidence is present,
+    however, malformed, future-observed, zero-length, or expired windows are
+    rejected at the exact boundary ``observed_at <= now < expires_at``.
+    """
+
+    if not isinstance(representation, Mapping):
+        return False
+    evidence = representation.get("evidence")
+    if evidence is None:
+        return True
+    if not isinstance(evidence, Mapping):
+        return False
+    observed_at = _authority_datetime(evidence.get("observed_at"))
+    expires_at = _authority_datetime(evidence.get("expires_at"))
+    checked_at = _authority_datetime(now) if now is not None else datetime.now(timezone.utc)
+    if observed_at is None or expires_at is None or checked_at is None:
+        return False
+    return observed_at <= checked_at < expires_at and observed_at < expires_at
+
+
+def resolution_evidence_is_fresh(
+    resolved_resource: Mapping[str, Any] | Any,
+    *,
+    now: datetime | str | None = None,
+) -> bool:
+    """Check every explicit representation-evidence window in a Resolution."""
+
+    if not isinstance(resolved_resource, Mapping):
+        return False
+    nested = resolved_resource.get("resolved_resource")
+    if not isinstance(nested, Mapping):
+        nested = resolved_resource.get("resolved")
+    candidate = nested if isinstance(nested, Mapping) else resolved_resource
+    representations = candidate.get("representations")
+    if representations is None:
+        return True
+    if not isinstance(representations, (list, tuple)):
+        return False
+    return all(
+        representation_evidence_is_fresh(representation, now=now)
+        for representation in representations
+    )
+
+
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         _invalid(f"{field} 必须是对象")
@@ -1043,5 +1119,7 @@ __all__ = [
     "build_default_inspection",
     "build_representation_authority",
     "normalize_resolved_resource",
+    "representation_evidence_is_fresh",
+    "resolution_evidence_is_fresh",
     "source_fingerprint",
 ]

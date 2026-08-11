@@ -31,7 +31,12 @@ from .capability import CapabilityAuthorityError, CapabilityCoordinator
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
-from .inspection import INSPECTION_PROFILE_VERSION, InspectionRouter, source_fingerprint
+from .inspection import (
+    INSPECTION_PROFILE_VERSION,
+    InspectionRouter,
+    resolution_evidence_is_fresh,
+    source_fingerprint,
+)
 from .inspection_registry import default_inspection_router
 from .jobs import JobRunner
 from .policy import PolicyError, ensure_within_root
@@ -542,7 +547,10 @@ class ResourceService:
                 profile_version,
                 fingerprint,
             )
-            if cached is not None:
+            cache_status = "miss"
+            if cached is not None and resolution_evidence_is_fresh(
+                cached.get("resolved") or cached.get("resolved_resource") or {}
+            ):
                 resolved_resource = self._ensure_representation_ids(
                     cached.get("resolved") or cached.get("resolved_resource") or {}
                 )
@@ -573,6 +581,8 @@ class ResourceService:
                 return self._public_resolution_output(
                     flow_id, resource_id, saved
                 )
+            if cached is not None:
+                cache_status = "refresh"
 
             # The router preserves FEATURE_NOT_SUPPORTED as a domain error.
             # Unsupported platforms are not converted into a generic network
@@ -582,6 +592,9 @@ class ResourceService:
             resolved_resource = self._ensure_representation_ids(
                 payload.get("resolved_resource") or {}
             )
+            inspection = self._with_cache_status(
+                payload.get("inspection") or {}, cache_status
+            )
             try:
                 saved = self.store.save_resolution(
                     flow_id,
@@ -590,11 +603,11 @@ class ResourceService:
                     fingerprint,
                     payload["resolution_status"],
                     resolved=resolved_resource,
-                    inspection=payload.get("inspection") or {},
+                    inspection=inspection,
                     failures=payload.get("failures") or [],
                     idempotency_key=idempotency_key,
                     request_hash=request_hash,
-                    inspected_at=(payload.get("inspection") or {}).get("inspected_at"),
+                    inspected_at=inspection.get("inspected_at"),
                 )
             except KeyError as exc:
                 raise DomainError("RESOURCE_NOT_FOUND", "资源不存在") from exc

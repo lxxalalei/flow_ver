@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .inspection import source_fingerprint
+from .inspection import representation_evidence_is_fresh, source_fingerprint
 from .retrieval.models import Representation
 from .retrieval.registry import (
     CapabilityDescriptor,
@@ -1205,6 +1205,13 @@ class CapabilityCoordinator:
             representation_id=representation_id,
             required=True,
         )
+        if not representation_evidence_is_fresh(rep or {}, now=now):
+            raise CapabilityAuthorityError(
+                "RESOLUTION_STALE",
+                "representation evidence is expired or not yet valid",
+                {"resource_id": resource_id},
+                retryable=True,
+            )
         scope = self.classify_scope(resolution_map, rep)
         hinted_scope = _scope_hint(resolution_map, rep)
         if hinted_scope and _SCOPE_STRENGTH[hinted_scope] > _SCOPE_STRENGTH[scope]:
@@ -1431,6 +1438,14 @@ class CapabilityCoordinator:
                 representation_id=str(bound_representation_id) if bound_representation_id else None,
                 required=True,
             )
+            if not representation_evidence_is_fresh(rep or {}, now=checked):
+                return RevalidationResult(
+                    False,
+                    "RESOLUTION_STALE",
+                    "representation evidence is expired or not yet valid",
+                    {"resource_id": resource_map.get("resource_id")},
+                    readiness=fresh,
+                )
             observed_scope = self.classify_scope(resolution_map, rep)
             if observed_scope != bound.get("capability_scope"):
                 return RevalidationResult(
