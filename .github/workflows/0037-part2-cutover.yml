@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 5
+          fetch-depth: 6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -48,6 +48,25 @@ jobs:
           Path("/tmp/0037-part2-cutover.py").write_text("\n".join(output) + "\n", encoding="utf-8")
           PY
           python /tmp/0037-part2-cutover.py
+      - name: Remove materializer legacy request-class dependency
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('mcp/education-resources/src/education_resource_mcp/acquisition/web_materializer.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '''from .models import (\n    AcquisitionRequest,\n    AcquisitionResult,\n''',
+              '''from .models import (\n    AcquisitionResult,\n''',
+              1,
+          )
+          old = '''    def acquire(self, request: AcquisitionRequest) -> AcquisitionResult:\n        """Fetch and materialize one request using ``jobs_root/job_id`` only."""\n\n        if not isinstance(request, AcquisitionRequest):\n            raise TypeError("WebMaterializer.acquire expects AcquisitionRequest")\n        cancel_event = request.cancel_event\n'''
+          new = '''    def acquire(self, request: Any) -> AcquisitionResult:\n        """Fetch and materialize one server-authored request using ``jobs_root/job_id`` only."""\n\n        cancel_event = request.cancel_event\n'''
+          if old not in text:
+              raise SystemExit('web materializer request check shape changed')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Install service
         run: |
           python -m pip install --upgrade pip
@@ -61,7 +80,7 @@ jobs:
         run: |
           python -m pytest -q tests/test_acquisition_simplification_0037.py
           python -m pytest -q tests/test_mcp_stdio.py
-      - name: Verify deleted authority contract artifacts
+      - name: Verify deleted authority compatibility
         run: |
           test ! -e mcp/education-resources/contracts/capabilities/capability-descriptors.json
           test ! -e mcp/education-resources/contracts/schemas/capability-descriptor.schema.json
@@ -69,6 +88,7 @@ jobs:
           test ! -e mcp/education-resources/contracts/schemas/deployment-readiness.schema.json
           test ! -e mcp/education-resources/contracts/schemas/eligibility-decision.schema.json
           if git grep -nE 'Capability Descriptor -> Deployment Readiness|authority_digest|execution_binding_digest|readiness_snapshot_id|eligibility_id' -- mcp/education-resources/contracts/README.md mcp/education-resources/contracts/platforms/README.md; then exit 1; fi
+          if git grep -n 'WebMaterializer.acquire expects AcquisitionRequest' -- mcp/education-resources/src; then exit 1; fi
       - name: Commit successful cutover
         run: |
           git config user.name 'github-actions[bot]'
