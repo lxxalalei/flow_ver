@@ -1,8 +1,8 @@
 # 当前架构事实
 
-> 快照日期：2026-08-11
+> 快照日期：2026-08-12
 >
-> 本文记录当前工作树的人类可读事实。机器事实仍以公共契约和实际运行时代码为准。
+> 本文记录当前工作树的人类可读事实。机器事实仍以公共契约和实际运行代码为准。
 
 ## 事实优先级
 
@@ -14,7 +14,7 @@
 4. `.agent/plans/` 当前执行计划；
 5. `docs/archive/`、`.agent/plans/archive/` 和 `legacy/` 历史材料。
 
-Registry、Adapter、ProviderSpec 或历史实现存在，都不能单独证明某个平台当前可用、某个候选存在具体 Representation，或一次获取已经成功。
+Registry、Adapter、ProviderSpec 或历史代码存在，都不能单独证明某个平台当前可用、某个候选存在具体 Representation，或一次获取已经成功。
 
 ## 1. Active 边界
 
@@ -26,10 +26,11 @@ Registry、Adapter、ProviderSpec 或历史实现存在，都不能单独证明�
 | 公共契约 | `contract_version=1.0.0` |
 | Tool catalog | `catalog_version=1.6.0`，13 个领域级 Tool |
 | 分类 | `contracts/taxonomy/learning-v1.json` |
-| SQLite | active migration `8` |
+| SQLite | active migration `9` |
 | Active 获取服务 | `simple_service.py` |
 | Active 获取存储 | `simple_storage.py` |
 | 获取规划 | `acquisition/planner.py` 的 `ProviderSpec` / `AcquisitionPlanner` |
+| 获取请求 | `acquisition/simple.py` 的轻量 `AcquisitionRequest` |
 | Provider 路由 | exact `(provider_id, provider_version)`；失败不 silent fallback |
 
 Active 主链：
@@ -64,9 +65,9 @@ FlowTask
   -> Archive
 ```
 
-## 2. 0037 已删除的获取权威链
+## 2. 已删除的获取权威链
 
-以下对象已经退出 Active 新写入和公共契约：
+以下对象已经退出 Active acquisition 状态和 current 公共契约：
 
 - Capability Descriptor binding；
 - Deployment Readiness Snapshot；
@@ -87,7 +88,7 @@ Prepare 根据 fresh Representation 生成 Plan；Start 再读取当前 Resoluti
 
 这些是业务校验，不生成 Readiness ID、Eligibility ID 或 digest。
 
-旧 `capability.py` 的约 71KB authority 实现已经删除，只保留一个 tiny fail-fast shim，防止旧 Service 基座被误用于获取流程。Active `simple_service` 不创建或调用 `CapabilityCoordinator`。
+旧 `capability.py` 的大型 authority 实现已经删除，仅保留 fail-fast shim 防止旧获取入口被误用。Active `simple_service` 不创建或调用 `CapabilityCoordinator`。
 
 ## 3. 当前 ProviderSpec 路线
 
@@ -104,7 +105,7 @@ ProviderSpec 存在不等于平台 production-ready。真实网络、认证、�
 
 网页的业务角色和获取机制分开判断。
 
-如果网页本身就是用户选择的文章/教程/图文正文：
+如果网页本身就是用户选择的文章、教程或图文正文：
 
 ```text
 kind=webpage
@@ -120,7 +121,7 @@ role=landing
 scope=landing_page
 ```
 
-`web_materialize` 只描述“如何保存网页”，不能自动把网页降级成 landing page，也不能把 landing page 冒充正文资源。
+`web_materialize` 只描述“如何保存网页”，不能自动把正文降级成 landing page，也不能把 landing page 冒充正文资源。
 
 ## 5. `source_fingerprint` 与文件元数据
 
@@ -145,11 +146,76 @@ scope=landing_page
 - `resource_download_start` 不接受 `authority_digest`；
 - Prepare PlanItem 不暴露 capability/readiness/eligibility/binding digest；
 - FlowStatus current Plan/Job 不暴露 `authority_digest`；
-- JobStatus Outcome 不暴露 plan/execution/outcome digest。
+- JobStatus Outcome 不暴露 plan/execution/outcome digest；
+- 独立 Capability Descriptor、Deployment Readiness、Eligibility Decision current schema/catalog 已物理删除。
 
-`selection_digest` / `plan_digest` 继续存在，只用于当前选择与确认计划的服务端内容标识和幂等关系，不构成多层 capability authority chain，也不传给 Provider。
+`selection_digest` / `plan_digest` 继续存在，只用于当前选择与确认计划的内容标识和幂等关系，不构成多层 capability authority chain，也不传给 Provider。
 
-## 7. 仍保留的业务与安全不变量
+## 7. AcquisitionRequest 与 Provider 边界
+
+当前 `AcquisitionRequest` 是独立轻量 DTO，只包含执行实际需要的事实：
+
+```text
+job_id
+resource
+strategy
+provider_id / provider_version
+planned_scope
+representation_id
+preferred_container
+cancel_event
+jobs_root
+```
+
+它不继承旧 Request，也没有 capability、descriptor、readiness、eligibility、binding digest 等空 slot。
+
+Router 负责确认请求类型和 exact Provider；Provider 负责执行，不再重复要求某个历史 Request concrete class。`WebMaterializer` 已移除此前的旧 `isinstance(AcquisitionRequest)` 兼容检查。
+
+## 8. SQLite migration 8 / 9
+
+migration 8 建立当前三张 acquisition 业务表并先从 v7 降维 backfill：
+
+```text
+acquisition_plan_items
+job_items
+execution_outcomes
+```
+
+这些表只保存业务执行需要的字段，不包含 Descriptor/Readiness/Eligibility/digest 列。
+
+migration 9 在 backfill 完成后物理删除旧 acquisition authority 表：
+
+```text
+job_execution_items
+acquisition_outcomes
+download_plan_items
+eligibility_decisions
+capability_readiness_snapshots
+```
+
+`storage.py` 中仍保留历史 migration 定义，目的是让旧数据库能够升级；migration 9 后 Active acquisition 不读取或写入这些旧表。
+
+## 9. Active runner 与 Job 状态
+
+`simple_service.ResourceService` 已直接实现 acquisition runner：
+
+```text
+Job
+  -> get_job_items()
+  -> AcquisitionRequest
+  -> exact Provider
+  -> execution_outcomes
+  -> AssetBundle / Asset
+  -> finalize Job
+```
+
+Runner 不再调用 `get_job_execution_items()`，也不再人工补 `capability_scope`、`readiness_snapshot_id`、`eligibility_id` 等空兼容字段。
+
+`resource_job_status` 同样从 `job_items` 与 `execution_outcomes` 恢复实际执行事实。
+
+`simple_storage` 的 success / failure / cancellation 收口使用当前 Outcome 表；Asset/Bundle/Archive graph 仍作为资源产物一致性的业务事实。
+
+## 10. 仍保留的业务与安全不变量
 
 简化不等于取消必要边界：
 
@@ -163,35 +229,7 @@ scope=landing_page
 - SSRF、逐跳重定向、路径逃逸、取消、超时、真实 MIME/格式检查继续保留；
 - 不绕过登录、验证码、付费墙、DRM 或明确访问控制。
 
-## 8. SQLite migration 8
-
-migration 8 新增 Active 获取表：
-
-```text
-acquisition_plan_items
-job_items
-execution_outcomes
-```
-
-这些表只保存业务执行需要的字段，不包含 Descriptor/Readiness/Eligibility/digest 列。
-
-已有 v7 数据可从旧 `download_plan_items`、`job_execution_items`、`acquisition_outcomes` 降维 backfill。旧 v6/v7 authority 表目前仍可能存在于升级数据库中，但 0037 新路径不再向它们写入新 authority 事实。
-
-兼容期结束后需要独立 cleanup migration 物理删除无读取者的旧表。
-
-## 9. 代码过渡边界
-
-当前采用安全切换而不是一次性重写成熟搜索/归档代码：
-
-- `server.py` 指向 `simple_service.ResourceService`；
-- `simple_service.py` 复用旧 Service 的 Search/Inspect/Job lifecycle/Archive 辅助逻辑，但覆盖 acquisition 初始化、Prepare、Start 和 Outcome projection；
-- `simple_storage.py` 复用旧 Store 的 Retrieval/Resolution/Asset/Archive 基础能力，但覆盖 acquisition Plan/JobItem/Outcome 与归档关系；
-- `acquisition/simple.py` 仍通过旧 Request 类型 slot 兼容部分 Provider 的 `isinstance`，但 Provider-facing `to_dict()` 已不暴露 authority 字段；
-- inherited `_run_download_job` 仍使用少量兼容字段名，这一层将在 0037 下一 cleanup milestone 直接改成 `job_items`。
-
-因此当前准确状态是：**业务获取状态链已经简化并通过离线闭环，代码文件布局仍有兼容期残留。**
-
-## 10. Agent / 检索边界
+## 11. Agent / 检索边界
 
 Skill 已同步到新获取模型，但搜索分权保持不变：
 
@@ -205,46 +243,34 @@ Skill -> private SemanticReview -> Gap -> StopDecision
 
 0037 没有把搜索质量判断搬回 Python 硬编码。
 
-## 11. 测试治理
+## 12. 测试治理与验证
 
-只验证旧实现实体的测试已经移出 Active 测试面，包括 CapabilityAuthority、Readiness Snapshot、Eligibility/digest binding、Job execution authority storage 等测试。
+只验证旧实现实体的 CapabilityAuthority、Readiness Snapshot、Eligibility/digest binding、Job execution authority storage 等测试已移出 Active 测试面。
 
-平台 Search/Inspect Adapter 注册类测试继续保留，因为它们仍约束真实业务能力。
+平台 Search/Inspect Adapter 注册类测试继续保留。`test_mcp_stdio.py` 没有被删除，而是迁移为新契约继续验证完整业务闭环。
 
-`test_mcp_stdio.py` 没有被删除，而是迁移为新契约，继续验证完整业务闭环。
+0037 已完成三轮关键验证：
 
-## 12. 已完成验证
+1. simplified state 定向验证；
+2. run `31514845872`：完整离线 MCP round trip；
+3. run `31517757764`：migration 9 / Request / Runner / contract 物理 cleanup 后再次验证。
 
-最终临时 GitHub Actions run `31514845872` 已通过：
+第三轮实际通过：
 
-- 安装当前 MCP 包；
-- `compileall` active package；
-- 解析 `contracts/` 下所有 JSON；
-- `test_acquisition_simplification_0037.py`；
-- `test_mcp_stdio.py`。
+- current package install；
+- `compileall`；
+- current contract JSON 全量解析；
+- `test_acquisition_simplification_0037.py` 7/7；
+- `test_mcp_stdio.py` 2/2；
+- 五个旧 capability/readiness/eligibility current contract artifact 的物理删除检查。
 
-其中 stdio 测试真实覆盖离线：
+成功 cutover 提交：`ff2a7044fa26a48491e5c3dac9fed5ee7ffd380d`。
 
-```text
-13 Tool discovery
-  -> Flow
-  -> Search
-  -> Inspect
-  -> Presentation
-  -> Selection
-  -> Prepare
-  -> Start
-  -> Job
-  -> Outcome / Asset
-  -> Archive
-  -> Library search
-```
-
-这证明当前简化模型可以完成离线 MCP 业务闭环，但不能证明真实互联网平台、合法会话或默认 OpenClaw Agent 已通过。
+这些验证证明当前简化模型在离线 MCP 业务闭环中可执行，但不能证明真实互联网平台、合法会话或默认 OpenClaw Agent 已通过。
 
 ## 13. 当前执行顺序
 
-1. **0037 Acquisition State Simplification**：完成兼容层和旧表 cleanup，并跑真实 generic Agent 闭环；
+1. **0037 Acquisition State Simplification**：只剩真实 generic Agent 用户闭环验收；
 2. **0028 Real OpenClaw and Real Platform E2E**：基于简化模型恢复/验证真实平台；
 3. **0029 Retrieval Benchmark and Release Gate**：建立业务行为质量门禁；
 4. Platform Expansion / Library & Viewer / 后续部署。
@@ -253,13 +279,18 @@ Skill -> private SemanticReview -> Gap -> StopDecision
 
 ## 14. 尚未验收
 
-- inherited runner / old AcquisitionRequest compatibility slot 的最终删除；
-- cleanup migration 删除旧 authority 表；
-- 兼容 capability/readiness/eligibility Schema/catalog 的物理清理；
-- 真实 OpenClaw generic article primary webpage 成功闭环；
+0037 本身只剩：
+
+- 真实 OpenClaw generic article primary webpage 成功完成：
+  `Search -> Inspect -> Present -> Select -> Confirm -> Acquire -> Archive -> Recover`；
+- 确认正文网页实际为 `primary_resource + web_materialize`；
+- 确认真实调用没有暴露仍可触发的旧 authority acquisition 路径。
+
+后续属于 0028 / 0029：
+
 - SmartEdu 有效会话下真实 Search/Inspect/Acquire；
 - Bilibili、Douyin、Ximalaya、CCTV、NLC、Open163、Yixi 等真实平台 Provider 恢复；
-- 0029 benchmark/release gate。
+- retrieval benchmark / release gate。
 
 ## 相关入口
 
