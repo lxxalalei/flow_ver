@@ -28,11 +28,6 @@
             "text"
           ]
         },
-        "max_bytes_per_resource": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 5368709120
-        },
         "allow_safe_fallback": {
           "type": "boolean",
           "default": true,

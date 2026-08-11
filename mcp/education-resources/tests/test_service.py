@@ -126,7 +126,6 @@ class ResourceServiceTests(unittest.TestCase):
             database_path=data_dir / "database.sqlite",
             jobs_dir=data_dir / "jobs",
             library_dir=data_dir / "library",
-            max_download_bytes=1024 * 1024,
             max_search_results=20,
             max_workers=2,
             plan_ttl_seconds=60,
@@ -230,7 +229,7 @@ class ResourceServiceTests(unittest.TestCase):
             flow["flow_id"],
             "prepare-helper-key-0001",
             selection["selection_version"],
-            options={"preferred_container": "html", "max_bytes_per_resource": 4096},
+            options={"preferred_container": "html"},
         )
         return flow, plan
 
@@ -251,13 +250,13 @@ class ResourceServiceTests(unittest.TestCase):
             flow["flow_id"],
             "prepare-key-000001",
             selection["selection_version"],
-            options={"preferred_container": "html", "max_bytes_per_resource": 4096},
+            options={"preferred_container": "html"},
         )
         replayed_plan = self.service.download_prepare(
             flow["flow_id"],
             "prepare-key-000001",
             selection["selection_version"],
-            options={"preferred_container": "html", "max_bytes_per_resource": 4096},
+            options={"preferred_container": "html"},
         )
         self.assertEqual(replayed_plan, plan)
 

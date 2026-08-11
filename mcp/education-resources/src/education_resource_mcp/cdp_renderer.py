@@ -240,15 +240,14 @@ class CDPRenderer:
         job_dir: Path,
         *,
         formats: set[str],
-        max_bytes: int,
         cancel_event: threading.Event,
         cookies: str = "",
     ) -> list[tuple[Path, str, str, str]]:
         """Render *url* and write requested files under *job_dir*.
 
         Returns a list of ``(path, media_type, suffix, description)`` tuples,
-        one per produced file.  Raises :class:`DomainError` on cancellation,
-        oversized output, or rendering failure.
+        one per produced file. Raises :class:`DomainError` on cancellation or
+        rendering failure.
         """
         valid = {"mhtml", "pdf", "png"}
         if not formats:
@@ -300,12 +299,6 @@ class CDPRenderer:
                     raise DomainError(
                         "CONTENT_VALIDATION_FAILED",
                         f"{fmt.upper()} 渲染结果为空",
-                    )
-                if len(data_bytes) > max_bytes:
-                    raise DomainError(
-                        "DOWNLOAD_TOO_LARGE",
-                        f"{fmt.upper()} 超过大小上限",
-                        details={"max_bytes": max_bytes, "byte_size": len(data_bytes)},
                     )
                 suffix = _SUFFIXES[fmt]
                 destination = job_dir / f"page{suffix}"

@@ -42,7 +42,6 @@ class _UnusedDirectProvider:
         resource,
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         raise AssertionError("web materialization must not use direct download")
@@ -110,7 +109,6 @@ def _settings(data_dir: Path) -> Settings:
         database_path=data_dir / "database.sqlite",
         jobs_dir=data_dir / "jobs",
         library_dir=data_dir / "library",
-        max_download_bytes=1024 * 1024,
         max_search_results=20,
         max_workers=2,
         plan_ttl_seconds=60,
@@ -199,7 +197,6 @@ class AcquisitionServiceTests(unittest.TestCase):
             selection["selection_version"],
             options={
                 "preferred_container": "html",
-                "max_bytes_per_resource": 512 * 1024,
             },
         )
         started = self.service.download_start(

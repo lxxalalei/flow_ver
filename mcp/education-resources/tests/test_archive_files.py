@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -106,64 +105,48 @@ class ArchiveFileManagerTests(unittest.TestCase):
         self.source = Path(self.tempdir.name) / "asset.bin"
         self.payload = b"verified learning resource"
         self.source.write_bytes(self.payload)
-        self.sha256 = hashlib.sha256(self.payload).hexdigest()
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
     def _stage(self, operation_id: str = "archive_test"):
-        return self.manager.stage_and_verify(
+        return self.manager.stage(
             self.source,
-            expected_sha256=self.sha256,
-            expected_size=len(self.payload),
             media_type="application/octet-stream",
             operation_id=operation_id,
         )
 
-    def test_stage_verifies_hash_and_size_and_cleans_failure(self) -> None:
-        with self.assertRaisesRegex(ArchiveFileError, "SHA-256"):
-            self.manager.stage_and_verify(
-                self.source,
-                expected_sha256="0" * 64,
-                expected_size=len(self.payload),
-                media_type="application/octet-stream",
-                operation_id="bad_hash",
-            )
-        self.assertFalse((self.root / ".archive-staging" / "bad_hash.pending").exists())
+    def test_stage_copies_file_without_integrity_metadata(self) -> None:
+        staged = self._stage("copy")
+        self.assertEqual(self.payload, (self.root / staged.relative_path).read_bytes())
 
     def test_stage_rejects_declared_pdf_with_invalid_signature(self) -> None:
         pdf_source = Path(self.tempdir.name) / "invalid.pdf"
         pdf_source.write_bytes(self.payload)
         with self.assertRaisesRegex(ArchiveFileError, "文件签名"):
-            self.manager.stage_and_verify(
+            self.manager.stage(
                 pdf_source,
-                expected_sha256=self.sha256,
-                expected_size=len(self.payload),
                 media_type="application/pdf",
                 operation_id="bad_format",
             )
         self.assertFalse((self.root / ".archive-staging" / "bad_format.pending").exists())
 
-    def test_same_name_same_content_is_deduplicated(self) -> None:
+    def test_same_name_uses_next_available_filename(self) -> None:
         first = self._stage("first")
         first_result = self.manager.publish_no_replace(
             first.relative_path,
             "04-自然科学/其他/其他/资料.bin",
-            sha256=self.sha256,
-            byte_size=len(self.payload),
         )
         second = self._stage("second")
         second_result = self.manager.publish_no_replace(
             second.relative_path,
             "04-自然科学/其他/其他/资料.bin",
-            sha256=self.sha256,
-            byte_size=len(self.payload),
         )
         self.assertFalse(first_result.deduplicated)
-        self.assertTrue(second_result.deduplicated)
-        self.assertEqual(first_result.relative_path, second_result.relative_path)
+        self.assertFalse(second_result.deduplicated)
+        self.assertEqual(second_result.relative_path, "04-自然科学/其他/其他/资料-2.bin")
 
-    def test_same_name_different_content_gets_stable_short_hash(self) -> None:
+    def test_same_name_different_content_gets_numeric_suffix(self) -> None:
         existing = self.root / "04-自然科学" / "其他" / "其他" / "资料.bin"
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"different")
@@ -171,10 +154,8 @@ class ArchiveFileManagerTests(unittest.TestCase):
         published = self.manager.publish_no_replace(
             staged.relative_path,
             "04-自然科学/其他/其他/资料.bin",
-            sha256=self.sha256,
-            byte_size=len(self.payload),
         )
-        self.assertIn(self.sha256[:12], published.relative_path)
+        self.assertEqual(published.relative_path, "04-自然科学/其他/其他/资料-2.bin")
         self.assertEqual(existing.read_bytes(), b"different")
         self.assertEqual((self.root / published.relative_path).read_bytes(), self.payload)
 
@@ -191,8 +172,6 @@ class ArchiveFileManagerTests(unittest.TestCase):
             self.manager.publish_no_replace(
                 staged.relative_path,
                 "04-自然科学/其他/其他/资料.bin",
-                sha256=self.sha256,
-                byte_size=len(self.payload),
             )
         self.assertFalse((outside / "其他" / "其他" / "资料.bin").exists())
 

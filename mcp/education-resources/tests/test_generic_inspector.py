@@ -5,7 +5,7 @@ import unittest
 
 from education_resource_mcp.adapters.inspect_generic import (
     GenericWebInspector,
-    MAX_BYTES,
+    INSPECTION_MAX_BYTES,
 )
 
 
@@ -180,26 +180,34 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertNotEqual("primary", representation["role"])
         self.assertFalse(representation["materializable"])
 
-    def test_declared_content_length_is_rejected_before_reading(self) -> None:
+    def test_declared_file_size_does_not_block_inspection(self) -> None:
+        body = b"%PDF-1.7\npreview"
         response = FakeResponse(
-            headers={"Content-Type": "application/pdf", "Content-Length": str(MAX_BYTES + 1)},
-            body=b"should not be read",
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Length": str(INSPECTION_MAX_BYTES * 10),
+            },
+            body=body,
         )
         mapped = inspector(QueueTransport(response)).inspect(resource()).to_mapping()
 
-        self.assertEqual("unresolved", mapped["resolution_status"])
-        self.assertEqual("DOWNLOAD_TOO_LARGE", mapped["failures"][0]["code"])
-        self.assertEqual(0, response.read_calls)
+        self.assertEqual("resolved", mapped["resolution_status"])
+        self.assertEqual([], mapped["failures"])
+        self.assertGreater(response.read_calls, 0)
+        self.assertEqual(
+            INSPECTION_MAX_BYTES * 10,
+            mapped["resolved_resource"]["representations"][0]["size_bytes"],
+        )
 
-    def test_streaming_content_length_limit_is_enforced(self) -> None:
+    def test_large_stream_is_classified_from_bounded_preview(self) -> None:
         response = FakeResponse(
-            headers={"Content-Type": "application/octet-stream"},
-            chunks=[b"x" * (MAX_BYTES + 1)],
+            headers={"Content-Type": "application/pdf"},
+            chunks=[b"%PDF-1.7\n" + b"x" * INSPECTION_MAX_BYTES],
         )
         mapped = inspector(QueueTransport(response)).inspect(resource()).to_mapping()
 
-        self.assertEqual("DOWNLOAD_TOO_LARGE", mapped["failures"][0]["code"])
-        self.assertEqual("unresolved", mapped["resolution_status"])
+        self.assertEqual("resolved", mapped["resolution_status"])
+        self.assertEqual([], mapped["failures"])
 
     def test_initial_private_url_is_policy_blocked(self) -> None:
         transport = QueueTransport()

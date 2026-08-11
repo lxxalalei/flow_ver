@@ -289,7 +289,7 @@ class LibgenClient:
 
     def download(
         self, md5: str, dest_dir: str | Path,
-        cancel_event: Optional[Any] = None, max_bytes: int = 0,
+        cancel_event: Optional[Any] = None,
     ) -> LibgenDownloadResult:
         md5 = md5.lower().strip()
         if not _MD5_RE.fullmatch(md5):
@@ -297,14 +297,14 @@ class LibgenClient:
         last_err: Optional[Exception] = None
         for mirror in self.mirrors:
             try:
-                return self._download_from(mirror, md5, dest_dir, cancel_event, max_bytes)
+                return self._download_from(mirror, md5, dest_dir, cancel_event)
             except Exception as exc:
                 last_err = exc
         raise LibgenError(f"Download failed on all mirrors: {last_err}") from last_err
 
     def _download_from(
         self, mirror: str, md5: str, dest_dir: str | Path,
-        cancel_event: Optional[Any] = None, max_bytes: int = 0,
+        cancel_event: Optional[Any] = None,
     ) -> LibgenDownloadResult:
         ads_html = self._get(mirror, "/ads.php", md5=md5)
         soup = BeautifulSoup(ads_html, "lxml")
@@ -341,9 +341,6 @@ class LibgenClient:
                     if not chunk:
                         break
                     size += len(chunk)
-                    if max_bytes and size > max_bytes:
-                        out.unlink(missing_ok=True)
-                        raise LibgenError("DOWNLOAD_TOO_LARGE")
                     fh.write(chunk)
         return LibgenDownloadResult(path=out, size_bytes=size, mirror=mirror, url=get_url, filename=filename)
 

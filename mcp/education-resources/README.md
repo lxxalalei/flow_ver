@@ -86,8 +86,7 @@ EDUCATION_RESOURCE_MCP_SEARXNG_URL=http://127.0.0.1:8888 \
   Cookie、Token 或浏览器档案。
 - `EDUCATION_RESOURCE_MCP_SEARXNG_URL`：可选的受信任搜索后端地址；未设置时不启用该后端。
 
-常用资源限制可通过 `EDUCATION_RESOURCE_MCP_MAX_BYTES`、
-`EDUCATION_RESOURCE_MCP_SEARCH_TIMEOUT`、`EDUCATION_RESOURCE_MCP_DOWNLOAD_TIMEOUT`、
+常用运行参数可通过 `EDUCATION_RESOURCE_MCP_SEARCH_TIMEOUT`、`EDUCATION_RESOURCE_MCP_DOWNLOAD_TIMEOUT`、
 `EDUCATION_RESOURCE_MCP_MAX_RESULTS`、`EDUCATION_RESOURCE_MCP_MAX_WORKERS` 和
 `EDUCATION_RESOURCE_MCP_PLAN_TTL` 配置。值必须为正整数；不要用环境变量传入凭据、任意命令或
 本地路径给工具输入。
@@ -96,7 +95,7 @@ EDUCATION_RESOURCE_MCP_SEARXNG_URL=http://127.0.0.1:8888 \
 
 - 来源只允许经过策略校验的 `http`/`https`；逐跳校验重定向并阻断本机、私网、链路本地和云
   元数据地址。
-- 服务端强制执行超时、重试/并发、流式大小、数量、内容类型和真实文件格式校验，并清理取消
+- 服务端强制执行超时、重试/并发、固定数据块流式写入、数量、内容类型和真实文件格式校验，并清理取消
   或失败的临时产物。
 - 不绕过登录、验证码、付费墙、DRM 或其他访问控制。需要认证时由独立 `session-manager`
   合法完成浏览器捕获；用户明确指定平台、用途并授权时，也可由它接受一次 canonical direct import。

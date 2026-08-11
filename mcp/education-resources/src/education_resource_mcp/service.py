@@ -755,7 +755,6 @@ class ResourceService:
             raise DomainError("INVALID_ARGUMENT", "options 必须是对象")
         allowed_options = {
             "preferred_container",
-            "max_bytes_per_resource",
             "allow_safe_fallback",
         }
         unknown_options = sorted(set(download_options) - allowed_options)
@@ -769,23 +768,10 @@ class ResourceService:
         container = download_options.get("preferred_container", "original")
         if container not in {"original", "pdf", "epub", "mp4", "mp3", "html", "text"}:
             raise DomainError("INVALID_ARGUMENT", "preferred_container 无效")
-        max_value = download_options.get(
-            "max_bytes_per_resource", self.settings.max_download_bytes
-        )
-        if not isinstance(max_value, int) or isinstance(max_value, bool):
-            raise DomainError("INVALID_ARGUMENT", "max_bytes_per_resource 必须是整数")
-        effective_max = int(max_value)
-        if effective_max < 1 or effective_max > self.settings.max_download_bytes:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "max_bytes_per_resource 超出服务端允许范围",
-                details={"server_max_bytes": self.settings.max_download_bytes},
-            )
         fallback_value = download_options.get("allow_safe_fallback", True)
         if not isinstance(fallback_value, bool):
             raise DomainError("INVALID_ARGUMENT", "allow_safe_fallback 必须是布尔值")
         normalized_options = {
-            "max_bytes": effective_max,
             "preferred_container": str(container),
             # Compatibility preference only. It is persisted for request
             # identity, but never selects a provider, strategy, or scope.
@@ -845,7 +831,6 @@ class ResourceService:
                 resources,
                 resolutions,
                 preferred_container=str(container),
-                effective_max_bytes=effective_max,
             )
         except CapabilityAuthorityError as exc:
             code = {
@@ -853,7 +838,6 @@ class ResourceService:
                 "CAPABILITY_REPRESENTATION_MISMATCH": "CAPABILITY_SCOPE_MISMATCH",
                 "INVALID_DIGEST": "VALIDATION_ERROR",
                 "INVALID_INPUT": "VALIDATION_ERROR",
-                "INVALID_MAX_BYTES": "VALIDATION_ERROR",
                 "INVALID_TIMESTAMP": "VALIDATION_ERROR",
                 "RESOURCE_ID_REQUIRED": "VALIDATION_ERROR",
                 "RESOLUTION_REQUIRED": "RESOLUTION_STALE",
@@ -1117,7 +1101,6 @@ class ResourceService:
                     "CAPABILITY_REPRESENTATION_MISMATCH": "CAPABILITY_SCOPE_MISMATCH",
                     "INVALID_DIGEST": "VALIDATION_ERROR",
                     "INVALID_INPUT": "VALIDATION_ERROR",
-                    "INVALID_MAX_BYTES": "VALIDATION_ERROR",
                     "INVALID_TIMESTAMP": "VALIDATION_ERROR",
                     "RESOURCE_ID_REQUIRED": "VALIDATION_ERROR",
                     "RESOLUTION_REQUIRED": "RESOLUTION_STALE",
@@ -1805,16 +1788,9 @@ class ResourceService:
                     )
                     if content is None or not content.get("relative_path"):
                         raise ArchiveFileError("deduplicated_content_missing", "去重内容缺少安全相对路径")
-                    verified = self.archive_files.verify_ready(
-                        content["relative_path"],
-                        reservation["sha256"],
-                        reservation["byte_size"],
-                    )
+                    verified = self.archive_files.verify_ready(content["relative_path"])
                     if verified != "ready":
-                        if verified == "corrupt":
-                            self.store.mark_archive_corrupt(archive_id, {"code": "CONTENT_CORRUPT"})
-                        else:
-                            self.store.mark_archive_missing(archive_id, {"code": "CONTENT_MISSING"})
+                        self.store.mark_archive_missing(archive_id, {"code": "CONTENT_MISSING"})
                         raise ArchiveFileError("deduplicated_content_unavailable", "既有去重内容不可用")
                     relative_path = str(content["relative_path"])
                     deduplicated = True
@@ -1822,10 +1798,8 @@ class ResourceService:
                     staged_relative = f".archive-staging/{archive_id}.pending"
                     staged_path = self.archive_files.absolute_for_internal_read(staged_relative)
                     if not staged_path.exists():
-                        staged = self.archive_files.stage_and_verify(
+                        staged = self.archive_files.stage(
                             source,
-                            expected_sha256=asset["sha256"],
-                            expected_size=int(asset["byte_size"]),
                             media_type=str(asset["media_type"]),
                             operation_id=archive_id,
                         )
@@ -1833,8 +1807,6 @@ class ResourceService:
                     published = self.archive_files.publish_no_replace(
                         staged_relative,
                         intended_relative_path,
-                        sha256=asset["sha256"],
-                        byte_size=int(asset["byte_size"]),
                     )
                     relative_path = published.relative_path
                     deduplicated = published.deduplicated
@@ -1880,7 +1852,7 @@ class ResourceService:
                     "unsafe_library_root",
                 }:
                     raise DomainError("POLICY_DENIED", str(exc)) from exc
-                if exc.code in {"asset_integrity_mismatch", "asset_format_mismatch"}:
+                if exc.code == "asset_format_mismatch":
                     raise DomainError("ASSET_NOT_ARCHIVABLE", str(exc)) from exc
                 raise DomainError("STORAGE_UNAVAILABLE", str(exc), retryable=True) from exc
             except OSError as exc:
@@ -1925,11 +1897,7 @@ class ResourceService:
         assets: list[dict[str, Any]] = []
         for item in page["items"]:
             if not self._archive_file_is_ready(item):
-                status = self._archive_file_status(item)
-                if status == "corrupt":
-                    self.store.mark_archive_corrupt(item["archive_id"], {"code": "CONTENT_CORRUPT"})
-                else:
-                    self.store.mark_archive_missing(item["archive_id"], {"code": "CONTENT_MISSING"})
+                self.store.mark_archive_missing(item["archive_id"], {"code": "CONTENT_MISSING"})
                 continue
             classification = dict(item["classification"])
             primary_domain = classification.get("primary_domain")
@@ -2098,11 +2066,7 @@ class ResourceService:
     def _archive_file_status(self, archive: dict[str, Any]) -> str:
         relative_path = archive.get("relative_path")
         if relative_path:
-            return self.archive_files.verify_ready(
-                str(relative_path),
-                str(archive.get("content_sha256") or archive.get("sha256")),
-                int(archive.get("content_byte_size") or archive.get("byte_size") or 0),
-            )
+            return self.archive_files.verify_ready(str(relative_path))
         return self._legacy_archive_file_status(archive)
 
     def _archive_file_is_ready(self, archive: dict[str, Any]) -> bool:
@@ -2124,21 +2088,7 @@ class ResourceService:
             return "missing"
         if not resolved.is_file():
             return "missing"
-        digest = hashlib.sha256()
-        size = 0
-        try:
-            with resolved.open("rb") as stream:
-                while True:
-                    chunk = stream.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    digest.update(chunk)
-                    size += len(chunk)
-        except OSError:
-            return "missing"
-        expected_size = int(archive.get("content_byte_size") or archive.get("byte_size") or 0)
-        expected_sha = str(archive.get("content_sha256") or archive.get("sha256") or "")
-        return "ready" if size == expected_size and digest.hexdigest() == expected_sha else "corrupt"
+        return "ready"
 
     @staticmethod
     def _path_is_within(path: Path, root: Path) -> bool:
@@ -2156,33 +2106,23 @@ class ResourceService:
         archive_id = str(item["archive_id"])
         status = str(item.get("status") or "")
         relative_path = item.get("relative_path")
-        expected_sha256 = str(item.get("sha256") or item.get("content_sha256") or "")
-        expected_size = int(
-            item.get("byte_size") or item.get("content_byte_size") or 0
-        )
         try:
             if status == "ready":
                 file_status = self._archive_file_status(item)
                 if file_status == "missing":
                     self.store.mark_archive_missing(archive_id, {"code": "CONTENT_MISSING"})
-                elif file_status == "corrupt":
-                    self.store.mark_archive_corrupt(archive_id, {"code": "CONTENT_CORRUPT"})
                 return
             if status != "pending":
                 return
             if item.get("content_status") == "ready" and relative_path:
-                if self.archive_files.verify_ready(
-                    str(relative_path), expected_sha256, expected_size
-                ) == "ready":
+                if self.archive_files.verify_ready(str(relative_path)) == "ready":
                     self.store.mark_archive_ready(
                         archive_id,
                         relative_path=str(relative_path),
                         resource_format=item.get("resource_format"),
                     )
                     return
-            if relative_path and self.archive_files.verify_ready(
-                str(relative_path), expected_sha256, expected_size
-            ) == "ready":
+            if relative_path and self.archive_files.verify_ready(str(relative_path)) == "ready":
                 self.store.mark_archive_ready(
                     archive_id,
                     relative_path=str(relative_path),
@@ -2195,8 +2135,6 @@ class ResourceService:
                 published = self.archive_files.publish_no_replace(
                     str(temporary),
                     str(relative_path),
-                    sha256=expected_sha256,
-                    byte_size=expected_size,
                 )
                 self.store.mark_archive_ready(
                     archive_id,
@@ -2380,21 +2318,10 @@ class ResourceService:
                         details={"resource_id": resource_id},
                     )
                 selected_container = representation.get("selected_container")
-                effective_max_bytes = representation.get("effective_max_bytes")
                 if not isinstance(selected_container, str) or not selected_container:
                     raise DomainError(
                         "CAPABILITY_BINDING_CONFLICT",
                         "任务执行绑定缺少已确认的容器约束",
-                        details={"resource_id": resource_id},
-                    )
-                if (
-                    not isinstance(effective_max_bytes, int)
-                    or isinstance(effective_max_bytes, bool)
-                    or effective_max_bytes < 1
-                ):
-                    raise DomainError(
-                        "CAPABILITY_BINDING_CONFLICT",
-                        "任务执行绑定缺少已确认的大小上限",
                         details={"resource_id": resource_id},
                     )
                 request = AcquisitionRequest(
@@ -2415,7 +2342,6 @@ class ResourceService:
                     eligibility_id=execution["eligibility_id"],
                     eligibility_digest=execution["eligibility_digest"],
                     preferred_container=selected_container,
-                    max_bytes=effective_max_bytes,
                     cancel_event=cancel_event,
                     jobs_root=self.settings.jobs_dir.resolve(),
                 )

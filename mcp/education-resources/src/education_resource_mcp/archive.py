@@ -9,13 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import errno
-import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
 import unicodedata
-from typing import BinaryIO
 
 from .taxonomy import domain_directory
 
@@ -64,9 +62,6 @@ class ArchiveFileError(ValueError):
 @dataclass(frozen=True, slots=True)
 class StagedFile:
     relative_path: str
-    sha256: str
-    byte_size: int
-    media_type: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,18 +229,6 @@ def validate_relative_path(value: str) -> PurePosixPath:
     return path
 
 
-def _stream_fingerprint(stream: BinaryIO) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    while True:
-        chunk = stream.read(COPY_CHUNK_BYTES)
-        if not chunk:
-            break
-        digest.update(chunk)
-        size += len(chunk)
-    return digest.hexdigest(), size
-
-
 class ArchiveFileManager:
     """Publish verified files under a non-symlink library root."""
 
@@ -290,12 +273,10 @@ class ArchiveFileManager:
             except ValueError as exc:
                 raise ArchiveFileError("path_escape", "归档父目录逃出资料库根目录") from exc
 
-    def stage_and_verify(
+    def stage(
         self,
         source: Path,
         *,
-        expected_sha256: str,
-        expected_size: int,
         media_type: str,
         operation_id: str,
     ) -> StagedFile:
@@ -310,8 +291,6 @@ class ArchiveFileManager:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         flags |= getattr(os, "O_NOFOLLOW", 0)
         fd: int | None = None
-        digest = hashlib.sha256()
-        size = 0
         header = bytearray()
         try:
             fd = os.open(destination, flags, 0o600)
@@ -324,8 +303,6 @@ class ArchiveFileManager:
                     output.write(chunk)
                     if len(header) < 64:
                         header.extend(chunk[: 64 - len(header)])
-                    digest.update(chunk)
-                    size += len(chunk)
                 output.flush()
                 os.fsync(output.fileno())
         except FileExistsError as exc:
@@ -336,88 +313,63 @@ class ArchiveFileManager:
             destination.unlink(missing_ok=True)
             raise
 
-        actual_sha256 = digest.hexdigest()
-        if size != expected_size or actual_sha256 != expected_sha256:
-            destination.unlink(missing_ok=True)
-            raise ArchiveFileError("asset_integrity_mismatch", "Asset 大小或 SHA-256 校验失败")
         if not media_signature_matches(media_type, source_path.name, bytes(header)):
             destination.unlink(missing_ok=True)
             raise ArchiveFileError("asset_format_mismatch", "Asset 媒体类型、扩展名或文件签名不一致")
-        return StagedFile(
-            relative_path=relative,
-            sha256=actual_sha256,
-            byte_size=size,
-            media_type=media_type,
-        )
+        return StagedFile(relative_path=relative)
 
     def publish_no_replace(
         self,
         staged_relative_path: str,
         intended_relative_path: str,
-        *,
-        sha256: str,
-        byte_size: int,
     ) -> PublishedFile:
         staged = self._absolute(staged_relative_path)
         if staged.parent != self.staging_root or staged.is_symlink() or not staged.is_file():
             raise ArchiveFileError("staging_missing", "归档暂存文件不存在或不安全")
         destination = self._absolute(intended_relative_path)
         self._ensure_safe_parent(destination)
-        selected = self._select_destination(destination, sha256, byte_size)
-        if selected.exists():
-            staged.unlink(missing_ok=True)
-            return PublishedFile(self._relative(selected), True)
-        try:
-            os.link(staged, selected, follow_symlinks=False)
-        except FileExistsError:
-            selected = self._select_destination(destination, sha256, byte_size)
-            if not selected.exists():
-                raise ArchiveFileError("publish_conflict", "归档目标发生并发冲突")
-            staged.unlink(missing_ok=True)
-            return PublishedFile(self._relative(selected), True)
-        except OSError as exc:
-            if exc.errno in {errno.EXDEV, errno.EPERM, errno.ENOTSUP}:
-                raise ArchiveFileError("atomic_publish_unavailable", "资料库不支持原子无覆盖发布") from exc
-            raise
+        selected: Path | None = None
+        for _ in range(100):
+            selected = self._select_destination(destination)
+            try:
+                os.link(staged, selected, follow_symlinks=False)
+                break
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                if exc.errno in {errno.EXDEV, errno.EPERM, errno.ENOTSUP}:
+                    raise ArchiveFileError("atomic_publish_unavailable", "资料库不支持原子无覆盖发布") from exc
+                raise
+        else:
+            raise ArchiveFileError("publish_conflict", "归档目标发生并发冲突")
+        assert selected is not None
         staged.unlink(missing_ok=True)
         return PublishedFile(self._relative(selected), False)
 
-    def _select_destination(self, destination: Path, sha256: str, byte_size: int) -> Path:
+    def _select_destination(self, destination: Path) -> Path:
         if not destination.exists():
             return destination
         if destination.is_symlink() or not destination.is_file():
             raise ArchiveFileError("unsafe_destination", "归档目标不是安全的普通文件")
-        if self._matches(destination, sha256, byte_size):
-            return destination
         suffix = destination.suffix
         stem = destination.name[: -len(suffix)] if suffix else destination.name
-        for width in (12, 16, 24, 64):
-            candidate = destination.with_name(f"{stem}-{sha256[:width]}{suffix}")
+        for index in range(2, 10_000):
+            candidate = destination.with_name(f"{stem}-{index}{suffix}")
             validate_relative_path(self._relative(candidate))
             if not candidate.exists():
                 return candidate
             if candidate.is_symlink() or not candidate.is_file():
                 raise ArchiveFileError("unsafe_destination", "归档冲突目标不安全")
-            if self._matches(candidate, sha256, byte_size):
-                return candidate
-        raise ArchiveFileError("hash_collision", "无法为同名不同内容生成安全文件名")
+        raise ArchiveFileError("name_conflict", "无法为同名文件生成可用归档名称")
 
-    @staticmethod
-    def _matches(path: Path, sha256: str, byte_size: int) -> bool:
-        if path.stat().st_size != byte_size:
-            return False
-        with path.open("rb") as stream:
-            actual_sha256, actual_size = _stream_fingerprint(stream)
-        return actual_size == byte_size and actual_sha256 == sha256
-
-    def verify_ready(self, relative_path: str, sha256: str, byte_size: int) -> str:
+    def verify_ready(self, relative_path: str) -> str:
         try:
             path = self._absolute(relative_path)
         except ArchiveFileError:
             return "missing"
         if not path.exists() or path.is_symlink() or not path.is_file():
             return "missing"
-        return "ready" if self._matches(path, sha256, byte_size) else "corrupt"
+        return "ready"
 
     def remove_staging(self, relative_path: str) -> None:
         path = self._absolute(relative_path)

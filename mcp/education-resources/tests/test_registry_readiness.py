@@ -24,7 +24,7 @@ from education_resource_mcp.retrieval.registry import (  # noqa: E402
 
 CATALOG = SERVICE_ROOT / "contracts" / "capabilities" / "capability-descriptors.json"
 CATALOG_SCHEMA = SERVICE_ROOT / "contracts" / "schemas" / "capability-descriptors.schema.json"
-EXPECTED_REGISTRY_DIGEST = "c54c64a024174f0b96c4bddf14c153d2a12a93de9e29344c8a76ff7ae10dbae5"
+EXPECTED_REGISTRY_DIGEST = "515ea8bab9c6e2b5ff5fee2eb7cf75804833a88c9f49f7c6d02cde693e37bc15"
 EXPECTED_CAPABILITIES = {
     "cap_generic_document_primary_direct_v1": {
         "platform_id": "generic",
@@ -32,7 +32,7 @@ EXPECTED_CAPABILITIES = {
         "provider_version": "1.0.0",
         "scope": "primary_resource",
         "strategy": "direct_file",
-        "descriptor_digest": "a30ba16bf1b70ef81cc9f31003a122d0607eb3094a92de2b3fa864725f5c2421",
+        "descriptor_digest": "01c14cb65938628e5395cdb60fbb0a54326babe9b86e36f0e5bbf94fc881c0c1",
     },
     "cap_generic_webpage_landing_materialize_v1": {
         "platform_id": "generic",
@@ -40,7 +40,7 @@ EXPECTED_CAPABILITIES = {
         "provider_version": "1.0.0",
         "scope": "landing_page",
         "strategy": "web_materialize",
-        "descriptor_digest": "50f8d3f8ede4e260110bcb148ca2abb8dd75f87e95c1be328f85a4a5c0e0cfff",
+        "descriptor_digest": "d41b2f1b14ef9e8650f40e56e4ca20f5fd944f3b2d5f43c6be296283c05cbe7f",
     },
     "cap_smartedu_document_primary_direct_v1": {
         "platform_id": "smartedu",
@@ -48,7 +48,7 @@ EXPECTED_CAPABILITIES = {
         "provider_version": "1.0.0",
         "scope": "primary_resource",
         "strategy": "direct_file",
-        "descriptor_digest": "b847a01769bf6afeec3228b6853e1cb502e4062ae19010db7fcc225b733344de",
+        "descriptor_digest": "97dfd1d8f170b5a5826383dbd7fbb1f2935c91f73c8e1e98cb5f84504a811358",
     },
 }
 

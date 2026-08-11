@@ -223,7 +223,6 @@ class JobExecutionAuthorityStorageTests(unittest.TestCase):
             str(selection["selection_digest"]),
             {
                 "strategy": "materialize",
-                "max_bytes": 2048,
                 "preferred_container": "html",
                 "allow_safe_fallback": False,
             },

@@ -31,7 +31,6 @@ class Settings:
     database_path: Path
     jobs_dir: Path
     library_dir: Path
-    max_download_bytes: int = 25 * 1024 * 1024
     search_timeout_seconds: int = 20
     download_timeout_seconds: int = 30
     max_search_results: int = 20
@@ -59,9 +58,6 @@ class Settings:
                     str(data_dir / "学习资料库"),
                 )
             ).expanduser().resolve(),
-            max_download_bytes=_positive_int(
-                "EDUCATION_RESOURCE_MCP_MAX_BYTES", 25 * 1024 * 1024
-            ),
             search_timeout_seconds=_positive_int(
                 "EDUCATION_RESOURCE_MCP_SEARCH_TIMEOUT", 20
             ),

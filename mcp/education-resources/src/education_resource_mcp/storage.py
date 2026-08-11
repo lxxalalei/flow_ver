@@ -2764,10 +2764,7 @@ class Store:
         # Capability preparation may add only these execution constraints to
         # otherwise immutable Resolution evidence.  No arbitrary enrichment is
         # accepted at the storage authority boundary.
-        if set(planned_copy) - set(observed_copy) - {
-            "selected_container",
-            "effective_max_bytes",
-        }:
+        if set(planned_copy) - set(observed_copy) - {"selected_container"}:
             raise RuntimeError("representation_drift")
 
     def save_capability_readiness_snapshot(
@@ -3199,7 +3196,6 @@ class Store:
                         "estimated_size_bytes": item["representation"].get(
                             "estimated_size_bytes"
                         ),
-                        "effective_max_bytes": options["max_bytes"],
                         "risks": [
                             {
                                 "code": "PUBLIC_NETWORK_ACCESS",

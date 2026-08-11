@@ -46,7 +46,6 @@ def _settings(data_dir: Path) -> Settings:
         database_path=data_dir / "database.sqlite",
         jobs_dir=data_dir / "jobs",
         library_dir=data_dir / "library",
-        max_download_bytes=1024 * 1024,
         max_search_results=20,
         max_workers=2,
         plan_ttl_seconds=60,
@@ -85,7 +84,6 @@ class _BundleProvider:
         resource,
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadBatchResult:
         if cancel_event.is_set():
@@ -224,7 +222,6 @@ class AssetBundleServiceTests(unittest.TestCase):
                 "required_fields": [],
                 "auth_mode": "none",
                 "network_policy": "public_http",
-                "max_bytes": 512 * 1024,
                 "max_retries": 0,
                 "requires_session": False,
             },
@@ -329,7 +326,6 @@ class AssetBundleServiceTests(unittest.TestCase):
             selection["selection_version"],
             options={
                 "preferred_container": "mp4",
-                "max_bytes_per_resource": 512 * 1024,
             },
         )
         started = service.download_start(

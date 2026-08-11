@@ -95,7 +95,6 @@ def _request(
     source_url: str,
     *,
     job_id: str = "job-web-001",
-    max_bytes: int = 8 * 1024 * 1024,
     cancel_event: threading.Event | None = None,
 ):
     return AcquisitionRequest(
@@ -120,7 +119,6 @@ def _request(
         eligibility_id="elig_web_materializer_v1",
         eligibility_digest="sha256:" + "d" * 64,
         jobs_root=root,
-        max_bytes=max_bytes,
         cancel_event=cancel_event or threading.Event(),
     )
 
@@ -257,11 +255,11 @@ class WebMaterializerGoldenTests(unittest.TestCase):
             materializer.acquire(_request(self.root, url))
         self.assertEqual(context.exception.code, "DOWNLOAD_TOO_LARGE")
 
-    def test_package_files_and_zip_are_counted_together(self) -> None:
-        url = "https://example.com/article-total-limit"
+    def test_package_files_and_zip_are_all_written_without_bundle_limit(self) -> None:
+        url = "https://example.com/article-bundle"
         fetcher = FakeFetcher({url: self._fixture("ordinary-article.html")})
         WebMaterializer(fetcher=fetcher).acquire(
-            _request(self.root, url, job_id="job-measure", max_bytes=8 * 1024 * 1024)
+            _request(self.root, url, job_id="job-measure")
         )
         measured_dir = self.root / "job-measure"
         package_size = sum(
@@ -270,15 +268,6 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         )
         total_size = package_size + (measured_dir / "webbundle.zip").stat().st_size
         self.assertGreater(total_size, package_size)
-
-        with self.assertRaises(DomainError) as context:
-            WebMaterializer(fetcher=fetcher).acquire(
-                _request(self.root, url, job_id="job-total-limit", max_bytes=total_size - 1)
-            )
-        self.assertEqual(context.exception.code, "DOWNLOAD_TOO_LARGE")
-        limited_dir = self.root / "job-total-limit"
-        self.assertFalse((limited_dir / "webbundle.zip").exists())
-        self.assertFalse((limited_dir / "index.html").exists())
 
     def test_cancellation_after_fetch_stops_before_output(self) -> None:
         url = "https://example.com/cancelled"

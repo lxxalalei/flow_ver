@@ -60,7 +60,6 @@
         "required_fields": [],
         "auth_mode": "none",
         "network_policy": "public_http",
-        "max_bytes": 5368709120,
         "max_retries": 2,
         "requires_session": false
       },
@@ -84,7 +83,7 @@
       },
       "deprecated": false,
       "notes": "Executable only when Inspection proves a concrete primary document representation and canonical source fingerprint.",
-      "descriptor_digest": "sha256:a30ba16bf1b70ef81cc9f31003a122d0607eb3094a92de2b3fa864725f5c2421"
+      "descriptor_digest": "sha256:01c14cb65938628e5395cdb60fbb0a54326babe9b86e36f0e5bbf94fc881c0c1"
     },
     {
       "descriptor_id": "cap_generic_webpage_landing_materialize_v1",
@@ -127,7 +126,6 @@
         "required_fields": [],
         "auth_mode": "none",
         "network_policy": "public_http",
-        "max_bytes": 104857600,
         "max_retries": 2,
         "requires_session": false
       },
@@ -151,7 +149,7 @@
       },
       "deprecated": false,
       "notes": "An explicit materialize action may bind this landing-page representation; it is never upgraded to a primary-resource download.",
-      "descriptor_digest": "sha256:50f8d3f8ede4e260110bcb148ca2abb8dd75f87e95c1be328f85a4a5c0e0cfff"
+      "descriptor_digest": "sha256:d41b2f1b14ef9e8650f40e56e4ca20f5fd944f3b2d5f43c6be296283c05cbe7f"
     },
     {
       "descriptor_id": "cap_smartedu_document_primary_direct_v1",
@@ -191,7 +189,6 @@
         "required_fields": [],
         "auth_mode": "optional",
         "network_policy": "platform_allowlist",
-        "max_bytes": 5368709120,
         "max_retries": 2,
         "requires_session": false
       },
@@ -215,7 +212,7 @@
       },
       "deprecated": false,
       "notes": "Executable only when SmartEdu inspection binds a concrete primary document; platform support alone is insufficient.",
-      "descriptor_digest": "sha256:b847a01769bf6afeec3228b6853e1cb502e4062ae19010db7fcc225b733344de"
+      "descriptor_digest": "sha256:97dfd1d8f170b5a5826383dbd7fbb1f2935c91f73c8e1e98cb5f84504a811358"
     }
   ]
 }

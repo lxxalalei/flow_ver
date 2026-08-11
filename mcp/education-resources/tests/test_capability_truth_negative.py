@@ -150,7 +150,7 @@ class _NeverNetworkDownloader:
     def __init__(self) -> None:
         self.calls = 0
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls += 1
         raise AssertionError("capability-truth test must not reach a network downloader")
 
@@ -161,7 +161,7 @@ class _CountingDirectProvider:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls.append((str(resource.get("platform")), str(strategy)))
         raise AssertionError("generic direct provider fallback is forbidden")
 
@@ -170,7 +170,7 @@ class _FailingPlatformProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls += 1
         raise DomainError("UPSTREAM_UNAVAILABLE", "fixture platform provider failed", retryable=True)
 
@@ -291,7 +291,6 @@ class _CapabilityTruthHarness:
             database_path=root / "database.sqlite",
             jobs_dir=root / "jobs",
             library_dir=root / "library",
-            max_download_bytes=1024 * 1024,
             max_search_results=20,
             max_workers=1,
             plan_ttl_seconds=3600,
@@ -377,7 +376,6 @@ class _CapabilityTruthHarness:
             selection_digest=str(selection["selection_digest"]),
             options={
                 "preferred_container": str(representation.get("container") or "pdf"),
-                "max_bytes_per_resource": 1024,
                 "allow_safe_fallback": True,
             },
         )
@@ -518,7 +516,6 @@ class CapabilityTruthRouterGates(unittest.TestCase):
             eligibility_id="elig_capability_truth_v1",
             eligibility_digest=_digest("router-eligibility"),
             preferred_container="pdf",
-            max_bytes=1024,
             cancel_event=threading.Event(),
             jobs_root=self.jobs_root,
         )
@@ -662,7 +659,6 @@ class CapabilityTruthPersistenceGates(_CapabilityTruthHarness, unittest.TestCase
             str(selection["selection_digest"]),
             {
                 "strategy": "direct",
-                "max_bytes": 1024,
                 "preferred_container": "pdf",
                 "allow_safe_fallback": False,
             },

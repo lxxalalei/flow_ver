@@ -1,7 +1,7 @@
 """Anna's Archive book downloader (Libgen-backed).
 
 Downloads books anonymously from Libgen mirrors. md5 identifiers match
-Anna's Archive.  Supports mirror failover, cancel, and max_bytes limits.
+Anna's Archive. Supports mirror failover and cancellation.
 """
 from __future__ import annotations
 
@@ -40,7 +40,6 @@ class AnnasArchiveDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         # Extract md5 from platform_signals or source_url
@@ -59,14 +58,12 @@ class AnnasArchiveDownloader:
 
         try:
             result = self._client.download(
-                md5, job_dir, cancel_event=cancel_event, max_bytes=max_bytes,
+                md5, job_dir, cancel_event=cancel_event,
             )
         except LibgenError as exc:
             msg = str(exc)
             if "CANCELLED" in msg:
                 raise DomainError("JOB_CANCELLED", "下载已取消") from exc
-            if "TOO_LARGE" in msg:
-                raise DomainError("DOWNLOAD_TOO_LARGE", "文件超过大小上限") from exc
             raise DomainError(
                 "DOWNLOAD_FAILED", f"Libgen 下载失败: {exc}", retryable=True
             ) from exc

@@ -371,7 +371,6 @@ class DownloadProvider(Protocol):
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult | list[DownloadResult] | DownloadBatchResult:
         """Download one or more files for *resource*.
@@ -416,7 +415,6 @@ class PublicHttpDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         url = str(resource["source_url"])
@@ -448,28 +446,15 @@ class PublicHttpDownloader:
                     validate_public_http_url(final_url)
                 except PolicyError as exc:
                     raise DomainError("REDIRECT_BLOCKED", str(exc)) from exc
-                declared = response.headers.get("Content-Length")
-                if declared and declared.isdigit() and int(declared) > max_bytes:
-                    raise DomainError(
-                        "DOWNLOAD_TOO_LARGE",
-                        "资源声明大小超过下载上限",
-                        details={"declared_bytes": int(declared), "max_bytes": max_bytes},
-                    )
                 media_type = response.headers.get_content_type() or "application/octet-stream"
                 with temporary.open("wb") as handle:
                     while True:
                         if cancel_event.is_set():
                             raise DomainError("JOB_CANCELLED", "下载已取消")
-                        chunk = response.read(min(64 * 1024, max_bytes - byte_size + 1))
+                        chunk = response.read(64 * 1024)
                         if not chunk:
                             break
                         byte_size += len(chunk)
-                        if byte_size > max_bytes:
-                            raise DomainError(
-                                "DOWNLOAD_TOO_LARGE",
-                                "资源实际大小超过下载上限",
-                                details={"max_bytes": max_bytes},
-                            )
                         digest.update(chunk)
                         handle.write(chunk)
         except DomainError:

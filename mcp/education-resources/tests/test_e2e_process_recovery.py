@@ -142,7 +142,6 @@ def prepare_and_start(
             **binding,
             "options": {
                 "preferred_container": container,
-                "max_bytes_per_resource": 512 * 1024,
             },
         },
     )

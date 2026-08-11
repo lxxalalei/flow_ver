@@ -59,7 +59,7 @@ class _DirectProvider:
         self.count = count
         self.calls: list[tuple[str, str]] = []
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls.append((resource["title"], strategy))
         job_dir = self.root / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -75,13 +75,13 @@ class _FailingProvider:
     def __init__(self) -> None:
         self.calls = 0
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls += 1
         raise DomainError("UPSTREAM_UNAVAILABLE", "platform unavailable", retryable=True)
 
 
 class _AuthProvider:
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         raise DomainError("AUTH_REQUIRED", "authentication required")
 
 
@@ -117,7 +117,7 @@ class _Materializer:
         )
         return AcquisitionResult.success(
             AcquisitionStrategy.WEB_MATERIALIZE,
-            ArtifactBundle((artifact,), request.max_bytes),
+            ArtifactBundle((artifact,)),
             metadata={
                 "provider": "untrusted",
                 "renderer": "test",
@@ -176,7 +176,7 @@ class _LegacyBrowser:
         self.root = root
         self.calls: list[str] = []
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls.append(strategy)
         job_dir = self.root / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -205,7 +205,6 @@ class AcquisitionCoreTests(unittest.TestCase):
         self,
         strategy: AcquisitionStrategy | str,
         *,
-        max_bytes: int = 1024,
         resource: dict | None = None,
         provider_id: str = "test-provider",
         provider_version: str = "1.0.0",
@@ -231,7 +230,6 @@ class AcquisitionCoreTests(unittest.TestCase):
             eligibility_id="elig_acquisition_core_v1",
             eligibility_digest="sha256:" + "d" * 64,
             preferred_container="html",
-            max_bytes=max_bytes,
             cancel_event=cancel_event or threading.Event(),
             jobs_root=self.root,
         )
@@ -300,10 +298,10 @@ class AcquisitionCoreTests(unittest.TestCase):
                 jobs_root=Path("relative-root"),
             )
 
-    def test_direct_provider_single_and_list_results_become_bounded_artifacts(self) -> None:
+    def test_direct_provider_single_and_list_results_become_artifacts(self) -> None:
         provider = _DirectProvider(self.root, count=2)
         router = AcquisitionRouter([_registration(provider)])
-        result = router.acquire(self._request("direct_file", max_bytes=1024))
+        result = router.acquire(self._request("direct_file"))
         self.assertTrue(result.ok)
         self.assertIsNotNone(result.bundle)
         assert result.bundle is not None
@@ -325,13 +323,42 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertTrue(result.to_json() == result.to_json())
         self.assertNotIn(str(self.root), result.to_json())
 
+    def test_router_records_actual_file_metadata_without_declared_integrity_gate(self) -> None:
+        payload = b"provider metadata is advisory"
+
+        class AdvisoryMetadataProvider:
+            def download(self, resource, job_id, strategy, cancel_event):
+                job_dir = self.root / job_id
+                job_dir.mkdir(parents=True, exist_ok=True)
+                path = job_dir / "advisory.bin"
+                path.write_bytes(payload)
+                return DownloadResult(
+                    path,
+                    1,
+                    "application/octet-stream",
+                    "0" * 64,
+                    path.name,
+                )
+
+            def __init__(self, root: Path) -> None:
+                self.root = root
+
+        result = AcquisitionRouter([
+            _registration(AdvisoryMetadataProvider(self.root)),
+        ]).acquire(self._request("direct_file"))
+        self.assertTrue(result.ok)
+        assert result.bundle is not None
+        artifact = result.bundle.primary
+        assert artifact is not None
+        self.assertEqual(artifact.byte_size, len(payload))
+        self.assertEqual(artifact.sha256, hashlib.sha256(payload).hexdigest())
+
     def test_cancellation_is_polled_during_direct_artifact_hashing(self) -> None:
         provider = _DirectProvider(self.root)
         cancel_event = _CancelAfterChecks(threshold=5)
         result = AcquisitionRouter([_registration(provider)]).acquire(
             self._request(
                 "direct_file",
-                max_bytes=1024,
                 cancel_event=cancel_event,
             )
         )
@@ -569,7 +596,7 @@ class AcquisitionCoreTests(unittest.TestCase):
         outside.write_text("outside", encoding="utf-8")
 
         class OutsideProvider:
-            def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+            def download(self, resource, job_id, strategy, cancel_event):
                 return _download_result(outside)
 
         result = AcquisitionRouter([
@@ -594,7 +621,7 @@ class AcquisitionCoreTests(unittest.TestCase):
             for index in range(51)
         )
         with self.assertRaises(ValueError):
-            ArtifactBundle(artifacts, 1024)
+            ArtifactBundle(artifacts)
 
 
 if __name__ == "__main__":

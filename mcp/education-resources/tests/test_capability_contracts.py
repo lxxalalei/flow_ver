@@ -61,7 +61,7 @@ EXPECTED_DESCRIPTOR_FACTS = {
             "version": "1.0.0",
             "scope": "primary_resource",
         },
-        "descriptor_digest": "sha256:a30ba16bf1b70ef81cc9f31003a122d0607eb3094a92de2b3fa864725f5c2421",
+        "descriptor_digest": "sha256:01c14cb65938628e5395cdb60fbb0a54326babe9b86e36f0e5bbf94fc881c0c1",
         "fallback": {
             "allowed": False,
             "max_scope": "primary_resource",
@@ -81,7 +81,7 @@ EXPECTED_DESCRIPTOR_FACTS = {
             "version": "1.0.0",
             "scope": "landing_page",
         },
-        "descriptor_digest": "sha256:50f8d3f8ede4e260110bcb148ca2abb8dd75f87e95c1be328f85a4a5c0e0cfff",
+        "descriptor_digest": "sha256:d41b2f1b14ef9e8650f40e56e4ca20f5fd944f3b2d5f43c6be296283c05cbe7f",
         "fallback": {
             "allowed": False,
             "max_scope": "landing_page",
@@ -101,7 +101,7 @@ EXPECTED_DESCRIPTOR_FACTS = {
             "version": "1.0.0",
             "scope": "primary_resource",
         },
-        "descriptor_digest": "sha256:b847a01769bf6afeec3228b6853e1cb502e4062ae19010db7fcc225b733344de",
+        "descriptor_digest": "sha256:97dfd1d8f170b5a5826383dbd7fbb1f2935c91f73c8e1e98cb5f84504a811358",
         "fallback": {
             "allowed": False,
             "max_scope": "primary_resource",
@@ -125,7 +125,7 @@ PRESENTATION_ID = "pres_1234567890abcdef"
 
 PRIMARY_DESCRIPTOR_ID = "cap_smartedu_document_primary_direct_v1"
 PRIMARY_DESCRIPTOR_DIGEST = (
-    "sha256:b847a01769bf6afeec3228b6853e1cb502e4062ae19010db7fcc225b733344de"
+    "sha256:97dfd1d8f170b5a5826383dbd7fbb1f2935c91f73c8e1e98cb5f84504a811358"
 )
 PRIMARY_READINESS_ID = "ready_smartedu_document_primary_direct_v1"
 PRIMARY_CAPABILITY_REF = {
@@ -351,7 +351,6 @@ def plan_item_fixture() -> dict:
         "binding_digest": "d" * 64,
         "planned_container": "pdf",
         "estimated_size_bytes": 4096,
-        "effective_max_bytes": 5 * 1024 * 1024,
         "risks": [
             {
                 "code": "PUBLIC_NETWORK_ACCESS",
@@ -371,7 +370,6 @@ def legacy_v1_4_plan_item_fixture() -> dict:
         "platform": "smartedu",
         "planned_container": "pdf",
         "estimated_size_bytes": 4096,
-        "effective_max_bytes": 5 * 1024 * 1024,
         "risks": [
             {
                 "code": "PUBLIC_NETWORK_ACCESS",

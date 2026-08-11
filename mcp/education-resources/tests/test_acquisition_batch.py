@@ -61,7 +61,7 @@ class _Provider:
         self.raw = raw
         self.calls = 0
 
-    def download(self, resource, job_id, strategy, max_bytes, cancel_event):
+    def download(self, resource, job_id, strategy, cancel_event):
         self.calls += 1
         return self.raw
 
@@ -106,7 +106,6 @@ class AcquisitionBatchTests(unittest.TestCase):
             readiness_digest="sha256:" + "c" * 64,
             eligibility_id="elig_acquisition_batch_v1",
             eligibility_digest="sha256:" + "d" * 64,
-            max_bytes=4096,
             cancel_event=cancel_event or threading.Event(),
             jobs_root=self.root,
         )
@@ -120,7 +119,7 @@ class AcquisitionBatchTests(unittest.TestCase):
             paths.append(path)
         return paths
 
-    def test_old_single_and_list_keep_five_argument_compatibility(self) -> None:
+    def test_single_and_list_download_results_are_supported(self) -> None:
         primary, attachment = self._files(["legacy.bin", "legacy-extra.bin"])
         single = AcquisitionRouter([
             _registration(_Provider(self.root, _result(primary))),

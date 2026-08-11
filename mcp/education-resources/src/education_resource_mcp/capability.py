@@ -1185,7 +1185,6 @@ class CapabilityCoordinator:
         resolution: Any,
         *,
         preferred_container: str | None = None,
-        effective_max_bytes: int | None = None,
         now: datetime | str | None = None,
         position: int = 0,
         representation_id: str | None = None,
@@ -1271,11 +1270,6 @@ class CapabilityCoordinator:
         if preferred_container is not None:
             rep = dict(rep)
             rep["selected_container"] = preferred_container
-        if effective_max_bytes is not None:
-            if isinstance(effective_max_bytes, bool) or int(effective_max_bytes) < 1:
-                raise CapabilityAuthorityError("INVALID_MAX_BYTES", "effective_max_bytes must be positive")
-            rep = dict(rep)
-            rep["effective_max_bytes"] = int(effective_max_bytes)
         representation_id = eligibility.representation_id
         item: dict[str, Any] = {
             "resource_id": resource_id,
@@ -1311,7 +1305,6 @@ class CapabilityCoordinator:
         resolutions: Iterable[Any] | Mapping[str, Any],
         *,
         preferred_container: str | None = None,
-        effective_max_bytes: int | None = None,
         now: datetime | str | None = None,
     ) -> list[dict[str, Any]]:
         resource_list = list(resources)
@@ -1332,7 +1325,6 @@ class CapabilityCoordinator:
                 resource,
                 resolution,
                 preferred_container=preferred_container,
-                effective_max_bytes=effective_max_bytes,
                 now=now,
                 position=index,
             )

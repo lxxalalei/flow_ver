@@ -53,7 +53,6 @@ class RenderingDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         if strategy != "webpage":
@@ -79,23 +78,11 @@ class RenderingDownloader:
             url,
             job_dir,
             formats=formats,
-            max_bytes=max_bytes,
             cancel_event=cancel_event,
             cookies=cookies,
         )
         if not produced:
             raise DomainError("CONTENT_VALIDATION_FAILED", "渲染没有产生任何文件")
-
-        # Defense in depth: re-check every produced file against the size cap
-        # even though the renderer already enforces it, because the produced
-        # paths are untrusted from this adapter's perspective.
-        for path, _media_type, _suffix, _desc in produced:
-            if path.stat().st_size > max_bytes:
-                raise DomainError(
-                    "DOWNLOAD_TOO_LARGE",
-                    "渲染结果超过大小上限",
-                    details={"max_bytes": max_bytes, "byte_size": path.stat().st_size},
-                )
 
         # Prefer MHTML as the primary asset; fall back to the first produced.
         primary = next(

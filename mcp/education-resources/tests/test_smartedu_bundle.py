@@ -29,7 +29,6 @@ def _settings(root: Path) -> Settings:
         database_path=root / "database.sqlite",
         jobs_dir=root / "jobs",
         library_dir=root / "library",
-        max_download_bytes=1024 * 1024,
         max_search_results=20,
         max_workers=2,
         plan_ttl_seconds=60,
@@ -184,7 +183,7 @@ class SmartEduBundleTests(unittest.TestCase):
                 return _Response(audio or [])
             return _Response(detail)
 
-        def fake_stream(url, destination, event, max_bytes, token):  # type: ignore[no-untyped-def]
+        def fake_stream(url, destination, event, token):  # type: ignore[no-untyped-def]
             fmt = Path(destination).suffix.lstrip(".")
             if fmt in stream_failure_formats:
                 raise DomainError(
@@ -231,7 +230,6 @@ class SmartEduBundleTests(unittest.TestCase):
                 },
                 "job-1",
                 "direct",
-                1024,
                 cancel_event,
             )
 

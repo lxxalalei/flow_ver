@@ -58,7 +58,6 @@ _FIXTURE_PREREQUISITES = {
     "required_fields": [],
     "auth_mode": "none",
     "network_policy": "public_http",
-    "max_bytes": 512 * 1024,
     "max_retries": 0,
     "requires_session": False,
 }
@@ -332,7 +331,6 @@ class FixtureDownloader:
         resource: dict,
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult | DownloadBatchResult:
         kind = str((resource.get("metadata") or {}).get("fixture_kind") or "video")

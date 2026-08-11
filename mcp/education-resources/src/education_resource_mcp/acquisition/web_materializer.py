@@ -43,7 +43,6 @@ MAX_HTML_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_COUNT = 32
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024
-MAX_BUNDLE_BYTES = 16 * 1024 * 1024
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _HTTP_SCHEMES = frozenset({"http", "https"})
@@ -68,7 +67,6 @@ class MaterializerConfig:
     max_images: int | None = None
     max_image_bytes: int = MAX_IMAGE_BYTES
     max_total_image_bytes: int = MAX_TOTAL_IMAGE_BYTES
-    max_bundle_bytes: int = MAX_BUNDLE_BYTES
     max_dom_nodes: int = 50_000
     max_dom_depth: int = 128
     max_text_chars: int = 1_000_000
@@ -83,7 +81,6 @@ class MaterializerConfig:
             "max_html_bytes",
             "max_image_bytes",
             "max_total_image_bytes",
-            "max_bundle_bytes",
             "max_dom_nodes",
             "max_dom_depth",
             "max_text_chars",
@@ -161,14 +158,6 @@ def _make_config(config: Any, settings: Any) -> MaterializerConfig:
                 settings,
                 ("max_total_image_bytes", "web_max_total_image_bytes"),
                 MAX_TOTAL_IMAGE_BYTES,
-            )
-        ),
-        max_bundle_bytes=int(
-            _config_value(
-                config,
-                settings,
-                ("max_bundle_bytes", "web_max_bundle_bytes"),
-                MAX_BUNDLE_BYTES,
             )
         ),
         max_dom_nodes=int(
@@ -560,18 +549,15 @@ class WebMaterializer:
         resource = request.mutable_resource()
         source_url = resource.get("source_url")
         source_url = _safe_http_url(source_url, label="资源来源")
-        request_max_int = request.max_bytes
-        bundle_limit = min(request_max_int, self.config.max_bundle_bytes)
-
         page_response_raw = self._fetch_html(
             source_url,
-            max_bytes=min(self.config.max_html_bytes, request_max_int),
+            max_bytes=self.config.max_html_bytes,
             cancel_event=cancel_event,
         )
         page_response = _response_view(
             page_response_raw,
             source_url,
-            min(self.config.max_html_bytes, request_max_int),
+            self.config.max_html_bytes,
         )
         if page_response.status in {401, 403}:
             raise DomainError("AUTH_REQUIRED", "网页需要授权才能物化")
@@ -584,7 +570,7 @@ class WebMaterializer:
         page_origin = _origin(page_response.url)
         resource_title = resource.get("title") or ""
         limits = BlockLimits(
-            max_html_bytes=min(self.config.max_html_bytes, request_max_int),
+            max_html_bytes=self.config.max_html_bytes,
             max_dom_nodes=self.config.max_dom_nodes,
             max_depth=self.config.max_dom_depth,
             max_text_chars=self.config.max_text_chars,
@@ -716,26 +702,7 @@ class WebMaterializer:
         }
         for relative_path, asset in image_assets.items():
             package_files[relative_path] = asset.data
-        package_size = sum(len(data) for data in package_files.values())
-        if package_size > bundle_limit:
-            self._cleanup(job_dir, package_files.keys())
-            raise DomainError(
-                "DOWNLOAD_TOO_LARGE",
-                "网页物化结果超过任务大小上限",
-                details={"max_bytes": bundle_limit, "byte_size": package_size},
-            )
-
         zip_data = _zip_bytes(package_files, cancel_event=cancel_event)
-        total_artifact_bytes = package_size + len(zip_data)
-        if total_artifact_bytes > bundle_limit:
-            self._cleanup(job_dir, package_files.keys())
-            (job_dir / "webbundle.zip").unlink(missing_ok=True)
-            raise DomainError(
-                "DOWNLOAD_TOO_LARGE",
-                "网页物化资产与 ZIP 总大小超过任务上限",
-                details={"max_bytes": bundle_limit, "byte_size": total_artifact_bytes},
-            )
-
         zip_path = ensure_within_root(job_dir / "webbundle.zip", job_dir)
         try:
             for relative_path, data in package_files.items():
@@ -776,7 +743,7 @@ class WebMaterializer:
         except Exception:
             self._cleanup(job_dir, (*package_files.keys(), "webbundle.zip"))
             raise
-        bundle = ArtifactBundle(tuple(artifacts), max_bytes=request.max_bytes)
+        bundle = ArtifactBundle(tuple(artifacts))
         return AcquisitionResult.success(
             AcquisitionStrategy.WEB_MATERIALIZE,
             bundle,
@@ -796,7 +763,6 @@ class WebMaterializer:
 
 
 __all__ = [
-    "MAX_BUNDLE_BYTES",
     "MAX_HTML_BYTES",
     "MAX_IMAGE_BYTES",
     "MAX_IMAGE_COUNT",

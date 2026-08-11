@@ -41,7 +41,6 @@ class DirectProvider(Protocol):
         resource: Mapping[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult | list[DownloadResult] | DownloadBatchResult:
         ...
@@ -63,7 +62,6 @@ class BrowserCapture(Protocol):
         resource: Mapping[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult | list[DownloadResult] | DownloadBatchResult:
         ...
@@ -71,7 +69,6 @@ class BrowserCapture(Protocol):
 
 _PROVIDER_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _COMPONENT_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]{0,63}$")
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REDACTED_DETAIL_KEYS = {
     "path",
     "file",
@@ -458,7 +455,6 @@ class AcquisitionRouter:
                 request.mutable_resource(),
                 request.job_id,
                 provider_strategy,
-                request.max_bytes,
                 request.cancel_event,
             )
             self._raise_if_cancelled(request.cancel_event)
@@ -622,15 +618,7 @@ class AcquisitionRouter:
             self._raise_if_cancelled(request.cancel_event)
             path = self._checked_path(result.path, request.jobs_root)
             actual_size = path.stat().st_size
-            if actual_size != result.byte_size:
-                raise ValueError("download result byte_size does not match the file")
-            if actual_size > request.max_bytes:
-                raise ValueError("artifact exceeds max_bytes")
-            digest = self._sha256(path, request.max_bytes, request.cancel_event)
-            if not isinstance(result.sha256, str) or not _SHA256.fullmatch(result.sha256.lower()):
-                raise ValueError("download result sha256 is invalid")
-            if digest != result.sha256.lower():
-                raise ValueError("download result sha256 does not match the file")
+            digest = self._sha256(path, request.cancel_event)
             filename = result.filename or path.name
             role = roles[index]
             required = bool(result.required)
@@ -651,7 +639,7 @@ class AcquisitionRouter:
                     item_key=item_keys[index],
                 )
             )
-        return ArtifactBundle(tuple(artifacts), request.max_bytes)
+        return ArtifactBundle(tuple(artifacts))
 
     def _validate_bundle(
         self, request: AcquisitionRequest, bundle: ArtifactBundle
@@ -659,18 +647,11 @@ class AcquisitionRouter:
         if len(bundle.artifacts) > MAX_ARTIFACTS:
             raise ValueError("provider returned too many artifacts")
         validated: list[Artifact] = []
-        total = 0
         for item in bundle.artifacts:
             self._raise_if_cancelled(request.cancel_event)
             path = self._checked_path(item.path, request.jobs_root)
             actual_size = path.stat().st_size
-            if actual_size != item.byte_size:
-                raise ValueError("artifact byte_size does not match the file")
-            if actual_size > request.max_bytes:
-                raise ValueError("artifact exceeds max_bytes")
-            digest = self._sha256(path, request.max_bytes, request.cancel_event)
-            if digest != item.sha256:
-                raise ValueError("artifact sha256 does not match the file")
+            digest = self._sha256(path, request.cancel_event)
             validated.append(
                 Artifact(
                     artifact_id=item.artifact_id,
@@ -686,10 +667,7 @@ class AcquisitionRouter:
                     item_key=item.item_key,
                 )
             )
-            total += actual_size
-        if total > request.max_bytes:
-            raise ValueError("bundle exceeds max_bytes")
-        return ArtifactBundle(tuple(validated), request.max_bytes)
+        return ArtifactBundle(tuple(validated))
 
     @classmethod
     def _normalise_download_envelope(
@@ -827,20 +805,15 @@ class AcquisitionRouter:
     def _sha256(
         cls,
         path: Path,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> str:
         digest = hashlib.sha256()
-        total = 0
         with path.open("rb") as handle:
             while True:
                 cls._raise_if_cancelled(cancel_event)
                 chunk = handle.read(64 * 1024)
                 if not chunk:
                     break
-                total += len(chunk)
-                if total > max_bytes:
-                    raise ValueError("artifact exceeds max_bytes")
                 digest.update(chunk)
         return digest.hexdigest()
 

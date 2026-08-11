@@ -53,12 +53,9 @@ class FixedContentDownloader:
         resource: dict,
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         del strategy, cancel_event
-        if len(self.payload) > max_bytes:
-            raise DomainError("DOWNLOAD_TOO_LARGE", "too large")
         directory = self.jobs_dir / job_id
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{resource['resource_id']}{self.extension}"
@@ -113,7 +110,7 @@ class OfflineGenericInspector:
 
 
 class FailingStageManager(ArchiveFileManager):
-    def stage_and_verify(self, *args, **kwargs):
+    def stage(self, *args, **kwargs):
         raise ArchiveFileError("copy_failed", "injected copy failure")
 
 
@@ -122,11 +119,11 @@ class FailOnceStageManager(ArchiveFileManager):
         super().__init__(root)
         self.failed = False
 
-    def stage_and_verify(self, *args, **kwargs):
+    def stage(self, *args, **kwargs):
         if not self.failed:
             self.failed = True
             raise ArchiveFileError("copy_failed", "injected one-time failure")
-        return super().stage_and_verify(*args, **kwargs)
+        return super().stage(*args, **kwargs)
 
 
 class FailReadyOnceStore(Store):
@@ -150,7 +147,6 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             database_path=data_dir / "database.sqlite",
             jobs_dir=data_dir / "jobs",
             library_dir=data_dir / "学习资料库",
-            max_download_bytes=1024 * 1024,
             max_search_results=20,
             max_workers=2,
             plan_ttl_seconds=60,
@@ -614,7 +610,6 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             database_path=self.settings.database_path,
             jobs_dir=self.settings.jobs_dir,
             library_dir=self.settings.library_dir,
-            max_download_bytes=self.settings.max_download_bytes,
             max_search_results=self.settings.max_search_results,
             max_workers=1,
             plan_ttl_seconds=60,

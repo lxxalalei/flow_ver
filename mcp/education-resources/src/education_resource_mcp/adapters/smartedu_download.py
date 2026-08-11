@@ -558,7 +558,6 @@ def _safe_error_message(code: str) -> str:
         "REDIRECT_BLOCKED": "重定向被策略阻止",
         "JOB_CANCELLED": "下载已取消",
         "CANCELLED": "下载已取消",
-        "DOWNLOAD_TOO_LARGE": "文件超过大小上限",
         "CONTENT_VALIDATION_FAILED": "下载内容未通过校验",
         "RELATION_AUDIO_LOOKUP_FAILED": "伴随音频查询失败",
     }
@@ -737,7 +736,7 @@ def _smartedu_headers(token: str = "") -> dict[str, str]:
 
 
 def _stream_download(
-    url: str, dest: Path, cancel_event: threading.Event, max_bytes: int,
+    url: str, dest: Path, cancel_event: threading.Event,
     token: str = "",
 ) -> int:
     """Download a direct file (PDF, MP3, etc.).
@@ -751,12 +750,10 @@ def _stream_download(
             while True:
                 if cancel_event.is_set():
                     raise DomainError("JOB_CANCELLED", "下载已取消")
-                chunk = response.read(min(64 * 1024, max_bytes - written + 1))
+                chunk = response.read(64 * 1024)
                 if not chunk:
                     break
                 written += len(chunk)
-                if written > max_bytes:
-                    raise DomainError("DOWNLOAD_TOO_LARGE", "文件超过大小上限")
                 f.write(chunk)
     return written
 
@@ -911,7 +908,6 @@ class SmartEduDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadReturn:
         if cancel_event.is_set():
@@ -1065,7 +1061,7 @@ class SmartEduDownloader:
                     media_type = "video/mp4"
                 else:
                     _stream_download(
-                        str(candidate["url"]), destination, cancel_event, max_bytes, token
+                        str(candidate["url"]), destination, cancel_event, token
                     )
                     media_type = {
                         "pdf": "application/pdf",
@@ -1082,8 +1078,6 @@ class SmartEduDownloader:
                 byte_size = destination.stat().st_size
                 if byte_size <= 0:
                     raise DomainError("CONTENT_VALIDATION_FAILED", "下载内容为空")
-                if byte_size > max_bytes:
-                    raise DomainError("DOWNLOAD_TOO_LARGE", "文件超过大小上限")
                 digest = hashlib.sha256()
                 with destination.open("rb") as handle:
                     for chunk in iter(lambda: handle.read(64 * 1024), b""):

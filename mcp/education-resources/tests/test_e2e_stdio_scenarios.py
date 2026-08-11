@@ -49,7 +49,6 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         **binding,
                         "options": {
                             "preferred_container": "mp4",
-                            "max_bytes_per_resource": 512 * 1024,
                         },
                     },
                 )
@@ -147,7 +146,6 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         "selection_digest": selection["selection_digest"],
                         "options": {
                             "preferred_container": "pdf",
-                            "max_bytes_per_resource": 512 * 1024,
                         },
                     },
                 )
@@ -322,7 +320,6 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         **binding,
                         "options": {
                             "preferred_container": "mp4",
-                            "max_bytes_per_resource": 512 * 1024,
                         },
                     },
                 )
@@ -467,7 +464,6 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         **binding,
                         "options": {
                             "preferred_container": "html",
-                            "max_bytes_per_resource": 512 * 1024,
                         },
                     },
                 )

@@ -313,7 +313,6 @@ class XimalayaDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         url = str(resource["source_url"])
@@ -368,12 +367,10 @@ class XimalayaDownloader:
                     while True:
                         if cancel_event.is_set():
                             raise DomainError("JOB_CANCELLED", "下载已取消")
-                        chunk = response.read(min(64 * 1024, max_bytes - byte_size + 1))
+                        chunk = response.read(64 * 1024)
                         if not chunk:
                             break
                         byte_size += len(chunk)
-                        if byte_size > max_bytes:
-                            raise DomainError("DOWNLOAD_TOO_LARGE", "音频超过大小上限", details={"max_bytes": max_bytes})
                         digest.update(chunk)
                         handle.write(chunk)
         except DomainError:

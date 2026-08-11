@@ -1,4 +1,4 @@
-"""Bounded inspection of public generic HTTP resources.
+"""Preview-based inspection of public generic HTTP resources.
 
 This adapter intentionally keeps the network boundary private.  It follows
 only a small, explicitly bounded redirect chain, validates every URL with the
@@ -32,8 +32,7 @@ from ..policy import Resolver, PolicyViolation, system_resolver, validate_public
 
 
 INSPECTOR_ID = "generic"
-MAX_BYTES = 1024 * 1024
-INSPECTION_MAX_BYTES = MAX_BYTES
+INSPECTION_MAX_BYTES = 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_REDIRECTS = 5
 READ_CHUNK_SIZE = 64 * 1024
@@ -470,7 +469,7 @@ def _resource_id(resource: Mapping[str, Any]) -> str | None:
 
 
 class GenericWebInspector:
-    """Inspect one public HTTP resource with a bounded synchronous GET."""
+    """Inspect one public HTTP resource from a bounded in-memory preview."""
 
     platform_id = "generic"
     inspector_id = INSPECTOR_ID
@@ -486,7 +485,6 @@ class GenericWebInspector:
         transport: Callable[..., Any] | None = None,
         opener: Any | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
-        max_bytes: int = MAX_BYTES,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
         *,
         timeout_seconds: float | None = None,
@@ -498,13 +496,10 @@ class GenericWebInspector:
             raise ValueError("timeout must be numeric")
         if effective_timeout <= 0:
             raise ValueError("timeout must be positive")
-        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
-            raise ValueError("max_bytes must be a positive integer")
         if isinstance(max_redirects, bool) or not isinstance(max_redirects, int) or max_redirects < 0:
             raise ValueError("max_redirects must be non-negative")
         self.resolver = resolver or system_resolver
         self.timeout = float(effective_timeout)
-        self.max_bytes = min(max_bytes, MAX_BYTES)
         self.max_redirects = max_redirects
         self.transport = transport
         self.opener = opener or build_opener(_NoRedirectHandler())
@@ -678,39 +673,22 @@ class GenericWebInspector:
             warnings=warnings,
         )
 
-    def _read_bounded(self, response: Any) -> tuple[bytes | None, dict[str, Any] | None]:
+    def _read_preview(
+        self,
+        response: Any,
+    ) -> tuple[bytes | None, dict[str, Any] | None, int | None]:
         declared = _header(response, "Content-Length")
         declared_size: int | None = None
-        declared_error: dict[str, Any] | None = None
         if declared is not None:
             candidate = declared.strip()
-            if re.fullmatch(r"\d+", candidate) is None:
-                declared_error = {
-                    "code": "CONTENT_VALIDATION_FAILED",
-                    "message": "响应大小声明无效",
-                    "retriable": False,
-                }
-            else:
-                try:
-                    declared_size = int(candidate)
-                except ValueError:
-                    declared_error = {
-                        "code": "CONTENT_VALIDATION_FAILED",
-                        "message": "响应大小声明无效",
-                        "retriable": False,
-                    }
-                if declared_size is not None and declared_size > self.max_bytes:
-                    return None, {
-                        "code": "DOWNLOAD_TOO_LARGE",
-                        "message": "资源声明大小超过检查上限",
-                        "retriable": False,
-                    }
+            if re.fullmatch(r"\d+", candidate) is not None:
+                declared_size = int(candidate)
 
         chunks: list[bytes] = []
         total = 0
         try:
-            while True:
-                amount = min(READ_CHUNK_SIZE, self.max_bytes - total + 1)
+            while total < INSPECTION_MAX_BYTES:
+                amount = min(READ_CHUNK_SIZE, INSPECTION_MAX_BYTES - total)
                 chunk = response.read(amount)
                 if chunk is None or chunk == b"":
                     break
@@ -719,37 +697,32 @@ class GenericWebInspector:
                         "code": "CONTENT_VALIDATION_FAILED",
                         "message": "响应内容格式无效",
                         "retriable": False,
-                    }
-                if len(chunk) > self.max_bytes - total:
-                    return None, {
-                        "code": "DOWNLOAD_TOO_LARGE",
-                        "message": "资源实际大小超过检查上限",
-                        "retriable": False,
-                    }
-                chunk_bytes = bytes(chunk)
+                    }, None
+                chunk_bytes = bytes(chunk[:amount])
                 total += len(chunk_bytes)
                 chunks.append(chunk_bytes)
+                if len(chunk) > amount:
+                    break
         except Exception as exc:
             if _is_timeout(exc):
                 return None, {
                     "code": "PARTIAL_FAILURE",
                     "message": "检查请求超时",
                     "retriable": True,
-                }
+                }, None
             return None, {
                 "code": "PARTIAL_FAILURE",
                 "message": "检查请求失败",
                 "retriable": True,
-            }
+            }, None
 
-        result_error = declared_error
-        if declared_size is not None and declared_size != total:
-            result_error = {
-                "code": "CONTENT_VALIDATION_FAILED",
-                "message": "响应大小声明与实际内容不一致",
-                "retriable": False,
-            }
-        return b"".join(chunks), result_error
+        # Content-Length is advisory metadata only.  Large resources are
+        # classified from the preview and continue to the streaming download
+        # path instead of being rejected during inspection.
+        observed_size = declared_size
+        if observed_size is None and total < INSPECTION_MAX_BYTES:
+            observed_size = total
+        return b"".join(chunks), None, observed_size
 
     def inspect(self, resource: Mapping[str, Any]) -> InspectionResult:
         try:
@@ -906,7 +879,7 @@ class GenericWebInspector:
                     False,
                 )
 
-            body, read_error = self._read_bounded(response)
+            body, read_error, observed_size = self._read_preview(response)
             if body is None:
                 assert read_error is not None
                 return self._error_result(
@@ -1027,7 +1000,7 @@ class GenericWebInspector:
                 "scope": scope,
                 "role": role,
                 "technical_availability": technical_availability,
-                "size_bytes": len(body),
+                "size_bytes": observed_size,
                 "materializable": materializable,
             }
             if language:
@@ -1076,5 +1049,4 @@ __all__ = [
     "GenericWebInspector",
     "INSPECTION_MAX_BYTES",
     "INSPECTOR_ID",
-    "MAX_BYTES",
 ]

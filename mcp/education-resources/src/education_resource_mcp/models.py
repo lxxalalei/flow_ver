@@ -146,9 +146,6 @@ class DownloadOptions(StrictModel):
     preferred_container: Literal[
         "original", "pdf", "epub", "mp4", "mp3", "html", "text"
     ] = "html"
-    max_bytes_per_resource: int | None = Field(
-        default=None, ge=1, le=5_368_709_120
-    )
     allow_safe_fallback: bool = True
 
 

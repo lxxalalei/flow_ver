@@ -648,7 +648,6 @@ class AnnasArchiveDownloaderTests(unittest.TestCase):
             with patch.object(dl._client, "download", return_value=fake):
                 result = dl.download(
                     self._resource(), "job1", "direct",
-                    max_bytes=10 * 1024 * 1024,
                     cancel_event=threading.Event(),
                 )
         self.assertEqual(result.media_type, "application/pdf")
@@ -672,7 +671,7 @@ class AnnasArchiveDownloaderTests(unittest.TestCase):
             resource = {"source_url": "https://anns-archive.gl/md5/bbcd1234567890abcdef1234567890ab",
                         "title": "Book", "metadata": {}}
             with patch.object(dl._client, "download", return_value=fake):
-                result = dl.download(resource, "job1", "direct", 10*1024*1024, threading.Event())
+                result = dl.download(resource, "job1", "direct", threading.Event())
         self.assertEqual(result.media_type, "application/epub+zip")
 
     def test_download_no_md5_raises(self) -> None:
@@ -683,7 +682,7 @@ class AnnasArchiveDownloaderTests(unittest.TestCase):
                 dl.download(
                     {"source_url": "https://example.com/no-md5-here",
                      "title": "X", "metadata": {}},
-                    "job1", "direct", 10*1024*1024, threading.Event(),
+                    "job1", "direct", threading.Event(),
                 )
             self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
 
@@ -695,16 +694,16 @@ class AnnasArchiveDownloaderTests(unittest.TestCase):
                               side_effect=LibgenError("JOB_CANCELLED")):
                 with self.assertRaises(DomainError) as ctx:
                     dl.download(self._resource(), "job1", "direct",
-                                10*1024*1024, threading.Event())
+                                threading.Event())
             self.assertEqual(ctx.exception.code, "JOB_CANCELLED")
 
-    def test_download_too_large(self) -> None:
-        """LibgenError(DOWNLOAD_TOO_LARGE) → DomainError(DOWNLOAD_TOO_LARGE)."""
+    def test_download_failure_is_mapped(self) -> None:
+        """Libgen failures remain structured download failures."""
         with tempfile.TemporaryDirectory() as d:
             dl = self._downloader(Path(d))
             with patch.object(dl._client, "download",
-                              side_effect=LibgenError("DOWNLOAD_TOO_LARGE")):
+                              side_effect=LibgenError("mirror failed")):
                 with self.assertRaises(DomainError) as ctx:
                     dl.download(self._resource(), "job1", "direct",
-                                10*1024*1024, threading.Event())
-            self.assertEqual(ctx.exception.code, "DOWNLOAD_TOO_LARGE")
+                                threading.Event())
+            self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")

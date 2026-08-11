@@ -42,7 +42,6 @@ def _settings(data_dir: Path) -> Settings:
         database_path=data_dir / "database.sqlite",
         jobs_dir=data_dir / "jobs",
         library_dir=data_dir / "library",
-        max_download_bytes=1024 * 1024,
         max_search_results=20,
         max_workers=2,
         plan_ttl_seconds=60,
@@ -103,12 +102,11 @@ class FakeRenderer:
         self.produced = produced
         self.calls: list[dict] = []
 
-    def render(self, url, job_dir, *, formats, max_bytes, cancel_event, cookies=""):
+    def render(self, url, job_dir, *, formats, cancel_event, cookies=""):
         self.calls.append({
             "url": url,
             "job_dir": job_dir,
             "formats": formats,
-            "max_bytes": max_bytes,
             "cookies": cookies,
         })
         if self.produced is None:
@@ -128,7 +126,7 @@ class RenderingDownloaderTests(unittest.TestCase):
         base = {
             "resource_id": "res_1",
             "title": "天文知识页",
-            "source_url": "https://example.com/article",
+            "source_url": "https://93.184.216.34/article",
             "platform": "generic",
         }
         base.update(overrides)
@@ -143,7 +141,7 @@ class RenderingDownloaderTests(unittest.TestCase):
         downloader = RenderingDownloader(self.settings, renderer=renderer)  # type: ignore[arg-type]
 
         result = downloader.download(
-            self._resource(), "job_1", "webpage", 1024 * 1024, threading.Event()
+            self._resource(), "job_1", "webpage", threading.Event()
         )
         self.assertIsInstance(result, DownloadResult)
         self.assertEqual(result.filename, "天文知识页.mhtml")
@@ -152,7 +150,7 @@ class RenderingDownloaderTests(unittest.TestCase):
         self.assertEqual(result.sha256, hashlib.sha256(_mhtml_bytes()).hexdigest())
         call = renderer.calls[0]
         self.assertEqual(call["formats"], {"mhtml"})
-        self.assertEqual(call["url"], "https://example.com/article")
+        self.assertEqual(call["url"], "https://93.184.216.34/article")
 
     def test_preferred_container_pdf_adds_pdf(self) -> None:
         job_dir = self.settings.jobs_dir / "job_2"
@@ -164,7 +162,7 @@ class RenderingDownloaderTests(unittest.TestCase):
 
         downloader.download(
             self._resource(preferred_container="pdf"),
-            "job_2", "webpage", 1024 * 1024, threading.Event(),
+            "job_2", "webpage", threading.Event(),
         )
         self.assertEqual(renderer.calls[0]["formats"], {"mhtml", "pdf"})
 
@@ -172,7 +170,7 @@ class RenderingDownloaderTests(unittest.TestCase):
         renderer = FakeRenderer()
         downloader = RenderingDownloader(self.settings, renderer=renderer)  # type: ignore[arg-type]
         with self.assertRaises(DomainError) as ctx:
-            downloader.download(self._resource(), "job_3", "direct", 1024, threading.Event())
+            downloader.download(self._resource(), "job_3", "direct", threading.Event())
         self.assertEqual(ctx.exception.code, "INVALID_ARGUMENT")
 
     def test_ssrf_blocked(self) -> None:
@@ -181,23 +179,22 @@ class RenderingDownloaderTests(unittest.TestCase):
         with self.assertRaises(DomainError) as ctx:
             downloader.download(
                 self._resource(source_url="http://127.0.0.1:8080/private"),
-                "job_4", "webpage", 1024, threading.Event(),
+                "job_4", "webpage", threading.Event(),
             )
         self.assertEqual(ctx.exception.code, "NETWORK_BLOCKED")
         self.assertEqual(renderer.calls, [])
 
-    def test_oversize_rejected(self) -> None:
+    def test_rendered_file_has_no_size_gate(self) -> None:
         job_dir = self.settings.jobs_dir / "job_5"
         job_dir.mkdir(parents=True, exist_ok=True)
         page = job_dir / "page.mhtml"
         page.write_bytes(b"x" * 10)
         renderer = FakeRenderer(produced=[(page, "multipart/related", ".mhtml", "rendered mhtml")])
         downloader = RenderingDownloader(self.settings, renderer=renderer)  # type: ignore[arg-type]
-        # max_bytes smaller than the produced file -> the downloader checks size.
-        with self.assertRaises(DomainError):
-            downloader.download(
-                self._resource(), "job_5", "webpage", 5, threading.Event()
-            )
+        result = downloader.download(
+            self._resource(), "job_5", "webpage", threading.Event()
+        )
+        self.assertEqual(result.byte_size, 10)
 
     def test_cookies_forwarded_from_session_store(self) -> None:
         job_dir = self.settings.jobs_dir / "job_6"
@@ -213,7 +210,7 @@ class RenderingDownloaderTests(unittest.TestCase):
             self.settings, session_store=session_store, renderer=renderer  # type: ignore[arg-type]
         )
         downloader.download(
-            self._resource(platform="bilibili"), "job_6", "webpage", 1024 * 1024,
+            self._resource(platform="bilibili"), "job_6", "webpage",
             threading.Event(),
         )
         self.assertEqual(renderer.calls[0]["cookies"], "sid=abc")
@@ -223,7 +220,7 @@ class RenderingDownloaderTests(unittest.TestCase):
         downloader = RenderingDownloader(self.settings, renderer=renderer)  # type: ignore[arg-type]
         with self.assertRaises(DomainError) as ctx:
             downloader.download(
-                self._resource(), "job_7", "webpage", 1024 * 1024, threading.Event()
+                self._resource(), "job_7", "webpage", threading.Event()
             )
         self.assertEqual(ctx.exception.code, "CONTENT_VALIDATION_FAILED")
 
@@ -242,7 +239,7 @@ class CDPRendererErrorPathTests(unittest.TestCase):
         with self.assertRaises(DomainError) as ctx:
             renderer.render(
                 "https://example.com/", self.job_dir,
-                formats=set(), max_bytes=1024, cancel_event=threading.Event(),
+                formats=set(), cancel_event=threading.Event(),
             )
         self.assertEqual(ctx.exception.code, "INVALID_ARGUMENT")
 
@@ -251,7 +248,7 @@ class CDPRendererErrorPathTests(unittest.TestCase):
         with self.assertRaises(DomainError) as ctx:
             renderer.render(
                 "https://example.com/", self.job_dir,
-                formats={"mhtml"}, max_bytes=1024 * 1024,
+                formats={"mhtml"},
                 cancel_event=threading.Event(),
             )
         self.assertEqual(ctx.exception.code, "RENDER_BROWSER_FAILED")
@@ -285,7 +282,7 @@ class ServiceRoutingTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.called = False
 
-            def render(self, url, job_dir, *, formats, max_bytes, cancel_event, cookies=""):
+            def render(self, url, job_dir, *, formats, cancel_event, cookies=""):
                 self.called = True
                 job_dir = Path(job_dir)
                 job_dir.mkdir(parents=True, exist_ok=True)
@@ -320,7 +317,7 @@ class ServiceRoutingTests(unittest.TestCase):
                 )
                 return AcquisitionResult.success(
                     AcquisitionStrategy.WEB_MATERIALIZE,
-                    ArtifactBundle((artifact,), request.max_bytes),
+                    ArtifactBundle((artifact,)),
                 )
 
         static = StaticMaterializer()
@@ -379,7 +376,7 @@ class ServiceRoutingTests(unittest.TestCase):
             flow["flow_id"],
             "prepare-routing-000001",
             selection["selection_version"],
-            options={"preferred_container": "html", "max_bytes_per_resource": 4096},
+            options={"preferred_container": "html"},
         )
         started = service.download_start(
             flow["flow_id"], plan["plan_id"], plan["confirmation_token"],

@@ -74,14 +74,14 @@ def _extract_video_url(aweme_detail: dict[str, Any]) -> str:
 
 def _stream_download(
     url: str, dest: Path, cookie: str,
-    cancel_event: threading.Event, max_bytes: int,
+    cancel_event: threading.Event,
     max_retries: int = 3,
 ) -> int:
     """Stream-download with automatic retry on transient network errors.
 
     Retries up to *max_retries* times with exponential backoff (1s, 2s).
     Partial files are deleted before each retry.  Business exceptions
-    (JOB_CANCELLED, DOWNLOAD_TOO_LARGE) propagate immediately without retry.
+    JOB_CANCELLED propagates immediately without retry.
     """
     import time
     last_exc: Exception | None = None
@@ -99,12 +99,10 @@ def _stream_download(
                     while True:
                         if cancel_event.is_set():
                             raise DomainError("JOB_CANCELLED", "下载已取消")
-                        chunk = response.read(min(64 * 1024, max_bytes - written + 1))
+                        chunk = response.read(64 * 1024)
                         if not chunk:
                             break
                         written += len(chunk)
-                        if written > max_bytes:
-                            raise DomainError("DOWNLOAD_TOO_LARGE", "视频超过大小上限")
                         f.write(chunk)
             return written
         except DomainError:
@@ -141,7 +139,6 @@ class DouyinDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         url = str(resource["source_url"])
@@ -187,7 +184,7 @@ class DouyinDownloader:
 
         tmp = output.with_suffix(".tmp")
         try:
-            byte_size = _stream_download(video_url, tmp, cookie, cancel_event, max_bytes)
+            byte_size = _stream_download(video_url, tmp, cookie, cancel_event)
             tmp.rename(output)
         except DomainError:
             tmp.unlink(missing_ok=True)

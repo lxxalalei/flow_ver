@@ -49,7 +49,7 @@ def _request_json(url: str, cookie: str = "") -> dict[str, Any]:
 
 
 def _stream_download(
-    url: str, dest: Path, cookie: str, cancel_event: threading.Event, max_bytes: int
+    url: str, dest: Path, cookie: str, cancel_event: threading.Event
 ) -> int:
     """Download a single stream to *dest*, return byte count."""
     request = Request(url, headers={
@@ -63,12 +63,10 @@ def _stream_download(
             while True:
                 if cancel_event.is_set():
                     raise DomainError("JOB_CANCELLED", "下载已取消")
-                chunk = response.read(min(64 * 1024, max_bytes - digest_written + 1))
+                chunk = response.read(64 * 1024)
                 if not chunk:
                     break
                 digest_written += len(chunk)
-                if digest_written > max_bytes:
-                    raise DomainError("DOWNLOAD_TOO_LARGE", "视频超过大小上限")
                 f.write(chunk)
     return digest_written
 
@@ -90,7 +88,6 @@ class BilibiliDownloader:
         resource: dict[str, Any],
         job_id: str,
         strategy: str,
-        max_bytes: int,
         cancel_event: threading.Event,
     ) -> DownloadResult:
         url = str(resource["source_url"])
@@ -136,11 +133,6 @@ class BilibiliDownloader:
         if not dash:
             raise DomainError("DOWNLOAD_FAILED", "视频不支持的格式（非 DASH）", retryable=False)
 
-        # Pick best video and audio streams within size budget.
-        # Rough estimate: video stream ~70% of total, audio ~30%.
-        video_budget = int(max_bytes * 0.75)
-        audio_budget = max_bytes - video_budget
-
         videos = sorted(
             [v for v in (dash.get("video") or []) if v.get("baseUrl") or v.get("base_url")],
             key=lambda v: int(v.get("bandwidth") or v.get("id") or 0),
@@ -170,10 +162,10 @@ class BilibiliDownloader:
         ensure_within_root(output, self.settings.jobs_dir)
 
         try:
-            v_size = _stream_download(video_url, v_tmp, cookie, cancel_event, video_budget)
+            _stream_download(video_url, v_tmp, cookie, cancel_event)
             a_size = 0
             if a_tmp and audio_url:
-                a_size = _stream_download(audio_url, a_tmp, cookie, cancel_event, audio_budget)
+                a_size = _stream_download(audio_url, a_tmp, cookie, cancel_event)
         except DomainError:
             v_tmp.unlink(missing_ok=True)
             if a_tmp:
@@ -181,7 +173,6 @@ class BilibiliDownloader:
             raise
 
         # 5. Merge with ffmpeg
-        total_size = v_size + a_size
         cmd = ["ffmpeg", "-y", "-i", str(v_tmp), "-i", str(v_tmp)]
         if a_tmp and a_size > 0:
             cmd = ["ffmpeg", "-y", "-i", str(v_tmp), "-i", str(a_tmp),

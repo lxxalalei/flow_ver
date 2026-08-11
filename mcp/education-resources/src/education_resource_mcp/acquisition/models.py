@@ -98,8 +98,6 @@ INTERNAL_ARTIFACT_ROLES: frozenset[str] = frozenset(
     {"markdown", "sanitized_html", "image", "bundle"}
 )
 MAX_ARTIFACTS = 50
-MAX_BYTES = 5_368_709_120
-DEFAULT_MAX_BYTES = MAX_BYTES
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _CANONICAL_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -406,7 +404,6 @@ class AcquisitionRequest:
     eligibility_id: str
     eligibility_digest: str
     preferred_container: PreferredContainer = "html"
-    max_bytes: int = DEFAULT_MAX_BYTES
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
     # ``None`` is rejected in ``__post_init__``.  Keeping a sentinel default
     # makes missing server-owned roots unrepresentable at the provider seam.
@@ -434,11 +431,6 @@ class AcquisitionRequest:
             "original", "pdf", "epub", "mp4", "mp3", "html", "text"
         }:
             raise ValueError(f"unsupported preferred container: {self.preferred_container}")
-        if not isinstance(self.max_bytes, int) or isinstance(self.max_bytes, bool):
-            raise TypeError("max_bytes must be an integer")
-        if self.max_bytes <= 0 or self.max_bytes > MAX_BYTES:
-            raise ValueError(f"max_bytes must be between 1 and {MAX_BYTES}")
-
         _validate_provider_id(self.provider_id, label="provider_id")
         _validate_component_version(self.provider_version, label="provider_version")
         if not isinstance(self.planned_scope, str) or self.planned_scope not in CAPABILITY_SCOPES:
@@ -497,7 +489,6 @@ class AcquisitionRequest:
             "eligibility_id": self.eligibility_id,
             "eligibility_digest": self.eligibility_digest,
             "preferred_container": self.preferred_container,
-            "max_bytes": self.max_bytes,
         }
 
 
@@ -573,16 +564,11 @@ class Artifact:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactBundle:
-    """A bounded set of artifacts produced for one selected resource."""
+    """The artifacts produced for one selected resource."""
 
     artifacts: tuple[Artifact, ...]
-    max_bytes: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.max_bytes, int) or isinstance(self.max_bytes, bool):
-            raise TypeError("bundle max_bytes must be an integer")
-        if self.max_bytes <= 0 or self.max_bytes > MAX_BYTES:
-            raise ValueError(f"bundle max_bytes must be between 1 and {MAX_BYTES}")
         normalized = tuple(self.artifacts)
         if len(normalized) > MAX_ARTIFACTS:
             raise ValueError(f"artifact count exceeds {MAX_ARTIFACTS}")
@@ -600,11 +586,6 @@ class ArtifactBundle:
         for item in normalized:
             if item.primary and item.role not in {"primary", "bundle"}:
                 raise ValueError("only primary or legacy bundle artifacts may be primary")
-        total = sum(item.byte_size for item in normalized)
-        if any(item.byte_size > self.max_bytes for item in normalized):
-            raise ValueError("an artifact exceeds the bundle byte limit")
-        if total > self.max_bytes:
-            raise ValueError("bundle exceeds the total byte limit")
         primary_count = sum(item.primary for item in normalized)
         if normalized and primary_count != 1:
             raise ValueError("a non-empty bundle must contain exactly one primary artifact")
@@ -623,7 +604,6 @@ class ArtifactBundle:
         return {
             "artifact_count": len(ordered),
             "total_bytes": self.total_bytes,
-            "max_bytes": self.max_bytes,
             "artifacts": [
                 item.to_dict(include_path=include_paths) for item in ordered
             ],
@@ -1007,7 +987,6 @@ __all__ = [
     "FORMAL_ARTIFACT_ROLES",
     "INTERNAL_ARTIFACT_ROLES",
     "MAX_ARTIFACTS",
-    "MAX_BYTES",
     "PERSISTENT_ARTIFACT_ROLES",
     "AcquisitionFailure",
     "AcquisitionItemFailure",
