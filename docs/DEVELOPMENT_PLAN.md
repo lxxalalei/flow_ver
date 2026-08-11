@@ -2,249 +2,321 @@
 
 ## 文档定位
 
-这是本项目唯一的长期技术路线图。它描述目标、顺序、边界和完成门槛，不记录每轮执行日志、
-历史测试数字或已归档设计。当前工作树的机器事实见
-[CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)；正在执行的细节见对应的
-`.agent/plans/` 文件。
+这是项目唯一长期技术路线。它只记录产品目标、阶段顺序和完成门槛；当前机器事实见 [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)，具体执行记录见 `.agent/plans/`。
 
 当前 active 产品只有：
 
-- `skills/learning-resource-flow/`：唯一用户入口和对话编排层；
-- `mcp/education-resources/`：Python stdio MCP、领域契约、搜索、核验、获取、任务状态和归档。
+- `skills/learning-resource-flow/`：唯一用户入口与对话/语义编排；
+- `mcp/education-resources/`：Python stdio MCP，负责搜索事实、Resolution、Plan、Job、Asset 与 Archive。
 
-当前技术顺序固定为：
+## 当前路线
+
+2026-08-11 经过真实 E2E 和架构复核后，项目顺序调整为：
 
 ```text
-0027 平台获取能力接入
-  -> 0028 真实 OpenClaw / 真实平台 E2E
+0037 获取状态链简化
+  -> 0028 真实 OpenClaw / 真实平台 E2E（基于简化模型重验）
   -> 0029 检索 benchmark 与 release gate
   -> 主体架构阶段完成
-  -> 产品能力成熟：扩平台 / Library & Viewer / 持续质量优化 / readiness 扩展
+  -> 平台扩展 / Library & Viewer / 质量优化
   -> 平台化部署
 ```
 
-0025 Platform Capability Contract Alignment 已于 2026-08-10 完成，是上述顺序的前置基础。
-0027 不是新增产品方向，而是 2026-08-08 归档路线中原 0025 的“逐平台实际能力接入”执行面拆分；
-该阶段已于 2026-08-11 完成：
-0025 已完成 Descriptor、Readiness、Resolution/Representation、Eligibility、Plan/Execution、exact Provider、
-Outcome 等能力权威骨架；0027 将可证明路线保持在该权威链，并对其余现有实现完成结构化阻断。因此，归档路线中的
-原 0026 Real OpenClaw & Platform E2E 对应当前 0028，原 0027 Retrieval Benchmark & Release Gate
-对应当前 0029。该拆分改变计划编号与颗粒度，不改变原路线的产品目标和先后依赖。
+0025/0027 的历史工作仍保留为迁移证据，但其中 Descriptor → Readiness → Eligibility → binding digest 的运行时权威链已被 0037 明确废弃。保留的是它们验证出来的业务原则：Representation 要真实、Provider 要明确、失败不能静默换路、认证与策略边界要显式。
 
-文档治理由 [0030 计划](../.agent/plans/archive/0030-document-authority-consolidation.md) 单独跟踪，
-不改变产品路线。2026-08-08 的阶段规划保留在 archive 中作为历史决策依据；若本文与历史路线出现
-实质产品目标差异，必须显式记录差异原因，不能因文档精简而静默丢失既定目标。
+## 产品目标
 
-## 产品目标与任务模型
+用户应能通过自然语言完成完整教育资源闭环：
 
-用户应能通过自然语言完成可信的教育资源闭环：表达模糊需求、获得必要且克制的澄清、探索来源、
-理解候选差异、明确选择、安全获取，并在需要时归档和再次查找。
+```text
+表达需求
+  -> 必要澄清
+  -> 多轮但有上限的搜索
+  -> 候选语义审查
+  -> 必要 Inspect
+  -> 展示差异
+  -> 用户选择
+  -> 获取计划
+  -> 用户确认
+  -> 获取与进度
+  -> Asset / Bundle
+  -> 归档与再次查找
+```
 
-任务模型只由以下独立部分组成：
-
-- `user_role`：当前对话者是孩子或家长，可以未知；
-- `resource_target`：资源给孩子使用或给家长参考，可以未知；
-- 目标与用户明示的 `constraints`：主题、资源形态、语言、版本、来源、时间、格式等。
-
-`user_role` 和 `resource_target` 不能相互推导；未提供的信息保持 unknown。Skill 不为补齐模型
-而追问，也不把年龄、年级或身份暗推成搜索方向。搜索策略必须由资源对象、目标和显式约束共同决定。
+成功不等于“Tool 调用成功”或“搜到很多链接”。成功意味着：结果符合目标、关键事实可解释、用户明确控制副作用、实际资源能正确获取并恢复。
 
 ## 不可变架构约束
 
-### Active 与历史边界
+### 1. 语义判断与事实状态分开
 
-- 顶层 `skills/` 只保留 `learning-resource-flow`；旧七个 Skill 和阶段脚本只在
-  `legacy/skill-pipeline-v1/` 中作为历史快照。
-- Skill 不拼接 shell、Python、Node、脚本路径、绝对下载路径或任意业务 ID。
-- MCP 是 Flow、ResultSet、Presentation、Selection、Plan、Job、Resolution、Outcome、Asset 和
-  Archive 的服务端权威；模型不能手工伪造这些状态。
-- 运行数据、凭据和下载资产与源码分离；测试数据只能进入 `.openclaw-test/` 或临时目录。
+MCP 保存事实：ResultSet、Resolution、Selection、Plan、Job、Asset 等。
 
-### 检索与停止决策
+Skill 私有完成：
 
-- MCP Search 只产生可恢复的 factual coverage；Inspect/Resolution、readiness、eligibility、Job、
-  Asset 和 Archive 保持各自独立权威。
-- Skill 私有地完成 SemanticReview、Gap 和 StopDecision；`retrieval/adaptive.py` 只能作为离线
-  oracle/calibration helper，不得写入生产状态。
-- 不因标题、候选数量、搜索方向或“已注册”自动 Present；证据不足时必须 Inspect、澄清、重规划或
-  带 Gap 停止。详见 [Retrieval Authority ADR](RETRIEVAL_AUTHORITY.md)。
+- SemanticReview；
+- Gap；
+- StopDecision；
+- 是否继续搜索；
+- 是否需要 Selective Inspect；
+- 如何解释候选差异。
 
-### 获取与安全
+不把“候选数量”“标题命中”或固定评分器当作自动 Present 条件。
 
-- 下载严格执行 `prepare -> 用户明确确认 -> start`；服务端在副作用调用中重新校验 ownership、
-  来源、选择、计划、权限、状态、幂等和 authority binding。
-- 能力路线必须保持 Descriptor → Readiness → Resolution/Representation → Eligibility → Plan →
-  fresh Execution → exact Provider → Outcome；禁止隐式 generic fallback。
-- 只允许 `http`/`https`，执行 SSRF、逐跳重定向、域名策略、超时、重试、并发、大小、MIME 和真实
-  文件格式校验；不绕过登录、验证码、付费墙、DRM、版权或访问控制。
-- Job 异步化并可查询、取消和恢复；归档只接受服务端 `asset_id`，大文件不进入模型上下文。
+### 2. 获取链保持业务化
 
-## 路线阶段
+获取只保留：
 
-### 0027：Platform Acquisition Enablement（completed 2026-08-11）
+```text
+Resolution / Representation
+  -> AcquisitionPlan
+  -> 用户确认
+  -> Job / JobItem
+  -> exact Provider
+  -> Outcome
+  -> Asset / Bundle
+  -> Archive
+```
 
-**目标**：把源码中已存在的获取能力接入 0025 冻结的单一能力权威链，不以平台名、资源类型或
-generic Provider 猜路由，不把 landing page 或 metadata 冒充 primary resource。
+不重新引入：
 
-**工作内容**：
+- Capability Descriptor 持久 binding；
+- Readiness Snapshot 持久状态；
+- Eligibility Decision 持久状态；
+- `authority_digest`；
+- `plan_binding_digest`；
+- `execution_binding_digest`；
+- `outcome_digest`。
 
-1. 审计现有 Provider、Inspector、依赖、认证、网络、内容格式和版权/策略边界；
-2. 为每条可执行路线固化 Capability Descriptor、运行时 Readiness、候选 Representation、
-   Eligibility、Plan/Execution binding、exact Provider 和 Outcome；
-3. 完成 Bilibili、Douyin、Ximalaya、Anna/Libgen 及通用 `web_capture` 等现有实现的明确接入或
-   结构化阻断；浏览器渲染是获取机制，不是独立平台；
-4. 关闭跨平台、跨 scope、跨 representation 的静默 fallback，并补齐取消、幂等、大小、MIME/magic、
-   重定向、认证和失败恢复契约；
-5. 只在合法、可审计的依赖和会话条件下声明 ready/eligible/provider success。
+Provider 能力用轻量配置和运行时检查表达。需要防止串错时优先使用 server-owned ID、数据库关系、状态机、事务和显式版本，不用 SHA-256 给服务端自己的状态做多层“防伪”。
 
-**完成门槛**：每个执行项都能从 descriptor 追溯到 fresh execution 和 persisted outcome；无权威
-链缺口时只能阻断或要求重新 Inspect/prepare；定向代码、契约、Schema、状态和安全回归通过。
+### 3. 精确 Provider，但不做静默 fallback
 
-完成计划：[0027-platform-acquisition-enablement.md](../.agent/plans/archive/0027-platform-acquisition-enablement.md)。
+Plan 选择哪个 Provider，Start 就执行哪个 Provider。失败后：
 
-### 0028：Real OpenClaw and Real Platform E2E（当前）
+- 返回真实失败；
+- 需要改变路线时重新 Inspect / Prepare；
+- 不在 Router 内按平台名、资源类型或错误码偷偷切 generic Provider。
 
-**目标**：证明真实 OpenClaw 默认 Agent 能从自然语言使用唯一 Skill 和当前 MCP 完成可信闭环，
-而不是用 fixture、直接 Service 调用、MCP probe 或 Adapter 注册冒充用户验收。
+`web_materialize` / `web_capture` 是执行机制，不是“失败后的万能兜底”。
 
-**工作内容**：
+### 4. Representation 是核心业务事实
 
-1. 冻结脱敏的运行环境、Git dirty 摘要、Skill/MCP 加载路径、catalog/Schema digest 和工具发现证据；
-2. 串行验证 Search → Inspect → Present → Select → Confirm → Acquire → Archive → Recover；
-3. 覆盖文章、网页物化、视频、音频、图书/版本、课程/Bundle、混合检索和失败恢复；
-4. 对每个平台分别记录网络、认证、readiness、Representation、Eligibility、Provider、Outcome、
-   Asset/Archive 和重启结果；
-5. 只使用用户或平台合法授权的 session/SecretRef；不得把凭据、Cookie、浏览器档案、SQLite 或
-   下载产物写入仓库；不绕过验证码、付费墙、DRM 或访问控制。
+系统必须区分：
 
-**完成门槛**：真实 Agent 工具调用顺序、人工确认点、服务端稳定 ID、持久化状态和面向用户的失败
-解释可追溯；未具备合法会话或真实证据的平台保持明确 blocked/unsupported，不标记为 ready。
+- `primary_resource`；
+- `representation`；
+- `landing_page`；
+- `metadata`。
 
-**2026-08-11 当前检查点**：环境/工具基线、合法 generic 只读路径、进程级副作用门禁和 16 平台
-readiness/用户文案审计已完成；所有平台仍为非 production-ready。用户已明确选择文章候选 1；根 Agent
-在首次 Prepare 后发现过期 representation evidence 仍可命中 cache 的 P0 门禁缺口，已增加 Inspect
-refresh、Prepare/Start freshness 拒绝并以 `500/500` 全量 unittest 验证。部署后的真实 Inspect 已返回
-`cache_status=refresh` 并生成 landing-page Plan；该 Plan 随后已过期且未 Start。用户已质疑文章正文
-网页是否应按 landing page 获取，因此下一步先审计 `primary_resource` / `landing_page` 语义，再决定
-是否重新 Prepare。当前环境已安装并注册独立 session-manager、配置共享 store bridge，4 个 session
-Tool 与原 13 个教育业务 Tool 的 live probe 均通过。用户明确授权的 SmartEdu
-canonical direct import 已保存为 `stored/no_probe`，但 fresh 真实 Agent Search 返回认证 HTTP 403、
-0 候选，未到达 Inspect，因此 Step E 继续 blocked；不得自动重放当前值。默认使用受控浏览器登录；
-新的 direct import 仍须用户明确指定平台、用途并再次授权。保存不等于远端有效；真实网页物化/归档、
-合法平台认证恢复和最终文档验收仍未完成，不能由 `500/500` 全量 unittest 或 `8/8` stdio 子进程 E2E 替代。
+特别是网页：文章正文网页可以是 `primary_resource + web_materialize`；导航/预览页才是 landing page。
 
-执行计划：[0028-real-openclaw-platform-e2e.md](../.agent/plans/0028-real-openclaw-platform-e2e.md)。
+### 5. 保留真正必要的安全边界
 
-### 0029：Retrieval Benchmark and Release Gate（后续）
+简化不能删除：
 
-**目标**：建立版本化、可重复、机器可比较的质量与真实性发布门禁，防止候选相关性、语义停止决策和
-获取能力被数量、标题或静默 fallback 掩盖。
+- `prepare -> 用户明确确认 -> start`；
+- Selection / Plan 版本与幂等；
+- Start 前重新检查当前 Representation；
+- SSRF 与逐跳重定向；
+- 受控任务目录；
+- 取消、超时和失败恢复；
+- 内容类型与真实格式检查；
+- 登录、验证码、付费墙、DRM 和访问控制边界；
+- Archive 只接受服务端 `asset_id`。
 
-**工作内容**：
+文件 `sha256` / `byte_size` 只作元数据与去重信息，不恢复为通用下载验收门禁。
 
-1. 冻结可审查的 benchmark schema、gold 规则、指标定义、随机性策略和 critical invariants；
-2. 从检索、语义审查、能力真值和真实 Agent 证据构建 train-free 任务集；
-3. 实现确定性离线 runner、case JSON、聚合报告、baseline/digest 比较和可审查更新流程；
-4. 分别度量 relevance、Present/Replan、Gap、Clarify、Inspect efficiency、去重/来源多样性、
-   acquisition truthfulness、scope/provider/readiness/policy 和 Plan/Outcome consistency；
-5. 将真实 OpenClaw 证据独立报告，不混入离线分数；任一 P0 安全或权威不变量失败即阻断发布。
+## 当前阶段：0037 Acquisition State Simplification
 
-**完成门槛**：benchmark 不搜索真实平台、不下载、不归档、不写生产 SQLite、不读取真实凭据；gold
-变化可审查；报告能区分产品失败、环境失败、网络/认证失败和策略阻断。
+### 目标
 
-执行计划：[0029-retrieval-benchmark-release-gate.md](../.agent/plans/0029-retrieval-benchmark-release-gate.md)。
+把 0025/0027 形成的“能力权威证明系统”降级为简单获取业务模型，同时不破坏搜索、Inspect、Provider、Asset 与 Archive 的成熟实现。
 
-### 主体架构阶段完成边界
+### 已完成
 
-0027–0029 全部通过后，主体架构阶段才结束。此时至少应满足：
+- 新增轻量 `AcquisitionPlanner` / `ProviderSpec`；
+- generic document、generic primary webpage、generic landing webpage、SmartEdu document 的简化 Provider route；
+- MCP runtime 切到 `simple_service.ResourceService`；
+- migration 8 新增 `acquisition_plan_items`、`job_items`、`execution_outcomes`；
+- 新写入不再产生 Readiness/Eligibility/binding/outcome digest；
+- `resource_download_start` 删除 `authority_digest`；
+- PlanItem / JobStatus / Outcome 公共 Schema 删除 capability/readiness/eligibility digest 组；
+- tool catalog 升至 `1.6.0`；
+- 文章正文网页允许作为 primary resource 物化；
+- 完成一次 GitHub Actions 定向验证：包安装、compileall、JSON 契约解析和 0037 定向测试均通过。
 
-- 0023 的真实 OpenClaw 阻塞项已经由 0028 的真实证据关闭；
-- 检索不会因候选数量或标题表面相关而过早 Present，SemanticReview、Gap、StopDecision 的权威位置稳定；
-- Planner/Skill 能准确区分 primary resource、representation、landing page 和 metadata；
-- 真实 OpenClaw 能完成 Search → Inspect → Present → Select → Confirm → Acquire → Archive → Recover；
-- benchmark 与 critical invariants 已成为后续修改的稳定 release gate；
-- 公共 Tool 继续保持领域级入口，不因扩平台重新退化为脚本型 Tool 集合；
-- Registry、Capability、runtime、Skill、Schema、测试和文档之间没有已知语义漂移。
+### 仍需完成
 
-达到该边界只表示“核心骨架可以稳定演进”，不表示产品能力、资料库体验或平台覆盖已经完成。
+1. 清理旧 authority 专项测试；
+2. 将 0037 前的 `capability.py`、旧 acquisition authority 代码从兼容基座中彻底移除；
+3. 增加 cleanup migration，在兼容期结束后删除 v6/v7 旧 authority 表；
+4. 同步 Skill 中仍残留的 capability/readiness/eligibility 文案；
+5. 用真实 OpenClaw 部署简化后的 MCP 后重新跑完整业务回合；
+6. 0037 完成后归档计划并恢复 0028 主线。
 
-### 后续阶段一：产品能力成熟
+### 完成门槛
 
-0029 之后优先进入产品能力成熟阶段，而不是直接把主要精力切到远程化或多租户部署。
-这一阶段延续 2026-08-08 归档路线中“稳定扩平台与持续质量优化”的原始目标，并补回用户侧
-Library/Viewer 闭环。
+- Active runtime 不再 import 或写入 capability authority 链；
+- 公共 Tool/Schema 不再暴露已删除字段；
+- migration 8 新库和 v7 升级库都能正确恢复；
+- Prepare/Start 能处理 document、primary webpage、landing webpage；
+- exact Provider 失败不 silent fallback；
+- Job 成功/partial/失败/取消、Asset/Bundle、Archive 关系不依赖 digest；
+- 真实 Agent 至少完成一个 generic Search → Inspect → Select → Confirm → Acquire → Archive → Recover 成功闭环。
 
-#### 1. Platform Expansion
+## 下一阶段：0028 Real OpenClaw and Real Platform E2E
 
-在不改变核心 Tool/authority 架构的前提下，逐步新增或强化：
+0037 结束后重新执行 0028，但证据模型改为业务事实，而不是证明每一层 digest。
 
-- Platform Adapter：提高发现覆盖、来源质量和平台特征表达；
-- Inspector：补强版本、Representation、availability、auth/policy 和可比较证据；
-- Acquisition Provider：只为通过 capability/readiness/policy 门槛的平台增加真实获取能力；
-- 平台能力必须继续走 Descriptor → Readiness → Resolution/Representation → Eligibility →
-  Plan/Execution → exact Provider → Outcome，不为“多支持一个平台”建立旁路。
+### 要验证的用户闭环
 
-扩平台的完成标准不是代码存在，而是相应 benchmark、真实 E2E、readiness 与失败边界均可审计。
+```text
+Search
+  -> Inspect
+  -> Present
+  -> Select
+  -> Prepare
+  -> Confirm
+  -> Start
+  -> JobStatus
+  -> Asset/Bundle
+  -> Archive
+  -> Restart / Recover
+```
 
-#### 2. Library / Viewer
+### 覆盖类型
 
-Archive 成功不等于用户闭环完成。资料库必须从“存储资产”进一步演进为“按 Representation 正确打开和使用资源”。
+- 文章正文网页；
+- 普通网页/landing page；
+- 文件型文档/图书；
+- 视频；
+- 音频；
+- 课程/Bundle；
+- 混合来源；
+- AUTH_REQUIRED / policy / dependency / unavailable 等失败恢复。
 
-优先目标包括：
+### 证据要求
 
-- Representation-aware opening：Library 根据资源/Asset/Bundle 的真实表示选择正确打开方式；
-- WebBundle：底层可继续保存 ZIP/Bundle，但用户默认打开 `index.html` 或受控 primary representation，
-  不把 ZIP 文件本身当作最终阅读体验；
-- PDF / EPUB / video / audio：按真实 MIME、role、container 和平台策略提供相应查看/播放/打开入口；
-- Bundle / companion UX：主资源、字幕、封面、转写、附件等关系在资料库中可理解、可访问；
-- Library Search 返回的关系和展示信息应服务用户选择与再次使用，而不是泄露底层路径或存储细节。
+逐平台记录：
 
-Viewer 是产品表现层，不得为了方便打开资源而绕过 Asset、Bundle、Archive、权限或路径安全边界。
+- Search 是否真实命中；
+- Inspect 是否能确认 Representation；
+- Provider 是否实际部署；
+- session/auth 是否真实可用；
+- Plan route；
+- Job/Outcome；
+- Asset/Bundle；
+- Archive；
+- 重启后恢复。
 
-#### 3. Retrieval Quality Iteration
+不能用 Adapter 已注册、fixture、doctor/probe 或单元测试替代真实用户闭环。
 
-0029 建立 benchmark 后，后续检索改进以 benchmark 为主回归入口：
+### 平台恢复原则
 
-- 提升 Top-N relevance、Gap/Clarify 准确率、Inspect efficiency 和来源多样性；
-- 降低 Premature Present、Unnecessary Replan、Forbidden Display 和错误 capability promise；
-- 新增平台、Adapter、Inspector、Provider 或 Skill 规则时同步增加相应 gold/negative cases；
-- 不通过放宽 gold、增加随机重试、扩大 timeout 或静默 fallback 换取指标改善。
+0036 中对具体平台的恢复工作仍可继续，但按以下方式接入：
 
-#### 4. Capability Readiness Expansion
+```text
+Platform Search / Inspect
+  -> Representation
+  -> 新增/复用 ProviderSpec
+  -> exact Provider
+```
 
-随着真实平台验证积累，把平台从 `code_present` / experimental / auth_required 等中间状态逐步推进到
-可审计的 `production_ready`。状态提升必须来自当期环境的真实证据，而不是 Registry 布尔值、fixture
-通过或历史成功记录。
+不为每个平台新增 Descriptor/Readiness/Eligibility 状态实体。
 
-产品能力成熟阶段不预先绑定单一计划编号。进入某个明确工作包时，再从 evergreen 路线创建新的
-`.agent/plans/<next-id>-*.md`，避免为了路线图先制造一批长期 pending 计划。
+## 0029 Retrieval Benchmark and Release Gate
 
-### 后续阶段二：平台化部署
+0037 与 0028 稳定后再做 benchmark，重点度量业务行为：
 
-只有在核心架构稳定、产品能力成熟路径明确后，才把主要开发重心转向教育平台的远程化和生产部署：
+- relevance；
+- 是否过早 Present；
+- Gap 是否准确；
+- Replan 是否改善结果；
+- Clarify 是否必要；
+- Inspect 是否有效；
+- 来源多样性和去重；
+- Provider route 是否真实；
+- Plan / Job / Outcome / Asset 是否一致；
+- 真实平台失败是否被如实呈现。
 
-- 远程 Streamable HTTP MCP；
-- 独立 session / credential service；
-- remote storage 与运行目录治理；
-- 网络隔离与受控出网；
-- multi-tenant authentication / authorization；
-- audit、quota、rate limit 与运维可观测性。
+benchmark 不应把当前实现细节写成 gold，更不能通过测试强迫代码维持已废弃架构。
 
-远程化不是当前本地 MVP 的默认前置，也不能通过扩大本地 Tool catalog 替代真实平台化设计。
-平台化工作可以提前做必要预研，但不得以部署基础设施取代 Platform Expansion、Library/Viewer、
-Retrieval Quality Iteration 或 Capability Readiness Expansion 的产品成熟工作。
+P0 门禁应聚焦：
 
-## 发布与变更门槛
+- 用户未确认却产生副作用；
+- 错资源/错 Provider 被获取；
+- silent fallback；
+- 伪造成功；
+- 归档非 ready Asset；
+- 绕过认证/访问控制；
+- 真实结果明显不符合用户目标却被自动 Present。
 
-一个阶段只有同时满足以下条件才可标记完成：
+## 主体架构阶段完成边界
 
-- **权威唯一**：机器状态只有一个可解释来源；Skill 的语义结论不伪装成 MCP factual facts；
-- **安全**：没有模型伪造 ID、路径、URL、可用性、权限、Provider 或获取结果的成功路径；
-- **可恢复**：重启、LLM 失败、超时、取消和幂等重放能从 MCP facts 恢复，缺失语义按 unknown 处理；
-- **契约一致**：Schema、catalog、runtime、文档和测试同步；当前过渡只读行为按兼容政策解释，但不构成旧数据产品承诺；
-- **用户可解释**：Clarify、Present、Replan、StopWithGap、blocked、unsupported、AUTH_REQUIRED
-  和 partial 都保留真实原因；
-- **证据可审计**：敏感值脱敏，命令和结果可复现，历史基线与当前事实不混写。
+0037、0028、0029 完成后，主体架构才算稳定。至少满足：
 
-任何跨边界字段、工具入口、状态含义、Provider 路由或 StopDecision 位置的改变，必须同步更新
-机器契约、持久化迁移、代码、测试和本文，不得只改 Markdown。
+- 搜索的 SemanticReview / Gap / StopDecision 权威位置稳定；
+- Planner 能准确区分 primary / representation / landing / metadata；
+- 获取链没有多层自证状态；
+- 真实 Agent 能完成完整资源闭环；
+- benchmark 以业务行为而不是当前代码实现为准；
+- 扩平台只需要 Search/Inspect/ProviderSpec/Provider，不需要复制控制面；
+- Library/Archive 可以稳定消费 Asset/Bundle。
+
+## 产品成熟阶段
+
+### Platform Expansion
+
+按真实用户价值决定优先级，逐步恢复/新增平台：
+
+- 视频：Bilibili、公开课程平台等；
+- 音频：Ximalaya 等；
+- 图书/文档：合法公开图书馆、教材、文档来源；
+- 网页：文章正文、图文页面、复杂网页物化；
+- 课程：课程页、视频、讲义和字幕 Bundle。
+
+平台扩展的核心不是“支持平台名”，而是能把 Search 命中解析成真实 Representation 并通过明确 Provider 获得正确资产。
+
+### Library & Viewer
+
+在获取链稳定后完善：
+
+- 资料库浏览；
+- 分类/主题筛选；
+- 资源预览；
+- HTML/Markdown Viewer；
+- 图片与附件关联；
+- Bundle 展示；
+- 去重和版本关系；
+- 再搜索/再获取入口。
+
+### 持续质量优化
+
+后续改动优先回答：
+
+1. 用户实际行为是否更好？
+2. 是否增加了新的状态实体或重复投影？
+3. 新复杂度能否由真实业务失败证明必要？
+4. 能否用更简单的数据关系、事务或测试替代？
+
+禁止因为“以后可能需要”提前建立复杂控制面。
+
+## 平台化部署
+
+远程 Streamable HTTP、多租户隔离、正式 Secret 管理、配额与可观测性等属于后续部署阶段。它们不能反向迫使本地单用户产品提前采用分布式系统式的防伪/签名状态链。
+
+## 历史路线说明
+
+0025/0027、0036 等文件保留作为历史决策和问题证据。若其内容与本文冲突：
+
+- 业务事实可继续引用；
+- 已被 0037 废弃的 architecture binding 不再恢复；
+- 0030 已移除的文件哈希/大小验收门禁不因旧计划描述而恢复。
+
+相关入口：
+
+- [当前架构事实](CURRENT_ARCHITECTURE.md)
+- [0037 获取状态链简化](../.agent/plans/0037-acquisition-state-simplification.md)
+- [0028 真实 OpenClaw / 平台 E2E](../.agent/plans/0028-real-openclaw-platform-e2e.md)
+- [0029 检索 benchmark](../.agent/plans/0029-retrieval-benchmark-release-gate.md)
+- [Retrieval Authority ADR](RETRIEVAL_AUTHORITY.md)
