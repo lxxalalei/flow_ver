@@ -27,14 +27,30 @@
 ```text
 skills/learning-resource-flow/       # 唯一用户入口和对话编排
 mcp/education-resources/              # stdio MCP、契约、搜索、获取、任务与归档
-mcp/education-resources/contracts/   # 机器权威 catalog、Schema 和 capability 声明
+mcp/education-resources/contracts/   # 公共 Tool catalog、Schema、平台与分类契约
 docs/                                # 当前产品/架构文档与导航
 .agent/plans/                         # 当前执行计划；completed 进入 archive
 legacy/skill-pipeline-v1/             # 只读历史快照，不参与 active runtime
 .openclaw-test/                       # 临时隔离测试数据，不是正式资源库
 ```
 
-Skill 负责需求理解、澄清、搜索方向、候选语义审查、Selective Inspect、展示、选择解释与恢复；MCP 负责服务端业务 ID、权威状态、Capability/Readiness/Eligibility、网络与获取安全、异步 Job、Asset 和归档。用户不需要知道工具名、`flow_id`、`job_id`、确认令牌或本地路径。
+Skill 负责需求理解、澄清、搜索方向、候选语义审查、Selective Inspect、展示、选择解释与恢复；MCP 负责服务端业务 ID、ResultSet/Selection/Resolution/Plan/Job/Asset 等业务事实、网络与获取安全、异步任务和归档。用户不需要知道工具名、`flow_id`、`job_id`、确认令牌或本地路径。
+
+获取链保持简单：
+
+```text
+Selection
+  -> Resolution / Representation
+  -> AcquisitionPlan
+  -> 用户明确确认
+  -> Job / JobItem
+  -> exact Provider
+  -> Outcome
+  -> Asset / Bundle
+  -> Archive
+```
+
+Provider 能力用轻量配置和运行时检查表达，不再把 Capability Descriptor、Readiness Snapshot、Eligibility Decision 或多层 binding digest 作为持久业务状态。`source_fingerprint` 只用于资源身份与检查缓存关联；文件 `sha256` / `byte_size` 可作为资产元数据与去重信息，但不作为下载成功的额外验收门禁。
 
 ## 开始对话
 
@@ -59,4 +75,4 @@ openclaw chat --local
 - [唯一入口 Skill](skills/learning-resource-flow/SKILL.md)
 - [Legacy 说明](legacy/README.md)
 
-凭据、Cookie、浏览器档案、SQLite 数据和下载资产必须位于源码工作区之外。stdio MCP 是进程边界而不是安全沙箱；不绕过登录、验证码、付费墙、DRM 或明确访问控制，也不把模型提供的任意 URL、路径、业务 ID 或伪造状态当作权威输入。
+凭据、Cookie、浏览器档案、SQLite 数据和下载资产必须位于源码工作区之外。stdio MCP 是进程边界而不是安全沙箱；不绕过登录、验证码、付费墙、DRM 或明确访问控制，也不把模型提供的任意 URL、路径、Provider 或伪造业务 ID 当作服务端事实。
