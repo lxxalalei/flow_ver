@@ -2,62 +2,94 @@
 
 ## 产品承诺
 
-产品只承诺当前公共控制面：`contract_version=1.0.0`、`catalog_version=1.5.0`，机器权威以
-[`tool-catalog.json`](tool-catalog.json) 和相关 Schema 为准。**产品不承诺旧数据兼容**，也不承诺
-任意历史客户端、缓存的 Tool Schema 或旧确认材料可以继续执行。
+产品只承诺当前公共控制面：`contract_version=1.0.0`、`catalog_version=1.6.0`。机器事实以 [`tool-catalog.json`](tool-catalog.json) 和相关 Schema 为准。
 
-文档删减不等于运行时清理。当前 runtime 仍保留有限的读取路径：
+项目不承诺任意历史客户端、缓存的旧 Tool Schema、旧 Plan 确认材料或旧内部 authority 对象仍可继续执行。兼容的首要目标是“不误执行旧状态”，不是“让所有旧字段继续存在”。
 
-- 可读取并投影部分 `1.4` shape；
-- 可读取 legacy `Plan -> Job -> Outcome -> Archive` 记录及其安全只读状态。
+## 0037 获取模型切换
 
-这些路径是恢复、审计和迁移判断用的只读兼容，不是旧数据升级承诺。服务端不会从缺失字段、旧
-Plan options、平台布尔能力或 generic Provider 猜测新的执行权威，也不会把旧记录静默改写成当前
-可执行状态。
+当前新写获取链为：
 
-## Authority 缺失时的重置边界
+```text
+Selection
+  -> Resolution / Representation
+  -> Plan / PlanItem
+  -> 用户确认
+  -> Job / JobItem
+  -> exact Provider
+  -> Outcome
+  -> Asset / Bundle
+  -> Archive
+```
 
-旧 Plan/Job/Outcome/Archive 记录缺少可验证的 Capability、Readiness、Resolution/Representation、
-Eligibility 或 Job Execution authority 时，只能读取安全投影：
+以下 0037 前字段/实体不再属于新公共获取控制面：
 
-- 不能 `resource_download_start`；
-- 不能据此执行 `resource_archive`；
-- 不能重建或伪造 `authority_digest`、`plan_digest`、execution binding 或 Outcome digest；
-- 不能通过省略 `authority_digest`、`allow_safe_fallback` 或换用 generic Provider 绕过校验。
+- Capability Descriptor binding；
+- Readiness Snapshot；
+- Eligibility Decision；
+- `authority_digest`；
+- Plan/Execution binding digest；
+- `outcome_digest`。
 
-恢复方式是建立新的 Flow，重新 Inspect/Resolution、选择并 `resource_download_prepare`，取得新的
-用户确认后再 start；只有带有当前服务端权威链的已校验 Asset 才能归档。迁移可以保留原记录供读取，
-但不应依赖手工改 SQLite、路径或摘要来“修复”旧状态。
+服务端不会为了“兼容旧字段”在新 Plan/Job 中重新生成上述状态。
+
+## 旧 v7 数据
+
+migration 8 允许从旧 `download_plan_items`、`job_execution_items`、`acquisition_outcomes` 降维 backfill 到：
+
+- `acquisition_plan_items`；
+- `job_items`；
+- `execution_outcomes`。
+
+迁移只保留业务执行仍需要的事实：resource、resolution、representation、scope、strategy、Provider、Outcome 与 Asset/Bundle 关系。旧 digest 不作为迁移后执行凭证。
+
+已经消费、过期、缺少 Resolution/Representation 或无法重建明确 Provider route 的旧 Plan 不应被强行恢复为可执行状态；正确恢复方式是重新 Inspect / Selection / Prepare / Confirm。
 
 ## 客户端兼容
 
-当前公共输出仍允许旧形状的可选字段缺省，但 Schema 使用严格对象约束时，固定缓存 `1.4` Schema
-的 stale client 可能拒绝 `1.5` 新写输出。客户端应在 `initialize`/`tools/list` 后刷新当前目录；
-不能刷新的客户端必须使用服务端明确提供的旧字段投影或显式停止。**这不是无感兼容**，不能把
-“旧读”描述为任意 stale client 都无需升级。
+`resource_download_start` 已不再接受 `authority_digest`。缓存旧 `1.5` Schema 的客户端必须在 `initialize` / `tools/list` 后刷新当前目录，否则可能因为多传已删除字段而被严格 Schema 拒绝。
 
-`resource_download_start.input.authority_digest` 仍可省略，但省略只表示服务端从不可变 Plan 读取
-真实摘要并重新校验；它不是 fallback，也不降低权限、来源、Provider、strategy、scope 或
-Representation 检查强度。
+这是显式契约升级，不提供“多传旧字段也悄悄忽略”的公共 Tool 兼容层。内部 Python Provider seam 为了 staged cutover 暂时接受并丢弃旧 authority 参数，但该行为不是公共协议，不得被客户端依赖。
 
-## 运行中 Outcome 的兼容说明
+## Plan / Selection 摘要
 
-公共 `outcome_status` Schema 已接受 runtime 实际持久化和投影的 `status="running"`。这是对既有
-执行中状态的机器契约对齐，不新增 Job 状态、不改变终态语义，也不改变
-`contract_version=1.0.0`；旧客户端若本地复制了更窄的枚举，仍须刷新当前 Schema 后再读取运行中
-Outcome。
+`selection_digest` 与 `plan_digest` 继续保留，因为它们是当前用户选择和确认计划的服务端版本/内容标识，用于幂等与防止确认错计划。
 
-## ResultSet extend 容量与 provenance 校正
+它们与已删除的 capability/readiness/eligibility authority digest 不同：
 
-`resource_search.limit` 的既有语义是新不可变 ResultSet 的总容量；`mode=extend` 时 base 候选也占用
-该容量。客户端若希望在已有 8 个候选的快照上保留最多 8 个本轮新候选，应请求 `limit=16`，并继续
-受当前服务端 `max_search_results` 上限约束；重复使用 `limit=8` 不构成新增容量。
+- 不构成多层状态证明链；
+- 不传给 Provider；
+- 不生成新的 Readiness/Eligibility 实体；
+- 不用于证明远端内容“可信”。
 
-当前 runtime 将 `provenance.new_displayable_count` 校正为应用总容量后实际进入新 ResultSet 的本轮
-新候选数。此前创建的持久 ResultSet 不做静默重写，其历史字段可能反映截断前的 `new_unique_count`；
-恢复这类旧 Flow 时应以当前 `candidates` 为可展示事实，必要时从当前 ResultSet 建立新的有界 extend。
-字段名称、输入输出形状和 `contract_version=1.0.0` 均未改变。
+## `source_fingerprint`
 
-相关语义见 [`domain-contract.md`](domain-contract.md)；当前架构与检索权威分别见
-[`CURRENT_ARCHITECTURE.md`](../../../docs/CURRENT_ARCHITECTURE.md) 和
-[`RETRIEVAL_AUTHORITY.md`](../../../docs/RETRIEVAL_AUTHORITY.md)。
+`source_fingerprint` 继续作为资源身份与 Resolution cache key。它可参与“当前 Resolution 是否仍属于同一资源”的比较，但不作为 Plan/Job/Outcome 防伪签名。
+
+## 运行中 Outcome
+
+公共 `outcome_status` 继续允许 `running`。Outcome 终态可为 succeeded / partial / failed / cancelled；Job 生命周期仍独立使用 queued / running / cancelling / succeeded / failed / cancelled。
+
+Outcome 公共投影只描述 planned / execution / actual route 与 Asset/Bundle/failure，不再包含 digest credential。
+
+## ResultSet extend
+
+`resource_search.limit` 仍表示新不可变 ResultSet 的总容量。`mode=extend` 时 base 候选占用容量；例如已有 8 个候选，若希望最多再容纳 8 个，应请求 `limit=16`，并继续受服务端总上限约束。
+
+检索语义与 0037 获取简化相互独立；不得因为获取层删减状态而降低 SemanticReview、Gap、StopDecision 或 Selective Inspect 的要求。
+
+## 后续 cleanup
+
+兼容期结束后需要独立 cleanup：
+
+1. 旧 authority 专项测试移出 Active 门禁；
+2. Active runtime 不再 import 旧 `capability.py`；
+3. cleanup migration 删除 v6/v7 已无读取者的 authority 表；
+4. 删除不再被任何公共或迁移路径引用的 capability/readiness/eligibility Schema 与 catalog 文件。
+
+相关文档：
+
+- [当前架构](../../../docs/CURRENT_ARCHITECTURE.md)
+- [开发路线](../../../docs/DEVELOPMENT_PLAN.md)
+- [0037 获取状态链简化](../../../.agent/plans/0037-acquisition-state-simplification.md)
+- [检索权威边界](../../../docs/RETRIEVAL_AUTHORITY.md)
