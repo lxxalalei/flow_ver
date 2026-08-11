@@ -23,11 +23,11 @@ from education_resource_mcp.inspection import (
 )
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.server import create_server
-from education_resource_mcp.service import ResourceService
+from education_resource_mcp.simple_service import ResourceService
 
 
 class FixtureInspector:
-    """Offline, catalog-compatible evidence for a generic landing page."""
+    """Offline evidence for a generic landing page."""
 
     platform_id = "generic"
     inspector_id = "generic"
@@ -50,6 +50,7 @@ class FixtureInspector:
                         "role": "landing",
                         "materializable": True,
                         "requires_auth": False,
+                        "technical_availability": "available",
                     }
                 ],
                 "metadata": {},
@@ -58,7 +59,7 @@ class FixtureInspector:
                 self.inspector_id,
                 method="offline-fixture",
                 cache_status="miss",
-                inspected_at="2026-08-09T00:00:00Z",
+                inspected_at="2026-08-11T00:00:00Z",
             ),
             failures=[],
         )
