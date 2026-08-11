@@ -3,137 +3,58 @@
   "$id": "https://quanxiao.example/contracts/education-resource/schemas/tools/resource_download_start.schema.json",
   "title": "resource_download_start contract",
   "oneOf": [
-    {
-      "$ref": "#/$defs/input"
-    },
-    {
-      "$ref": "#/$defs/output"
-    }
+    {"$ref": "#/$defs/input"},
+    {"$ref": "#/$defs/output"}
   ],
   "$defs": {
     "input": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "contract_version",
-        "flow_id",
-        "plan_id",
-        "presentation_id",
-        "presented_version",
-        "selection_version",
-        "selection_digest",
-        "plan_digest",
-        "confirmation_token",
-        "idempotency_key"
+        "contract_version", "flow_id", "plan_id", "presentation_id",
+        "presented_version", "selection_version", "selection_digest",
+        "plan_digest", "confirmation_token", "idempotency_key"
       ],
       "properties": {
-        "contract_version": {
-          "$ref": "../common.schema.json#/$defs/contract_version"
-        },
-        "flow_id": {
-          "$ref": "../common.schema.json#/$defs/flow_id"
-        },
-        "plan_id": {
-          "$ref": "../common.schema.json#/$defs/plan_id"
-        },
-        "presentation_id": {
-          "$ref": "../common.schema.json#/$defs/presentation_id"
-        },
-        "presented_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_digest": {
-          "$ref": "../common.schema.json#/$defs/selection_digest"
-        },
-        "confirmation_token": {
-          "$ref": "../common.schema.json#/$defs/confirmation_token"
-        },
-        "idempotency_key": {
-          "$ref": "../common.schema.json#/$defs/idempotency_key"
-        },
-        "plan_digest": {
-          "$ref": "../common.schema.json#/$defs/plan_digest"
-        },
-        "authority_digest": {
-          "$ref": "../common.schema.json#/$defs/authority_digest"
-        }
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
+        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
+        "presented_version": {"type": "integer", "minimum": 1},
+        "selection_version": {"type": "integer", "minimum": 1},
+        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
+        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
+        "confirmation_token": {"$ref": "../common.schema.json#/$defs/confirmation_token"},
+        "idempotency_key": {"$ref": "../common.schema.json#/$defs/idempotency_key"}
       }
     },
     "success": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "contract_version",
-        "ok",
-        "flow_id",
-        "plan_id",
-        "presentation_id",
-        "presented_version",
-        "selection_version",
-        "selection_digest",
-        "plan_digest",
-        "job_id",
-        "status",
-        "queued_at"
+        "contract_version", "ok", "flow_id", "plan_id", "presentation_id",
+        "presented_version", "selection_version", "selection_digest",
+        "plan_digest", "job_id", "status", "queued_at"
       ],
       "properties": {
-        "contract_version": {
-          "$ref": "../common.schema.json#/$defs/contract_version"
-        },
-        "ok": {
-          "const": true
-        },
-        "flow_id": {
-          "$ref": "../common.schema.json#/$defs/flow_id"
-        },
-        "plan_id": {
-          "$ref": "../common.schema.json#/$defs/plan_id"
-        },
-        "presentation_id": {
-          "$ref": "../common.schema.json#/$defs/presentation_id"
-        },
-        "presented_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "selection_digest": {
-          "$ref": "../common.schema.json#/$defs/selection_digest"
-        },
-        "job_id": {
-          "$ref": "../common.schema.json#/$defs/job_id"
-        },
-        "status": {
-          "type": "string",
-          "const": "queued"
-        },
-        "queued_at": {
-          "$ref": "../common.schema.json#/$defs/timestamp"
-        },
-        "plan_digest": {
-          "$ref": "../common.schema.json#/$defs/plan_digest"
-        },
-        "authority_digest": {
-          "$ref": "../common.schema.json#/$defs/authority_digest"
-        }
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
+        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
+        "presented_version": {"type": "integer", "minimum": 1},
+        "selection_version": {"type": "integer", "minimum": 1},
+        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
+        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
+        "job_id": {"$ref": "../common.schema.json#/$defs/job_id"},
+        "status": {"type": "string", "const": "queued"},
+        "queued_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
       }
     },
     "output": {
       "oneOf": [
-        {
-          "$ref": "#/$defs/success"
-        },
-        {
-          "$ref": "../common.schema.json#/$defs/error_result"
-        }
+        {"$ref": "#/$defs/success"},
+        {"$ref": "../common.schema.json#/$defs/error_result"}
       ]
     }
   }
