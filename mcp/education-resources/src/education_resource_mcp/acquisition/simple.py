@@ -8,7 +8,6 @@ readiness, eligibility, or binding-digest credentials into Provider calls.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from pathlib import Path
 import copy
 import threading
@@ -20,18 +19,16 @@ from .router import AcquisitionRouter as _LegacyAcquisitionRouter
 from .router import ProviderRegistration
 
 
-@dataclass(frozen=True, slots=True, init=False)
-class AcquisitionRequest:
-    job_id: str
-    resource: Mapping[str, Any]
-    strategy: AcquisitionStrategy
-    provider_id: str
-    provider_version: str
-    planned_scope: str
-    representation_id: str
-    preferred_container: str
-    cancel_event: threading.Event = field(repr=False, compare=False)
-    jobs_root: Path = field(repr=False, compare=False)
+class AcquisitionRequest(_LegacyAcquisitionRequest):
+    """Compatibility subtype exposing only business execution facts.
+
+    Existing Providers that still perform ``isinstance(..., AcquisitionRequest)``
+    continue to work because this is a subtype of the previous request class.
+    The old authority fields are populated with inert compatibility values and
+    are never persisted, validated, or exposed to the Provider-facing dict.
+    """
+
+    __slots__ = ()
 
     def __init__(
         self,
@@ -46,8 +43,6 @@ class AcquisitionRequest:
         preferred_container: str = "original",
         cancel_event: threading.Event | None = None,
         jobs_root: Path | None = None,
-        # Transitional compatibility with the old runner. These values are
-        # deliberately ignored and never exposed to Providers.
         binding_digest: Any = None,
         source_fingerprint: Any = None,
         capability_id: Any = None,
@@ -97,6 +92,10 @@ class AcquisitionRequest:
         resolved_root = jobs_root.resolve(strict=False)
         if not resolved_root.is_absolute() or ".." in resolved_root.parts:
             raise ValueError("jobs_root must be an absolute server-controlled root")
+
+        # Base dataclass slots are assigned directly; its old __post_init__ is
+        # intentionally not called because the deleted authority credentials
+        # are not part of the new runtime contract.
         object.__setattr__(self, "job_id", job_id)
         object.__setattr__(self, "resource", copy.deepcopy(dict(resource)))
         object.__setattr__(self, "strategy", selected_strategy)
@@ -104,6 +103,15 @@ class AcquisitionRequest:
         object.__setattr__(self, "provider_version", provider_version)
         object.__setattr__(self, "planned_scope", planned_scope)
         object.__setattr__(self, "representation_id", representation_id)
+        object.__setattr__(self, "binding_digest", "")
+        object.__setattr__(self, "source_fingerprint", "")
+        object.__setattr__(self, "capability_id", "")
+        object.__setattr__(self, "descriptor_version", "")
+        object.__setattr__(self, "descriptor_digest", "")
+        object.__setattr__(self, "readiness_snapshot_id", "")
+        object.__setattr__(self, "readiness_digest", "")
+        object.__setattr__(self, "eligibility_id", "")
+        object.__setattr__(self, "eligibility_digest", "")
         object.__setattr__(self, "preferred_container", preferred_container)
         object.__setattr__(self, "cancel_event", event)
         object.__setattr__(self, "jobs_root", resolved_root)
@@ -137,14 +145,14 @@ class AcquisitionRouter(_LegacyAcquisitionRouter):
         if request.cancel_event.is_set():
             return self._planned_failure(request, "JOB_CANCELLED", "获取任务已取消")
 
-        registration, failure = self._resolve_registration(request)  # type: ignore[arg-type]
+        registration, failure = self._resolve_registration(request)
         if failure is not None:
             return failure
         assert registration is not None
         provider = registration.provider
         if request.strategy is AcquisitionStrategy.DIRECT_FILE:
             result = self._call_download_provider(
-                request,  # type: ignore[arg-type]
+                request,
                 provider,  # type: ignore[arg-type]
                 provider_strategy="direct",
                 result_strategy=AcquisitionStrategy.DIRECT_FILE,
@@ -152,7 +160,7 @@ class AcquisitionRouter(_LegacyAcquisitionRouter):
             )
         elif request.strategy is AcquisitionStrategy.WEB_MATERIALIZE:
             result = self._call_result_provider(
-                request,  # type: ignore[arg-type]
+                request,
                 provider,  # type: ignore[arg-type]
                 strategy=AcquisitionStrategy.WEB_MATERIALIZE,
                 method_name="materialize",
@@ -161,7 +169,7 @@ class AcquisitionRouter(_LegacyAcquisitionRouter):
         elif request.strategy is AcquisitionStrategy.WEB_CAPTURE:
             if callable(getattr(provider, "capture", None)):
                 result = self._call_result_provider(
-                    request,  # type: ignore[arg-type]
+                    request,
                     provider,  # type: ignore[arg-type]
                     strategy=AcquisitionStrategy.WEB_CAPTURE,
                     method_name="capture",
@@ -169,7 +177,7 @@ class AcquisitionRouter(_LegacyAcquisitionRouter):
                 )
             elif callable(getattr(provider, "download", None)):
                 result = self._call_download_provider(
-                    request,  # type: ignore[arg-type]
+                    request,
                     provider,  # type: ignore[arg-type]
                     provider_strategy="webpage",
                     result_strategy=AcquisitionStrategy.WEB_CAPTURE,
@@ -187,7 +195,7 @@ class AcquisitionRouter(_LegacyAcquisitionRouter):
                 "UNSUPPORTED_ACQUISITION_STRATEGY",
                 "不支持的获取策略",
             )
-        return self._bind_result(request, registration, result)  # type: ignore[arg-type]
+        return self._bind_result(request, registration, result)
 
     @staticmethod
     def _authority_kwargs(
