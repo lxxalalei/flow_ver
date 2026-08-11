@@ -8,7 +8,7 @@ import secrets
 import threading
 from typing import Any
 
-from .acquisition import AcquisitionRouter, AcquisitionStrategy, ProviderRegistration
+from .acquisition import AcquisitionRequest, AcquisitionRouter, AcquisitionStrategy, ProviderRegistration
 from .acquisition.planner import AcquisitionPlanner, AcquisitionPlanningError
 from .acquisition.web_materializer import WebMaterializer as StaticWebMaterializer
 from .archive import ArchiveFileManager
@@ -18,11 +18,17 @@ from .errors import DomainError
 from .inspection import INSPECTION_PROFILE_VERSION, InspectionRouter, source_fingerprint
 from .inspection_registry import default_inspection_router
 from .jobs import JobRunner
+from .policy import PolicyError, ensure_within_root
 from .search import SearchProvider, default_search_provider
 from .session_bridge import create_session_store
 from .simple_storage import Store
-from .storage import utc_now
-from .service import ResourceService as _LegacyResourceService
+from .storage import new_id, utc_now
+from .service import (
+    ACQUISITION_ABORT_CODES,
+    PERSISTED_ASSET_ROLES,
+    PUBLIC_JOB_FAILURE_CODES,
+    ResourceService as _LegacyResourceService,
+)
 
 
 _BARE_SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -441,6 +447,395 @@ class ResourceService(_LegacyResourceService):
             "status": "queued",
             "queued_at": job["created_at"],
         }
+
+    def _run_download_job(self, job_id: str, cancel_event: threading.Event) -> None:
+        """Execute the immutable JobItem route without legacy authority slots."""
+
+        job = self.store.get_job(job_id)
+        if job is None:
+            return
+        try:
+            self._raise_for_cancel_event(job_id, cancel_event)
+            self._start_download_job_execution(job_id)
+            job_items = self.store.get_job_items(job_id)
+
+            usable_primary_count = 0
+            processed_count = 0
+            saw_partial = False
+            total_items = len(job_items)
+            for item in job_items:
+                resource_id = str(item["resource_id"])
+                self._raise_for_cancel_event(job_id, cancel_event)
+                self.store.start_acquisition_outcome(
+                    job_id,
+                    resource_id,
+                    metadata={"attempt": 1},
+                )
+                representation = item.get("representation")
+                if not isinstance(representation, dict):
+                    raise DomainError(
+                        "PLAN_BINDING_CONFLICT",
+                        "任务执行项缺少已确认的资源表示",
+                        details={"resource_id": resource_id},
+                    )
+                selected_container = representation.get("selected_container")
+                if not isinstance(selected_container, str) or not selected_container:
+                    raise DomainError(
+                        "PLAN_BINDING_CONFLICT",
+                        "任务执行项缺少已确认的容器",
+                        details={"resource_id": resource_id},
+                    )
+                request = AcquisitionRequest(
+                    job_id=job_id,
+                    resource=item["resource"],
+                    strategy=item["strategy"],
+                    provider_id=item["provider_id"],
+                    provider_version=item["provider_version"],
+                    planned_scope=item["planned_scope"],
+                    representation_id=item["representation_id"],
+                    preferred_container=selected_container,
+                    cancel_event=cancel_event,
+                    jobs_root=self.settings.jobs_dir.resolve(),
+                )
+                acquisition = self.acquisition_router.acquire(request)
+
+                expected_actual = (
+                    str(item["planned_scope"]),
+                    str(item["strategy"]),
+                    str(item["provider_id"]),
+                    str(item["provider_version"]),
+                )
+                observed_actual = (
+                    acquisition.actual_scope,
+                    acquisition.strategy.kind,
+                    acquisition.provider_id,
+                    acquisition.provider_version,
+                )
+                has_actual_provider_facts = any(
+                    value is not None
+                    for value in (
+                        acquisition.actual_scope,
+                        acquisition.provider_id,
+                        acquisition.provider_version,
+                    )
+                )
+                if has_actual_provider_facts and observed_actual != expected_actual:
+                    raise DomainError(
+                        "PLAN_BINDING_CONFLICT",
+                        "获取结果与 JobItem 的 Provider 路线不一致",
+                        details={"resource_id": resource_id},
+                    )
+                actual_for_outcome = (
+                    expected_actual if observed_actual == expected_actual else (None, None, None, None)
+                )
+
+                if not acquisition.ok or acquisition.bundle is None:
+                    failure = acquisition.failure
+                    failure_code = failure.code if failure is not None else "DOWNLOAD_FAILED"
+                    failure_message = failure.message if failure is not None else "获取任务没有产生可用结果"
+                    failure_retryable = bool(failure.retryable) if failure is not None else False
+                    failure_details = dict(failure.details) if failure is not None else {}
+                    if failure_code == "JOB_CANCELLED":
+                        if self._job_cancellation_is_persisted(job_id):
+                            raise DomainError("JOB_CANCELLED", "任务已取消")
+                        self.store.audit(
+                            str(job["flow_id"]),
+                            "download.provider_cancel_rejected",
+                            job_id,
+                            {"resource_id": resource_id, "provider_id": str(item["provider_id"])},
+                        )
+                        failure_code = "DOWNLOAD_FAILED"
+                        failure_message = "资源获取提供方异常终止"
+                        failure_retryable = False
+                        failure_details = {}
+                    self._raise_for_cancel_event(job_id, cancel_event)
+                    self.store.persist_failed_asset_bundle(
+                        job_id,
+                        resource_id,
+                        failure={
+                            "code": failure_code,
+                            "message": failure_message,
+                            "retriable": failure_retryable,
+                            "details": failure_details,
+                            "item_position": 0,
+                            "item_role": "primary",
+                        },
+                    )
+                    self.store.complete_acquisition_outcome(
+                        job_id,
+                        resource_id,
+                        status="failed",
+                        actual_scope=actual_for_outcome[0],
+                        actual_strategy=actual_for_outcome[1],
+                        actual_provider_id=actual_for_outcome[2],
+                        actual_provider_version=actual_for_outcome[3],
+                        failure_code=failure_code,
+                        failure_message=failure_message,
+                        retriable=failure_retryable,
+                        metadata={"item_failure_count": 1},
+                    )
+                    processed_count += 1
+                    saw_partial = True
+                    self._update_download_job_progress(
+                        job_id, int((processed_count / total_items) * 100)
+                    )
+                    if failure_code in ACQUISITION_ABORT_CODES:
+                        raise DomainError(
+                            failure_code,
+                            failure_message,
+                            retryable=failure_retryable,
+                            details=failure_details,
+                        )
+                    continue
+
+                if observed_actual != expected_actual:
+                    raise DomainError(
+                        "PLAN_BINDING_CONFLICT",
+                        "成功获取缺少与 JobItem 一致的实际 Provider 路线",
+                        details={"resource_id": resource_id},
+                    )
+
+                artifacts = acquisition.bundle.artifacts
+                if acquisition.strategy is AcquisitionStrategy.WEB_MATERIALIZE:
+                    primary = acquisition.bundle.primary
+                    artifacts = (primary,) if primary is not None else ()
+                item_specs: list[dict[str, Any]] = []
+                for position, artifact in enumerate(artifacts):
+                    try:
+                        ensure_within_root(artifact.path.resolve(), self.settings.jobs_dir)
+                    except PolicyError as exc:
+                        raise DomainError("POLICY_DENIED", str(exc)) from exc
+                    if not artifact.path.is_file():
+                        raise DomainError("CONTENT_VALIDATION_FAILED", "获取器没有产生受控文件")
+                    artifact_data = artifact.to_dict(include_path=False)
+                    role = "primary" if artifact.primary else str(artifact.role)
+                    if role not in PERSISTED_ASSET_ROLES:
+                        role = "attachment"
+                    metadata = dict(artifact_data.get("metadata") or {})
+                    if artifact.item_key:
+                        metadata["item_key"] = artifact.item_key
+                    item_specs.append(
+                        {
+                            "position": position,
+                            "role": role,
+                            "status": "ready",
+                            "required": bool(artifact.required or artifact.primary),
+                            "metadata": metadata,
+                            "local_path": str(artifact.path.resolve()),
+                            "byte_size": artifact.byte_size,
+                            "media_type": artifact.media_type,
+                            "sha256": artifact.sha256,
+                            "filename": artifact.filename,
+                        }
+                    )
+
+                failure_specs: list[dict[str, Any]] = []
+                for failure in acquisition.item_failures:
+                    position = len(item_specs)
+                    role = failure.role or "attachment"
+                    if role not in PERSISTED_ASSET_ROLES or role == "primary":
+                        role = "attachment"
+                    metadata = dict(failure.metadata)
+                    metadata["item_key"] = failure.item_key
+                    item_specs.append(
+                        {
+                            "position": position,
+                            "role": role,
+                            "status": "failed",
+                            "required": bool(failure.required),
+                            "metadata": metadata,
+                        }
+                    )
+                    failure_specs.append(
+                        {
+                            "code": failure.code,
+                            "message": failure.message,
+                            "retriable": failure.retryable,
+                            "details": dict(failure.details),
+                            "item_position": position,
+                            "item_role": role,
+                        }
+                    )
+                if not any(
+                    spec["role"] == "primary" and spec["status"] == "ready"
+                    for spec in item_specs
+                ):
+                    raise DomainError(
+                        "CONTENT_VALIDATION_FAILED",
+                        "获取任务没有产生可持久化的 primary 资产",
+                    )
+
+                bundle_completion = (
+                    "partial"
+                    if failure_specs or acquisition.completion == "partial"
+                    else "complete"
+                )
+                bundle = self.store.persist_asset_bundle(
+                    job_id,
+                    resource_id,
+                    item_specs=item_specs,
+                    failures=failure_specs,
+                    completion=bundle_completion,
+                )
+                bundle_asset_ids = [
+                    str(bundle_item["asset_id"])
+                    for bundle_item in bundle.get("items", [])
+                    if isinstance(bundle_item, dict)
+                    and bundle_item.get("status") == "ready"
+                    and isinstance(bundle_item.get("asset"), dict)
+                    and bundle_item["asset"].get("asset_id")
+                ]
+                if not bundle_asset_ids:
+                    raise DomainError("CONTENT_VALIDATION_FAILED", "资产包没有保存可用资产")
+                self.store.complete_acquisition_outcome(
+                    job_id,
+                    resource_id,
+                    status="partial" if bundle_completion == "partial" else "succeeded",
+                    actual_scope=expected_actual[0],
+                    actual_strategy=expected_actual[1],
+                    actual_provider_id=expected_actual[2],
+                    actual_provider_version=expected_actual[3],
+                    bundle_id=str(bundle["bundle_id"]),
+                    asset_ids=bundle_asset_ids,
+                    metadata={
+                        "completion": bundle_completion,
+                        "item_failure_count": len(failure_specs),
+                    },
+                )
+                usable_primary_count += 1
+                processed_count += 1
+                saw_partial = saw_partial or bundle_completion == "partial"
+                self._update_download_job_progress(
+                    job_id, int((processed_count / total_items) * 100)
+                )
+
+            self._raise_for_cancel_event(job_id, cancel_event)
+            if usable_primary_count:
+                try:
+                    self.store.finalize_job_success(job_id)
+                except ValueError as exc:
+                    if str(exc) != "job_cancelling":
+                        raise
+                    self.store.finalize_job_cancellation(job_id)
+            else:
+                self._finalize_download_job_failure(
+                    job_id,
+                    failure_code="DOWNLOAD_FAILED",
+                    failure_message="所选资源均未产生可用 primary 资产",
+                    retriable=saw_partial,
+                )
+        except DomainError as exc:
+            if self._job_cancellation_is_persisted(job_id):
+                self.store.finalize_job_cancellation(
+                    job_id,
+                    failure_code="JOB_CANCELLED",
+                    failure_message="任务已取消",
+                )
+            elif exc.code == "JOB_CANCELLED":
+                self.store.audit(
+                    str(job["flow_id"]),
+                    "download.provider_cancel_rejected",
+                    job_id,
+                    {"source": "domain_error"},
+                )
+                self._finalize_download_job_failure(
+                    job_id,
+                    failure_code="DOWNLOAD_FAILED",
+                    failure_message="资源获取提供方异常终止",
+                    retriable=False,
+                )
+            else:
+                self._finalize_download_job_failure(
+                    job_id,
+                    failure_code=exc.code if exc.code in PUBLIC_JOB_FAILURE_CODES else "INTERNAL_ERROR",
+                    failure_message=exc.message,
+                    retriable=exc.retryable,
+                )
+        except Exception as exc:
+            if isinstance(exc, ValueError) and str(exc) == "job_cancelling":
+                self.store.finalize_job_cancellation(
+                    job_id,
+                    failure_code="JOB_CANCELLED",
+                    failure_message="任务已取消",
+                )
+                return
+            incident_id = new_id("incident")
+            self._finalize_download_job_failure(
+                job_id,
+                failure_code="INTERNAL_ERROR",
+                failure_message=f"资源获取任务发生内部错误（事件 {incident_id}）",
+                retriable=False,
+            )
+            self.store.audit(
+                str(job["flow_id"]),
+                "download.internal_error",
+                job_id,
+                {"incident_id": incident_id, "exception_type": type(exc).__name__},
+            )
+
+    def job_status(self, flow_id: str, job_id: str) -> dict[str, Any]:
+        self._require_flow(flow_id)
+        job = self.store.get_job(job_id)
+        if job is None or job["flow_id"] != flow_id:
+            raise DomainError("JOB_NOT_FOUND", "任务不存在")
+        plan = self.store.get_plan(job["plan_id"])
+        if plan is None:
+            raise DomainError("PLAN_NOT_FOUND", "任务对应的下载计划不存在")
+        bundles = self.store.get_asset_bundles_for_job(job_id)
+        try:
+            execution_by_resource = {
+                str(item["resource_id"]): item for item in self.store.get_job_items(job_id)
+            }
+        except RuntimeError:
+            execution_by_resource = {}
+        outcomes = [
+            self._public_acquisition_outcome(
+                outcome, execution_by_resource.get(str(outcome["resource_id"]))
+            )
+            for outcome in self.store.get_acquisition_outcomes_for_job(job_id)
+        ]
+        assets = []
+        for asset_id in job["asset_ids"]:
+            asset = self.store.get_asset(asset_id)
+            if asset is not None and asset["status"] == "ready":
+                assets.append(self._public_asset(asset))
+        failures = self._public_bundle_failures(bundles)[:50]
+        if not failures and job["error"]:
+            public_error = self._public_stored_job_error(job["error"])
+            failures = [public_error] if public_error is not None else []
+        result = {
+            "job_id": job_id,
+            "flow_id": job["flow_id"],
+            "plan_id": plan["plan_id"],
+            "presentation_id": plan["presentation_id"],
+            "presented_version": int(plan["presented_version"]),
+            "selection_version": int(plan["selection_version"]),
+            "selection_digest": plan["selection_digest"],
+            "plan_digest": plan.get("plan_digest") or "",
+            "status": job["status"],
+            "progress": {
+                "completed_items": min(
+                    len(
+                        [
+                            outcome
+                            for outcome in outcomes
+                            if outcome["status"] in {"succeeded", "partial", "failed", "cancelled"}
+                        ]
+                    ),
+                    len(plan["resource_ids"]),
+                ),
+                "total_items": len(plan["resource_ids"]),
+                "percent": job["progress"],
+            },
+            "assets": assets,
+            "failures": failures,
+            "outcomes": outcomes,
+            "updated_at": job["updated_at"],
+        }
+        completion = self._job_completion(job, bundles)
+        if completion is not None:
+            result["completion"] = completion
+        return result
 
     @staticmethod
     def _public_acquisition_outcome(

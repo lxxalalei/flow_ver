@@ -58,18 +58,10 @@ status / failure / bundle / assets / timestamps
 
 Provider 能力的当前可执行性是运行时事实，不生成 readiness/eligibility ID。
 
-## 兼容目录
+## 已清理的旧获取契约
 
-0037 前的以下文件目前仍暂留仓库，供旧数据迁移、历史对照和后续 cleanup 使用：
-
-```text
-capabilities/capability-descriptors.json
-schemas/capability-descriptor*.schema.json
-schemas/deployment-readiness.schema.json
-schemas/eligibility-decision.schema.json
-```
-
-它们不再被 `tool-catalog.json` 的下载公共契约引用，也不应被新代码当作 Active acquisition authority。兼容期结束后再通过独立 cleanup 计划物理删除，避免迁移与运行时切换混在一次改动中。
+0037 第二阶段已经物理删除独立 Capability Descriptor、Deployment Readiness 与 Eligibility Decision 的 catalog/schema。
+这些对象只存在于 Git 历史和归档计划中，不再属于 current contract 目录，也不能被新代码重新解释为 acquisition source of truth。
 
 ## 目录导航
 
@@ -88,7 +80,6 @@ contracts/
 │   ├── plan-item.schema.json
 │   ├── actual-outcome.schema.json
 │   └── platform-registry.schema.json
-├── capabilities/              # 0037 兼容期历史输入；非 Active 获取真值
 ├── platforms/platform-registry.json
 └── taxonomy/learning-v1.json
 ```

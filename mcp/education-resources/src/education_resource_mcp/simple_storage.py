@@ -31,7 +31,7 @@ from .storage import (
 )
 
 
-LATEST_SCHEMA_VERSION = 8
+LATEST_SCHEMA_VERSION = 9
 _STRATEGIES = frozenset({"direct_file", "web_materialize", "web_capture"})
 
 
@@ -53,14 +53,24 @@ class Store(_LegacyStore):
             applied = connection.execute(
                 "SELECT 1 FROM schema_migrations WHERE version = 8"
             ).fetchone()
-            if applied is not None:
-                return
-            self._migration_simple_acquisition(connection)
-            connection.execute(
-                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (8, ?, ?)",
-                ("simple_acquisition_state", utc_now()),
-            )
-            connection.execute("PRAGMA user_version = 8")
+            if applied is None:
+                self._migration_simple_acquisition(connection)
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (8, ?, ?)",
+                    ("simple_acquisition_state", utc_now()),
+                )
+                connection.execute("PRAGMA user_version = 8")
+        with self.transaction(immediate=True) as connection:
+            applied = connection.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = 9"
+            ).fetchone()
+            if applied is None:
+                self._migration_drop_legacy_acquisition_authority(connection)
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (9, ?, ?)",
+                    ("drop_legacy_acquisition_authority", utc_now()),
+                )
+                connection.execute("PRAGMA user_version = 9")
 
     def _migration_simple_acquisition(self, connection: sqlite3.Connection) -> None:
         self._execute_statements(
@@ -219,6 +229,22 @@ class Store(_LegacyStore):
                 """
             )
 
+    def _migration_drop_legacy_acquisition_authority(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Drop the v6/v7 acquisition proof tables after v8 backfill."""
+
+        self._execute_statements(
+            connection,
+            """
+            DROP TABLE IF EXISTS job_execution_items;
+            DROP TABLE IF EXISTS acquisition_outcomes;
+            DROP TABLE IF EXISTS download_plan_items;
+            DROP TABLE IF EXISTS eligibility_decisions;
+            DROP TABLE IF EXISTS capability_readiness_snapshots;
+            """,
+        )
+
     @staticmethod
     def _normalize_plan_items(
         items: list[dict[str, Any]] | None,
@@ -298,12 +324,7 @@ class Store(_LegacyStore):
         idempotency_key: str,
         request_hash: str,
         plan_items: list[dict[str, Any]] | None = None,
-        **legacy_kwargs: Any,
     ) -> dict[str, Any]:
-        # capability_items is intentionally not accepted as authority. It may
-        # arrive only from a stale internal caller during a rolling upgrade.
-        if plan_items is None and isinstance(legacy_kwargs.get("capability_items"), list):
-            raise ValueError("legacy_capability_items_not_supported")
         scope = f"resource_download_prepare:{flow_id}"
         now = utc_now()
         with self.transaction(immediate=True) as connection:
@@ -525,9 +546,7 @@ class Store(_LegacyStore):
         now: str,
         *,
         bindings: Mapping[str, Any],
-        **legacy_kwargs: Any,
     ) -> tuple[dict[str, Any], bool]:
-        del legacy_kwargs
         checked_now = self._normalize_authority_timestamp(now, "now")
         with self.transaction(immediate=True) as connection:
             previous = connection.execute(
@@ -688,15 +707,6 @@ class Store(_LegacyStore):
         }
         item["resource"] = resource
         item["representation"] = _load(item.pop("representation_json"), {})
-        # Temporary keys let the inherited runner call the simplified
-        # AcquisitionRequest without fabricating persistent authority facts.
-        item["capability_scope"] = item["planned_scope"]
-        for key in (
-            "execution_binding_digest", "capability_id", "descriptor_version",
-            "descriptor_digest", "readiness_snapshot_id", "readiness_digest",
-            "eligibility_id", "eligibility_digest",
-        ):
-            item[key] = None
         return item
 
     def get_job_items(self, job_id: str) -> list[dict[str, Any]]:
@@ -725,9 +735,6 @@ class Store(_LegacyStore):
         if not rows:
             raise RuntimeError("job_item_missing")
         return [self._decode_job_item(row) for row in rows]
-
-    # Compatibility for the existing job runner during the thin-service cutover.
-    get_job_execution_items = get_job_items
 
     @staticmethod
     def _decode_execution_outcome(row: sqlite3.Row) -> dict[str, Any]:

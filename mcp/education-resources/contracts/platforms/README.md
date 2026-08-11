@@ -30,55 +30,25 @@ kepu, baiduwenku, runoob, nlc, open163, annas-archive, weibo, wechat
 - Anna's Archive 的历史搜索/Inspection 来源为 Libgen-backed 路线；Wechat 搜索当前由
   Sogou Weixin 提供。平台显示名不能掩盖实际实现来源，也不构成权利、质量或执行能力证明。
 
-## Acquisition 执行权威（Tool catalog 1.5）
+## Acquisition 运行时路由（Tool catalog 1.6）
 
-公共 Tool catalog `1.5.0` 的 acquisition authority 使用独立的静态 Capability Descriptor
-catalog：[`../capabilities/capability-descriptors.json`](../capabilities/capability-descriptors.json)。
-该文件的 `catalog_version` 与 `registry_version` 均为 `1.1.0`，只声明设计上存在的
-platform/resource/scope/strategy/Provider/Inspector 组合；静态声明本身不等于当前部署 ready，
-也不等于某个候选已解析出可执行表示或具备使用权利。
+Platform Registry 只描述平台身份、Search/Inspect 与历史能力声明。当前 acquisition 不再维护独立 Capability Descriptor catalog。
+执行路线由 `acquisition/planner.py` 中的小型 `ProviderSpec` 与当前部署的 exact Provider registration 共同决定，并且必须以当前 Resolution/Representation 为输入。
 
-当前静态 catalog 只有三条 exact route：
+当前简化路线至少包括：
 
-| descriptor | strategy / scope | exact Provider | fallback |
-|---|---|---|---|
-| `cap_generic_document_primary_direct_v1` | `direct_file` / `primary_resource` | `generic-direct@1.0.0` | disabled |
-| `cap_generic_webpage_landing_materialize_v1` | `web_materialize` / `landing_page` | `generic-web-materializer@1.0.0` | disabled |
-| `cap_smartedu_document_primary_direct_v1` | `direct_file` / `primary_resource` | `smartedu-resource@1.0.0` | disabled |
-
-实际 acquisition 必须沿服务端权威链执行：
-
-```text
-Capability Descriptor -> Deployment Readiness
-  -> persisted Resolution/Representation -> Eligibility
-  -> immutable Plan binding -> fresh immutable Execution binding
-  -> exact Provider -> persisted Actual Outcome
-```
-
-当前所有 descriptor 的 fallback 都关闭。`allow_safe_fallback` 只是兼容边界，不允许从
-Platform Registry 的 `acquire=true`、历史 strategy、平台名、URL 或扩展名推导另一条路线。
-0021/0022 曾接入的 Bilibili、Ximalaya、Douyin 和 Anna Downloader 只保留为历史实现、夹具和
-Bundle 兼容事实；它们不是当前可执行 capability，缺少 exact binding 时 generic Provider
-不得接管。
-
-0027 对现有实现的当前处置如下；这张表解释为什么没有新增机器 descriptor，不替代上述 JSON
-机器权威，也不表示真实平台验收已经开始：
-
-| 平台/机制 | 当前结构化状态 | 不登记 executable route 的主要原因 |
+| representation | strategy / scope | exact Provider |
 |---|---|---|
-| Bilibili video | `policy_blocked`, `dependency_missing` | 未有匹配任意视频获取的官方授权/API；现有内部网页接口不可作为契约，live 环境也缺 ffmpeg |
-| Douyin video | `policy_blocked`, `auth_required` | 官方接口受应用 capability 和用户授权范围约束；现有 Cookie/a_bogus 网页路线不能替代官方授权 |
-| Ximalaya audio | `policy_blocked`, `auth_required`, `dependency_missing` | 官方合作/API/SDK 权限未具备；现有网页协议会产生 album 到首曲的语义漂移，live Python 也缺 Crypto |
-| Anna/Libgen book | `policy_blocked` | 没有逐作品许可事实或受控镜像/逐跳网络政策；Inspection 只证明 metadata/landing |
-| generic `web_capture` | `unsupported` | 当前只校验初始 URL，未拦截每次 redirect/subresource；Chrome 路径与 websocket 依赖也未进入 readiness |
+| generic document primary | `direct_file` / `primary_resource` | `generic-direct@1.0.0` |
+| generic webpage primary | `web_materialize` / `primary_resource` | `generic-web-materializer@1.0.0` |
+| generic webpage landing | `web_materialize` / `landing_page` | `generic-web-materializer@1.0.0` |
+| SmartEdu document primary | `direct_file` / `primary_resource` | `smartedu-resource@1.0.0`（仅实际注册时） |
 
-以上路线的机器行为是“不声明能力”：Capability 选择返回结构化 `CAPABILITY_NOT_DECLARED`，默认
-`ResourceService` 不注册对应 Provider，Router 也不会跨 Provider、scope 或 strategy 接管。未来解除
-某项阻断时，必须先补齐 descriptor、runtime readiness、concrete Representation、Eligibility、exact
-Provider 和 Outcome 测试，不能只修改本表或 Platform Registry 的历史字段。
+Prepare 根据 fresh Representation 生成 PlanItem；Start 重新读取当前 Resolution，核对 representation 未漂移，并确认 Plan 中的 exact Provider 仍注册且支持相同 scope/strategy。该检查不生成 Readiness Snapshot、Eligibility ID 或 binding digest。
 
-认证字段只描述当前 Adapter 的会话需求。它与 `sessions.py` 的登录态捕获、探测和存储
-Registry 分离；不得从某个平台存在 Session 配置反推其搜索或下载一定需要认证。
+Provider 失败后不切换 Generic/其他 Provider、scope 或 strategy。Bilibili、Douyin、Ximalaya、Anna/Libgen 等路线如果没有当前 `ProviderSpec + Representation + exact Provider`，就保持结构化 blocked/unsupported，不能从 Registry 的历史 `acquire=true` 推导执行能力。
+
+未来新增 acquisition route 时，应最小化地新增/调整 ProviderSpec、Inspector 产生的 Representation、Provider registration 和业务回归测试；不得重新建立 Descriptor → Readiness → Eligibility → digest 状态链。
 
 ## Identity profile
 
@@ -105,13 +75,12 @@ fallback 由测试锁定一致，错误平台不能复用其他平台的可清�
 
 1. 更新 `platform-registry.schema.json` 和严格 loader 语义校验。
 2. 更新 Adapter descriptor 一致性测试和 Identity Golden Cases。
-3. 更新 Skill 的 `references/platform-capabilities.md`；平台身份、检索与历史声明仍以本 JSON 为机器权威，acquisition 执行能力则以独立 Capability Descriptor catalog 为权威。
+3. 平台身份、检索与历史声明仍以本 JSON 为机器权威；acquisition 执行路线以当前 ProviderSpec、Representation 和 exact Provider registration 为准。
 4. 保持凭据、Cookie、Token、命令、下载 URL 和本地路径不进入 Registry。
 5. 新增或修改 inspect 能力时，必须同步实际 Inspector Router、平台固定夹具和能力一致性测试；
    Registry 不得提前声明未实现的平台支持。未启用平台由服务层返回结构化
    `FEATURE_NOT_SUPPORTED`。
-6. 新增 acquisition route 必须修改独立的 Capability Descriptor catalog、readiness/eligibility
-   与绑定测试；不得通过改 `acquire=true` 或 `acquisition.strategies` 扩大当前执行能力。
+6. 新增 acquisition route 必须同步 ProviderSpec、Inspector Representation、exact Provider registration 与业务测试；不得通过改 `acquire=true` 或 `acquisition.strategies` 扩大当前执行能力。
 
 ## Inspection 边界（0019）
 

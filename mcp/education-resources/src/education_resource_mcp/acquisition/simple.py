@@ -1,8 +1,8 @@
 """Simplified exact-provider acquisition seam.
 
-This module keeps the useful part of the old acquisition boundary — an exact
-Provider chosen by a server-authored Plan — without carrying descriptor,
-readiness, eligibility, or binding-digest credentials into Provider calls.
+A Provider receives only the execution facts needed to perform the operation.
+Descriptor, readiness, eligibility and digest credentials are not part of this
+boundary.
 """
 
 from __future__ import annotations
@@ -13,22 +13,26 @@ import copy
 import threading
 from typing import Any
 
-from .models import AcquisitionRequest as _LegacyAcquisitionRequest
 from .models import AcquisitionResult, AcquisitionStrategy, CAPABILITY_SCOPES
 from .router import AcquisitionRouter as _LegacyAcquisitionRouter
 from .router import ProviderRegistration
 
 
-class AcquisitionRequest(_LegacyAcquisitionRequest):
-    """Compatibility subtype exposing only business execution facts.
+class AcquisitionRequest:
+    """Server-authored execution request containing only business facts."""
 
-    Existing Providers that still perform ``isinstance(..., AcquisitionRequest)``
-    continue to work because this is a subtype of the previous request class.
-    The old authority fields are populated with inert compatibility values and
-    are never persisted, validated, or exposed to the Provider-facing dict.
-    """
-
-    __slots__ = ()
+    __slots__ = (
+        "job_id",
+        "resource",
+        "strategy",
+        "provider_id",
+        "provider_version",
+        "planned_scope",
+        "representation_id",
+        "preferred_container",
+        "cancel_event",
+        "jobs_root",
+    )
 
     def __init__(
         self,
@@ -43,27 +47,7 @@ class AcquisitionRequest(_LegacyAcquisitionRequest):
         preferred_container: str = "original",
         cancel_event: threading.Event | None = None,
         jobs_root: Path | None = None,
-        binding_digest: Any = None,
-        source_fingerprint: Any = None,
-        capability_id: Any = None,
-        descriptor_version: Any = None,
-        descriptor_digest: Any = None,
-        readiness_snapshot_id: Any = None,
-        readiness_digest: Any = None,
-        eligibility_id: Any = None,
-        eligibility_digest: Any = None,
     ) -> None:
-        del (
-            binding_digest,
-            source_fingerprint,
-            capability_id,
-            descriptor_version,
-            descriptor_digest,
-            readiness_snapshot_id,
-            readiness_digest,
-            eligibility_id,
-            eligibility_digest,
-        )
         if not isinstance(job_id, str) or not job_id:
             raise ValueError("job_id must be a non-empty server identifier")
         if not isinstance(resource, Mapping):
@@ -93,28 +77,16 @@ class AcquisitionRequest(_LegacyAcquisitionRequest):
         if not resolved_root.is_absolute() or ".." in resolved_root.parts:
             raise ValueError("jobs_root must be an absolute server-controlled root")
 
-        # Base dataclass slots are assigned directly; its old __post_init__ is
-        # intentionally not called because the deleted authority credentials
-        # are not part of the new runtime contract.
-        object.__setattr__(self, "job_id", job_id)
-        object.__setattr__(self, "resource", copy.deepcopy(dict(resource)))
-        object.__setattr__(self, "strategy", selected_strategy)
-        object.__setattr__(self, "provider_id", provider_id)
-        object.__setattr__(self, "provider_version", provider_version)
-        object.__setattr__(self, "planned_scope", planned_scope)
-        object.__setattr__(self, "representation_id", representation_id)
-        object.__setattr__(self, "binding_digest", "")
-        object.__setattr__(self, "source_fingerprint", "")
-        object.__setattr__(self, "capability_id", "")
-        object.__setattr__(self, "descriptor_version", "")
-        object.__setattr__(self, "descriptor_digest", "")
-        object.__setattr__(self, "readiness_snapshot_id", "")
-        object.__setattr__(self, "readiness_digest", "")
-        object.__setattr__(self, "eligibility_id", "")
-        object.__setattr__(self, "eligibility_digest", "")
-        object.__setattr__(self, "preferred_container", preferred_container)
-        object.__setattr__(self, "cancel_event", event)
-        object.__setattr__(self, "jobs_root", resolved_root)
+        self.job_id = job_id
+        self.resource = copy.deepcopy(dict(resource))
+        self.strategy = selected_strategy
+        self.provider_id = provider_id
+        self.provider_version = provider_version
+        self.planned_scope = planned_scope
+        self.representation_id = representation_id
+        self.preferred_container = preferred_container
+        self.cancel_event = event
+        self.jobs_root = resolved_root
 
     @property
     def resource_id(self) -> str:

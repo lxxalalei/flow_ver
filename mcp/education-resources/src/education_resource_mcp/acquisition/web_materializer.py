@@ -23,7 +23,6 @@ import zipfile
 from ..errors import DomainError
 from ..policy import ensure_within_root
 from .models import (
-    AcquisitionRequest,
     AcquisitionResult,
     AcquisitionStrategy,
     Artifact,
@@ -529,11 +528,9 @@ class WebMaterializer:
             )
         raise DomainError("WEB_FETCH_UNAVAILABLE", "静态物化 fetcher 不支持图片获取")
 
-    def acquire(self, request: AcquisitionRequest) -> AcquisitionResult:
-        """Fetch and materialize one request using ``jobs_root/job_id`` only."""
+    def acquire(self, request: Any) -> AcquisitionResult:
+        """Fetch and materialize one server-authored request using ``jobs_root/job_id`` only."""
 
-        if not isinstance(request, AcquisitionRequest):
-            raise TypeError("WebMaterializer.acquire expects AcquisitionRequest")
         cancel_event = request.cancel_event
         if cancel_event is not None and cancel_event.is_set():
             raise DomainError("JOB_CANCELLED", "任务已取消")

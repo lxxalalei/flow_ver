@@ -70,7 +70,7 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
             finally:
                 service.close()
 
-    def test_request_exposes_only_execution_facts(self) -> None:
+    def test_request_has_no_legacy_authority_slots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             request = AcquisitionRequest(
                 job_id="job_test_0037",
@@ -83,23 +83,35 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
                 preferred_container="html",
                 cancel_event=threading.Event(),
                 jobs_root=Path(directory),
-                binding_digest="legacy-value-is-ignored",
-                descriptor_digest="legacy-value-is-ignored",
-                readiness_digest="legacy-value-is-ignored",
-                eligibility_digest="legacy-value-is-ignored",
             )
+            for deleted in (
+                "binding_digest",
+                "source_fingerprint",
+                "capability_id",
+                "descriptor_digest",
+                "readiness_snapshot_id",
+                "readiness_digest",
+                "eligibility_id",
+                "eligibility_digest",
+            ):
+                self.assertFalse(hasattr(request, deleted), deleted)
+            with self.assertRaises(TypeError):
+                AcquisitionRequest(
+                    job_id="job_test_legacy_kwarg",
+                    resource={"resource_id": "res_test_legacy_kwarg", "platform": "generic"},
+                    strategy="web_materialize",
+                    provider_id="generic-web-materializer",
+                    provider_version="1.0.0",
+                    planned_scope="primary_resource",
+                    representation_id="repr_test_legacy_kwarg",
+                    preferred_container="html",
+                    cancel_event=threading.Event(),
+                    jobs_root=Path(directory),
+                    binding_digest="legacy",  # type: ignore[call-arg]
+                )
         public = request.to_dict()
         self.assertEqual(public["planned_scope"], "primary_resource")
         self.assertEqual(public["strategy"], "web_materialize")
-        for deleted in (
-            "binding_digest",
-            "source_fingerprint",
-            "capability_id",
-            "descriptor_digest",
-            "readiness_digest",
-            "eligibility_digest",
-        ):
-            self.assertNotIn(deleted, public)
 
     def test_primary_article_webpage_routes_to_materializer(self) -> None:
         router = AcquisitionRouter(
@@ -151,7 +163,7 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
         self.assertNotIn("authority_digest", items[0])
         self.assertNotIn("eligibility_id", items[0])
 
-    def test_migration_8_has_business_tables_without_authority_digests(self) -> None:
+    def test_migration_9_drops_legacy_authority_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "state.sqlite3")
             with store._connect() as connection:
@@ -180,8 +192,17 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
                         "PRAGMA table_info(execution_outcomes)"
                     ).fetchall()
                 }
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
         self.assertTrue({"acquisition_plan_items", "job_items", "execution_outcomes"} <= tables)
+        self.assertTrue(
+            {
+                "capability_readiness_snapshots",
+                "eligibility_decisions",
+                "download_plan_items",
+                "job_execution_items",
+                "acquisition_outcomes",
+            }.isdisjoint(tables)
+        )
         deleted = {
             "authority_digest",
             "binding_digest",
