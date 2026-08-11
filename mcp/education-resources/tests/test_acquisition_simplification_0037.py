@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+import inspect
+import json
+from pathlib import Path
+import tempfile
+import threading
+import unittest
+
+from education_resource_mcp.acquisition import (
+    AcquisitionRequest,
+    AcquisitionRouter,
+    AcquisitionStrategy,
+    ProviderRegistration,
+)
+from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+from education_resource_mcp.simple_service import ResourceService
+from education_resource_mcp.simple_storage import Store
+
+
+class _Materializer:
+    def materialize(self, request):  # pragma: no cover - routing registration only
+        raise AssertionError("not executed")
+
+
+class AcquisitionSimplification0037Tests(unittest.TestCase):
+    def test_request_exposes_only_execution_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            request = AcquisitionRequest(
+                job_id="job_test_0037",
+                resource={"resource_id": "res_test_0037", "platform": "generic"},
+                strategy="web_materialize",
+                provider_id="generic-web-materializer",
+                provider_version="1.0.0",
+                planned_scope="primary_resource",
+                representation_id="repr_test_0037",
+                preferred_container="html",
+                cancel_event=threading.Event(),
+                jobs_root=Path(directory),
+                binding_digest="legacy-value-is-ignored",
+                descriptor_digest="legacy-value-is-ignored",
+                readiness_digest="legacy-value-is-ignored",
+                eligibility_digest="legacy-value-is-ignored",
+            )
+        public = request.to_dict()
+        self.assertEqual(public["planned_scope"], "primary_resource")
+        self.assertEqual(public["strategy"], "web_materialize")
+        for deleted in (
+            "binding_digest",
+            "source_fingerprint",
+            "capability_id",
+            "descriptor_digest",
+            "readiness_digest",
+            "eligibility_digest",
+        ):
+            self.assertNotIn(deleted, public)
+
+    def test_primary_article_webpage_routes_to_materializer(self) -> None:
+        router = AcquisitionRouter(
+            [
+                ProviderRegistration(
+                    provider_id="generic-web-materializer",
+                    provider_version="1.0.0",
+                    provider=_Materializer(),
+                    strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
+                    scopes=("primary_resource", "landing_page"),
+                )
+            ]
+        )
+        planner = AcquisitionPlanner(router)
+        items = planner.plan_selection(
+            [
+                {
+                    "resource_id": "res_article_0037",
+                    "platform": "generic",
+                    "resource_type": "article",
+                    "title": "正文网页",
+                    "source_url": "https://example.com/article",
+                    "metadata": {},
+                }
+            ],
+            [
+                {
+                    "resolution_id": "resolution_0037",
+                    "representations": [
+                        {
+                            "representation_id": "repr_article_0037",
+                            "scope": "primary_resource",
+                            "kind": "webpage",
+                            "role": "primary",
+                            "container": "html",
+                            "mime_type": "text/html",
+                            "materializable": True,
+                            "technical_availability": "available",
+                        }
+                    ],
+                }
+            ],
+            preferred_container="html",
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["planned_scope"], "primary_resource")
+        self.assertEqual(items[0]["strategy"], "web_materialize")
+        self.assertEqual(items[0]["provider_id"], "generic-web-materializer")
+        self.assertNotIn("authority_digest", items[0])
+        self.assertNotIn("eligibility_id", items[0])
+
+    def test_migration_8_has_business_tables_without_authority_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "state.sqlite3")
+            with store._connect() as connection:
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                tables = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                plan_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(acquisition_plan_items)"
+                    ).fetchall()
+                }
+                job_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(job_items)"
+                    ).fetchall()
+                }
+                outcome_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(execution_outcomes)"
+                    ).fetchall()
+                }
+        self.assertEqual(version, 8)
+        self.assertTrue({"acquisition_plan_items", "job_items", "execution_outcomes"} <= tables)
+        deleted = {
+            "authority_digest",
+            "binding_digest",
+            "plan_binding_digest",
+            "execution_binding_digest",
+            "outcome_digest",
+            "readiness_snapshot_id",
+            "eligibility_id",
+        }
+        self.assertFalse(plan_columns & deleted)
+        self.assertFalse(job_columns & deleted)
+        self.assertFalse(outcome_columns & deleted)
+
+    def test_public_start_signature_has_no_authority_digest(self) -> None:
+        parameters = inspect.signature(ResourceService.download_start).parameters
+        self.assertNotIn("authority_digest", parameters)
+
+    def test_download_contracts_do_not_expose_authority_chain(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "contracts" / "schemas"
+        plan = json.loads((root / "plan-item.schema.json").read_text(encoding="utf-8"))
+        start = json.loads(
+            (root / "tools" / "resource_download_start.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        job = json.loads(
+            (root / "tools" / "resource_job_status.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        text = json.dumps([plan, start, job], ensure_ascii=False)
+        for deleted in (
+            "authority_digest",
+            "plan_binding_digest",
+            "execution_binding_digest",
+            "outcome_digest",
+            "eligibility_id",
+            "readiness_snapshot_id",
+        ):
+            self.assertNotIn(deleted, text)
+
+
+if __name__ == "__main__":
+    unittest.main()
