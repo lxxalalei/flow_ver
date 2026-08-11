@@ -15,15 +15,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 5
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Recover and apply staged patch script
         run: |
-          git show HEAD^^:.github/workflows/0037-part2-cutover.yml \
-            | awk 'BEGIN{capture=0} /python - <<'\''PY'\''/{capture=1; next} capture && /^          PY$/{exit} capture{print}' \
-            | sed 's/^          //' > /tmp/0037-part2-cutover.py
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          raw = subprocess.check_output(
+              ["git", "show", "e73ca1e22c7a269926824a169eb8215e6563bd45:.github/workflows/0037-part2-cutover.yml"],
+              text=True,
+          )
+          capture = False
+          in_triple = False
+          output = []
+          for raw_line in raw.splitlines():
+              if not capture:
+                  if "python - <<'PY'" in raw_line:
+                      capture = True
+                  continue
+              if not in_triple and raw_line == "          PY":
+                  break
+              line = raw_line
+              if not in_triple and line.startswith("          "):
+                  line = line[10:]
+              output.append(line)
+              if line.count("'''") % 2 == 1:
+                  in_triple = not in_triple
+          Path("/tmp/0037-part2-cutover.py").write_text("\n".join(output) + "\n", encoding="utf-8")
+          PY
           python /tmp/0037-part2-cutover.py
       - name: Install service
         run: |
