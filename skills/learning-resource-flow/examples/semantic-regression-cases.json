@@ -1,6 +1,6 @@
 {
-  "version": "3.1.0",
-  "purpose": "验证唯一入口 Skill 的需求澄清、稳定背景复用、搜索语义规划、自适应检索，以及 education-resources ResultSet、Presentation、Selection 控制边界。",
+  "version": "3.2.0",
+  "purpose": "验证唯一入口 Skill 的需求澄清、OpenClaw 上层用户背景消费、搜索语义规划、自适应检索，以及 education-resources ResultSet、Presentation、Selection 控制边界。",
   "cases": [
     {
       "name": "主题明确直接搜索",
@@ -43,31 +43,39 @@
       "forbidden": ["仅为补齐年龄、年级或身份而发问", "列出未知字段清单", "搜索前再次请求确认"]
     },
     {
-      "name": "稳定年龄背景复用",
+      "name": "消费 OpenClaw 已提供年龄背景",
       "messages": [
-        {"role": "user", "content": "我家小宝今年8岁。"},
+        {"role": "assistant", "content": "OpenClaw 当前用户上下文已提供：小宝约8岁。"},
         {"role": "user", "content": "给小宝找一些火山纪录片，先看看。"}
       ],
-      "expected": ["识别本次 resource target 仍是小宝", "年龄确实有助于适配判断时复用已知的8岁背景", "不要求用户重复提供年龄"],
-      "forbidden": ["把年龄视为每个新搜索都失效", "再次询问小宝几岁", "把8岁写成用户本次新声明的硬约束"]
+      "expected": ["识别本次 resource target 为小宝", "年龄确实有助于适配判断时使用当前上下文中的8岁背景", "不要求用户重复提供年龄", "资源 Flow 不新增年龄画像状态"],
+      "forbidden": ["再次询问小宝几岁", "创建 target_age 或 child_profile 等新的 MCP 画像字段", "把8岁改写成用户本次新声明的硬约束", "声称由资源 Skill 长期保存该年龄"]
     },
     {
       "name": "多孩子背景不串用",
       "messages": [
-        {"role": "user", "content": "大宝12岁，小宝7岁。"},
+        {"role": "assistant", "content": "OpenClaw 当前用户上下文已提供：大宝12岁，小宝7岁。"},
         {"role": "user", "content": "给小宝找一些适合自己读的古诗启蒙材料。"}
       ],
-      "expected": ["只使用与小宝对应的已知背景", "不把大宝的12岁迁移给小宝", "在年龄不需要进入 query 时不机械追加"],
-      "forbidden": ["再次询问两个孩子年龄", "使用12岁作为当前 target 背景", "把家庭其他成员背景当成当前任务约束"]
+      "expected": ["只使用与小宝对应的当前上下文背景", "不把大宝的12岁迁移给小宝", "在年龄不需要进入 query 时不机械追加", "不在资源系统内复制一份家庭画像"],
+      "forbidden": ["再次询问两个孩子年龄", "使用12岁作为当前 target 背景", "把家庭其他成员背景当成当前任务约束", "创建资源系统自己的家庭成员 Profile"]
     },
     {
       "name": "多孩子且对象不明确时先确认对象",
       "messages": [
-        {"role": "user", "content": "大宝12岁，小宝7岁。"},
+        {"role": "assistant", "content": "OpenClaw 当前用户上下文已提供：大宝12岁，小宝7岁。"},
         {"role": "user", "content": "找一些给孩子自己看的青春期身体变化科普。"}
       ],
-      "expected": ["判断不同孩子会导致明显不同的内容尺度", "只澄清这次是给大宝还是小宝", "复用已有年龄而不是重新采集"],
-      "forbidden": ["再次询问年龄", "默认选择其中一个孩子", "一次询问多个画像字段"]
+      "expected": ["判断不同孩子会导致明显不同的内容尺度", "只澄清这次是给大宝还是小宝", "确认对象后复用上层已有背景而不是重新采集"],
+      "forbidden": ["再次询问年龄", "默认选择其中一个孩子", "一次询问多个画像字段", "为了绑定对象新增 profile_id"]
+    },
+    {
+      "name": "本轮召回假设不写回用户记忆",
+      "messages": [
+        {"role": "user", "content": "给小宝找些恐龙科普，形式你看着办。"}
+      ],
+      "expected": ["可以把动画、纪录片或图文作为召回假设", "只用这些假设规划 SearchDirection 和 query", "不把本轮模型选择自动沉淀成小宝的长期偏好"],
+      "forbidden": ["声称小宝长期喜欢动画", "把召回假设写成用户 prefer", "由资源 Skill 更新 OpenClaw 长期用户画像"]
     },
     {
       "name": "硬约束冲突",
