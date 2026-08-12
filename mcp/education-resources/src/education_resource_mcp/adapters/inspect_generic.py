@@ -1,10 +1,10 @@
 """Preview-based inspection of public generic HTTP resources.
 
-This adapter intentionally keeps the network boundary private. It follows
+This adapter intentionally keeps the network boundary private.  It follows
 only a small, explicitly bounded redirect chain, validates every URL with the
 shared public-network policy, and returns metadata that has already passed the
-inspection core's locator/secret boundary. The transport and DNS resolver are
-injectable so tests never need to access the network.
+inspection core's locator/secret boundary.  The transport and DNS resolver
+are injectable so tests never need to access the network.
 """
 
 from __future__ import annotations
@@ -414,6 +414,8 @@ def _extract_html_metadata(body: bytes) -> _HTMLMetadata:
         parser.feed(body.decode("utf-8", errors="replace"))
         parser.close()
     except Exception:
+        # Malformed HTML should not turn an otherwise bounded response into a
+        # raw parser exception.  The resource fallback remains available.
         pass
 
     meta = parser.meta
@@ -502,6 +504,9 @@ class GenericWebInspector:
     platform_id = "generic"
     inspector_id = INSPECTOR_ID
     version = INSPECTOR_VERSION
+    # Runtime capability inventory is derived from this implementation fact,
+    # not from the retrieval catalog. Platform wrappers inherit the same
+    # bounded scope set and may add non-primary companion representations.
     supported_scopes = ("primary_resource", "representation", "landing_page", "metadata")
 
     def __init__(
@@ -655,6 +660,10 @@ class GenericWebInspector:
                 fingerprint = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
             seed = f"{fingerprint}:{rep.get('kind', 'other')}:{rep.get('mime_type', '')}"
             rep.setdefault("representation_id", "repr_" + hashlib.sha256(seed.encode()).hexdigest()[:32])
+            # Every adapter result carries explicit capability scope and
+            # bounded evidence.  Legacy role/materializable fields remain in
+            # the envelope for old consumers but are never used to infer a
+            # primary resource when the authority fields disagree.
             scope = rep.get("scope")
             role = rep.get("role")
             if isinstance(scope, str) and isinstance(role, str):
@@ -740,6 +749,9 @@ class GenericWebInspector:
                 "retriable": True,
             }, None
 
+        # Content-Length is advisory metadata only.  Large resources are
+        # classified from the preview and continue to the streaming download
+        # path instead of being rejected during inspection.
         observed_size = declared_size
         if observed_size is None and total < INSPECTION_MAX_BYTES:
             observed_size = total
@@ -749,6 +761,9 @@ class GenericWebInspector:
         try:
             return self._inspect(resource)
         except Exception:
+            # The adapter boundary must not expose parser, resolver, or
+            # transport exception text.  Keep this fallback deliberately
+            # boring and let the inspection core validate the envelope.
             safe_resource = resource if isinstance(resource, Mapping) else {}
             try:
                 return self._error_result(
@@ -989,7 +1004,12 @@ class GenericWebInspector:
                 and mime_error is None
                 and read_error is None
             )
-            if concrete_evidence or (page_evidence and html_metadata.primary_page):
+            if concrete_evidence:
+                scope = "primary_resource"
+                role = "primary"
+                materializable = True
+                technical_availability = "available"
+            elif page_evidence and html_metadata.primary_page:
                 scope = "primary_resource"
                 role = "primary"
                 materializable = True
@@ -997,9 +1017,16 @@ class GenericWebInspector:
             elif page_evidence:
                 scope = "landing_page"
                 role = "landing"
+                # A successfully inspected public HTML response is concrete
+                # landing-page evidence.  It can be materialized by the exact
+                # web-materializer capability while remaining a landing page;
+                # this never upgrades it to a primary resource.
                 materializable = True
                 technical_availability = "available" if not failures else "unknown"
             else:
+                # A declared file MIME without a matching magic signature, a
+                # MIME/magic conflict, or an unclassified body is only a
+                # representation fact.  It must not become a primary plan.
                 scope = "representation"
                 role = "attachment"
                 materializable = False
