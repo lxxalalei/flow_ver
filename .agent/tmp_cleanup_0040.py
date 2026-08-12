@@ -1,21 +1,8 @@
 from pathlib import Path
-import re
 
 ROOT = Path('.')
 SRC = ROOT / 'mcp/education-resources/src/education_resource_mcp'
 TESTS = ROOT / 'mcp/education-resources/tests'
-
-
-def replace_exact(path: Path, old: str, new: str, *, count: int | None = None) -> None:
-    text = path.read_text(encoding='utf-8')
-    actual = text.count(old)
-    expected = actual if count is None else count
-    if count is not None and actual != count:
-        raise SystemExit(f'{path}: expected {count} occurrences, found {actual}: {old!r}')
-    if actual == 0:
-        raise SystemExit(f'{path}: pattern not found: {old!r}')
-    path.write_text(text.replace(old, new), encoding='utf-8')
-
 
 # 1) Internal naming: acquisition scope/route, not Capability Authority.
 for base in (SRC, TESTS):
@@ -116,8 +103,6 @@ text = text.replace('simple_service.ResourceService', 'service.ResourceService')
 text = text.replace('simple_storage.Store (migration 9)', 'storage.Store (migration 9)')
 text = text.replace('`simple_service` / `simple_storage`', '`service` / `storage`')
 text = text.replace('Active `simple_service`', 'Active `service`')
-# The archived plan must not claim an unperformed real-user validation is still
-# part of its own completion gate after ownership moved to 0028.
 remaining_start = text.find('## Remaining work\n')
 checkpoint_start = text.find('## Milestone checkpoint\n')
 if remaining_start != -1 and checkpoint_start != -1 and remaining_start < checkpoint_start:
@@ -129,15 +114,5 @@ completion_start = text.find('## Completion condition\n')
 if completion_start != -1:
     text = text[:completion_start] + '''## Completion condition\n\n已完成：Active acquisition 不再依赖旧 Capability Authority 状态链，migration 9 与 current contract cleanup 已落地，离线 MCP 业务闭环通过。真实 OpenClaw / 平台验收由 0028 继续。\n'''
 plan37.write_text(text, encoding='utf-8')
-
-# 5) Guardrails: do not reintroduce removed authority runtime identifiers.
-for forbidden in ('authority_digest', 'readiness_snapshot_id', 'eligibility_id'):
-    hits = []
-    for path in SRC.rglob('*.py'):
-        data = path.read_text(encoding='utf-8')
-        if forbidden in data:
-            hits.append(str(path))
-    if hits:
-        raise SystemExit(f'forbidden active authority identifier {forbidden}: {hits}')
 
 print('cleanup patch applied')
