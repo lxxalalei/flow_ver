@@ -218,11 +218,11 @@ class AcquisitionServiceTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("acquisition job did not reach a terminal state")
 
-    def test_static_bundle_is_single_public_asset_and_archives_portably(self) -> None:
+    def test_standalone_html_is_single_public_asset_and_archives_directly(self) -> None:
         flow_id, status = self._run_job()
         self.assertEqual(status["status"], "succeeded")
         self.assertEqual(len(status["assets"]), 1)
-        self.assertEqual(status["assets"][0]["media_type"], "application/zip")
+        self.assertEqual(status["assets"][0]["media_type"], "text/html")
         self.assertEqual(1, len(status["outcomes"]))
         outcome = status["outcomes"][0]
         self.assertEqual(
@@ -242,9 +242,15 @@ class AcquisitionServiceTests(unittest.TestCase):
         asset = self.service.store.get_asset(asset_id)
         self.assertIsNotNone(asset)
         assert asset is not None
-        self.assertEqual(asset["filename"], "webbundle.zip")
+        self.assertEqual(asset["filename"], "index.html")
+        primary_html = Path(asset["local_path"]).read_text(encoding="utf-8")
+        self.assertNotIn("<script", primary_html.casefold())
+        self.assertIn("data:image/png;base64,", primary_html)
+        self.assertNotIn("assets/image-", primary_html)
 
-        with zipfile.ZipFile(Path(asset["local_path"])) as archive:
+        job_bundle = self.settings.jobs_dir / status["job_id"] / "webbundle.zip"
+        self.assertTrue(job_bundle.is_file())
+        with zipfile.ZipFile(job_bundle) as archive:
             names = archive.namelist()
             self.assertEqual(names, sorted(names))
             self.assertIn("index.html", names)
@@ -252,8 +258,9 @@ class AcquisitionServiceTests(unittest.TestCase):
             self.assertIn("metadata.json", names)
             self.assertTrue(any(name.startswith("assets/image-") for name in names))
             sanitized = archive.read("index.html").decode("utf-8")
-            self.assertNotIn("<script", sanitized.casefold())
-            self.assertIn("assets/image-", sanitized)
+            markdown = archive.read("content.md").decode("utf-8")
+            self.assertIn("data:image/png;base64,", sanitized)
+            self.assertIn("assets/image-", markdown)
 
         archived = self.service.archive(
             flow_id,
@@ -266,10 +273,11 @@ class AcquisitionServiceTests(unittest.TestCase):
         stored_archive = self.service.store.get_archive_for_asset(asset_id)
         self.assertIsNotNone(stored_archive)
         assert stored_archive is not None
-        with zipfile.ZipFile(
-            self.settings.library_dir / Path(stored_archive["library_path"])
-        ) as archive:
-            self.assertIn("index.html", archive.namelist())
+        archived_path = self.settings.library_dir / Path(stored_archive["library_path"])
+        self.assertEqual(".html", archived_path.suffix)
+        archived_html = archived_path.read_text(encoding="utf-8")
+        self.assertNotIn("<script", archived_html.casefold())
+        self.assertIn("data:image/png;base64,", archived_html)
 
         self.assertEqual(
             self.fetcher.calls,
