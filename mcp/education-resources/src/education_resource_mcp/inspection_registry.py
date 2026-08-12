@@ -46,7 +46,7 @@ def default_inspection_router(
         DouyinInspector(session_store=session_store),
         NlcInspector(**inspector_options),
         AnnasArchiveInspector(**inspector_options),
-        XimalayaInspector(**inspector_options),
+        XimalayaInspector(session_store=session_store, **inspector_options),
         ZhihuInspector(**inspector_options),
         SmartEduInspector(session_store=session_store, **inspector_options),
     )

@@ -121,6 +121,17 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         resource_types=frozenset({"video"}),
     ),
     ProviderSpec(
+        platform_id="ximalaya",
+        scope="primary_resource",
+        representation_kind="audio",
+        role="primary",
+        strategy=AcquisitionStrategy.DIRECT_FILE,
+        provider_id="ximalaya-audio",
+        provider_version="1.0.0",
+        containers=frozenset({"mp3", "m4a"}),
+        resource_types=frozenset({"audio"}),
+    ),
+    ProviderSpec(
         platform_id="generic",
         scope="primary_resource",
         representation_kind="document",

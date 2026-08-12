@@ -304,13 +304,16 @@ class PlatformBoundedInspector(GenericWebInspector):
         metadata: Mapping[str, Any],
         representations: Sequence[Mapping[str, Any]],
         creator: str | None = None,
+        availability: str | None = None,
     ) -> InspectionResult:
         mapping = result.to_mapping()
         resolved = mapping["resolved_resource"]
         resolved["resource_type"] = resource_type
         resolved["metadata"] = dict(metadata)
         observed_at = mapping.get("inspection", {}).get("inspected_at")
-        availability = resolved.get("availability", {}).get("status", "unknown")
+        if availability is not None:
+            resolved["availability"] = {"status": availability}
+        availability_status = resolved.get("availability", {}).get("status", "unknown")
         normalised_representations: list[dict[str, Any]] = []
         for raw in representations:
             item = dict(raw)
@@ -326,7 +329,7 @@ class PlatformBoundedInspector(GenericWebInspector):
             item["scope"] = scope
             item.setdefault(
                 "technical_availability",
-                "available" if availability == "available" else "unknown",
+                "available" if availability_status == "available" else "unknown",
             )
             evidence = item.get("evidence")
             if not isinstance(evidence, Mapping):
