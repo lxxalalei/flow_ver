@@ -42,7 +42,7 @@ def default_inspection_router(
     )
     inspectors = (
         GenericWebInspector(**inspector_options),
-        BilibiliInspector(**inspector_options),
+        BilibiliInspector(session_store=session_store, **inspector_options),
         DouyinInspector(session_store=session_store),
         NlcInspector(**inspector_options),
         AnnasArchiveInspector(**inspector_options),

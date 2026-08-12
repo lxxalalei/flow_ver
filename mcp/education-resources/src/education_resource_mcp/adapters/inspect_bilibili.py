@@ -1,15 +1,15 @@
-"""Public Bilibili inspection built on the bounded generic web inspector.
+"""Bilibili inspection backed by current playurl DASH facts.
 
-The platform inspectors in this directory only inspect a public landing page.
-They deliberately do not use the search adapters' session state or copy
-request headers into the result.  Platform metadata is an explicit scalar
-allow-list so an ordinary candidate record cannot become an output side
-channel for URLs, paths, cookies, or credentials.
+Fetches the public landing page for metadata, then calls the WBI-signed
+playurl API (the same chain the downloader uses) to verify that a concrete
+DASH video stream is obtainable.  When verified, emits a materializable
+``primary_resource / video / mp4`` representation.  Requires ffmpeg on the
+host for the download step (the merge happens at Job time, not here).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import hashlib
 import math
 from typing import Any
@@ -242,7 +242,7 @@ class _PlatformWebInspector(GenericWebInspector):
 
 
 class BilibiliInspector(_PlatformWebInspector):
-    """Inspect a public Bilibili video landing page."""
+    """Inspect a public Bilibili video and verify a concrete DASH stream."""
 
     platform_id = "bilibili"
     inspector_id = "bilibili"
@@ -256,11 +256,134 @@ class BilibiliInspector(_PlatformWebInspector):
         "author",
     )
 
+    def __init__(
+        self,
+        *args: Any,
+        session_store: Any | None = None,
+        playurl_verify_func: Callable[[str, str], dict[str, Any] | None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._session_store = session_store
+        self._playurl_verify_func = playurl_verify_func
+
+    # ------------------------------------------------------------------
+    # DASH verification
+    # ------------------------------------------------------------------
+
+    def _cookie(self) -> str:
+        if self._session_store is None:
+            return ""
+        from ..sessions import SessionStore
+
+        data = self._session_store.get_session_data("bilibili")
+        if not data:
+            return ""
+        return SessionStore._cookie_header(data)
+
+    def _verify_dash(self, bvid: str) -> dict[str, Any] | None:
+        """Call the playurl chain and return ``{title}`` or ``None``.
+
+        The returned dict carries no stream URL — only the fact that a
+        concrete DASH video was confirmed and its title.
+        """
+
+        if self._playurl_verify_func is not None:
+            return self._playurl_verify_func(bvid, self._cookie())
+        try:
+            from .bilibili_download import (
+                NAV_URL,
+                PLAYURL_URL,
+                VIEW_URL,
+                _request_json,
+            )
+            from .wbi import wbi_sign
+            from urllib.parse import urlencode
+
+            cookie = self._cookie()
+            nav = _request_json(NAV_URL, cookie)
+            wbi = (nav.get("data") or {}).get("wbi_img") or {}
+            img_key = str(wbi.get("img_url") or "").rsplit("/", 1)[-1].split(".", 1)[0]
+            sub_key = str(wbi.get("sub_url") or "").rsplit("/", 1)[-1].split(".", 1)[0]
+            if not img_key or not sub_key:
+                return None
+            view = _request_json(f"{VIEW_URL}?bvid={bvid}", cookie)
+            if view.get("code") != 0:
+                return None
+            view_data = view.get("data") or {}
+            cid = view_data.get("cid")
+            if not cid:
+                return None
+            params = wbi_sign(
+                {"bvid": bvid, "cid": str(cid), "qn": "80", "fnval": "16", "fourk": "1"},
+                img_key,
+                sub_key,
+            )
+            play = _request_json(f"{PLAYURL_URL}?{urlencode(params)}", cookie)
+            if play.get("code") != 0:
+                return None
+            dash = (play.get("data") or {}).get("dash")
+            if not dash:
+                return None
+            videos = [
+                v for v in (dash.get("video") or [])
+                if v.get("baseUrl") or v.get("base_url")
+            ]
+            if not videos:
+                return None
+            return {"title": str(view_data.get("title") or "")}
+        except Exception:
+            return None
+
     def _enrich_payload(
         self, resource: Mapping[str, Any], payload: dict[str, Any]
     ) -> dict[str, Any]:
         payload = super()._enrich_payload(resource, payload)
-        if self._can_add_representation(payload):
+        if not self._can_add_representation(payload):
+            return payload
+
+        import re as _re
+
+        bvid_match = _re.search(r"BV[A-Za-z0-9]{10}", str(resource.get("source_url") or ""))
+        verified = self._verify_dash(bvid_match.group(0)) if bvid_match else None
+
+        if verified is not None:
+            # Replace any existing companion video with a concrete primary.
+            resolved = dict(payload["resolved_resource"])
+            representations = [
+                dict(item) for item in resolved.get("representations", [])
+                if not (item.get("kind") == "video")
+            ]
+            primary: dict[str, Any] = {
+                "representation_id": _new_representation_id(
+                    resource, "video", "primary", 0
+                ),
+                "kind": "video",
+                "container": "mp4",
+                "mime_type": "video/mp4",
+                "scope": "primary_resource",
+                "role": "primary",
+                "technical_availability": "available",
+                "materializable": True,
+            }
+            primary.update(
+                build_representation_authority(
+                    resource,
+                    scope="primary_resource",
+                    role="primary",
+                    technical_availability="available",
+                    source="provider",
+                    observed_at=payload.get("inspection", {}).get("inspected_at"),
+                )
+            )
+            representations.insert(0, primary)
+            resolved["representations"] = representations
+            resolved["availability"] = {"status": "available"}
+            resolved["resource_type"] = "video"
+            payload["resolved_resource"] = resolved
+            payload["inspection"]["method"] = "platform_playurl_api"
+        else:
+            # Non-materializable companion when DASH cannot be verified.
             self._append_representation(
                 resource, payload, kind="video", container="video", role="companion"
             )

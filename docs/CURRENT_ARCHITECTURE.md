@@ -66,10 +66,11 @@ Planner 内置以下 route（`DEFAULT_PROVIDER_SPECS`）：
 1. SmartEdu document/video/audio → `direct_file` → `smartedu-resource@1.0.0`
 2. Douyin video → `direct_file` → `douyin-video@1.0.0`
 3. Ximalaya audio → `direct_file` → `ximalaya-audio@1.0.0`
-4. Generic document → `direct_file` → `generic-direct@1.0.0`
-5. Generic video → `direct_file` → `generic-direct@1.0.0`
-6. Generic webpage (primary) → `web_materialize` → `generic-web-materializer@1.0.0`
-7. Generic webpage (landing) → `web_materialize` → `generic-web-materializer@1.0.0`
+4. Bilibili video → `direct_file` → `bilibili-video@1.0.0`
+5. Generic document → `direct_file` → `generic-direct@1.0.0`
+6. Generic video → `direct_file` → `generic-direct@1.0.0`
+7. Generic webpage (primary) → `web_materialize` → `generic-web-materializer@1.0.0`
+8. Generic webpage (landing) → `web_materialize` → `generic-web-materializer@1.0.0`
 
 ProviderSpec 存在不等于平台 production-ready。真实网络、认证、许可仍需 E2E 验证。
 
