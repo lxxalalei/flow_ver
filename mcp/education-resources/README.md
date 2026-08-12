@@ -97,12 +97,14 @@ EDUCATION_RESOURCE_MCP_SEARXNG_URL=http://127.0.0.1:8888 \
 
 默认/关键目录：
 
-- `EDUCATION_RESOURCE_MCP_DATA_DIR`：`~/.local/share/quanxiao/education-resource-mcp-data`；
-- `EDUCATION_RESOURCE_MCP_LIBRARY_DIR`：默认 `$EDUCATION_RESOURCE_MCP_DATA_DIR/学习资料库`；
+- `EDUCATION_RESOURCE_MCP_DATA_DIR`：`~/.local/share/quanxiao/education-resource-mcp-data`，用于 SQLite、Job 工作区等内部数据；
+- `EDUCATION_RESOURCE_MCP_LIBRARY_DIR`：默认 `~/Documents/学习资料库`。Windows 原生环境通常对应 `%USERPROFILE%\Documents\学习资料库`；显式配置该环境变量时使用用户指定目录；
 - `EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR`：独立 session store；
 - `EDUCATION_RESOURCE_MCP_SEARXNG_URL`：可选受信任搜索后端。
 
-SQLite、Job 临时目录、归档文件、Cookie/Token 和浏览器档案都不得放入源码目录。
+归档资料库与内部工作区有意分离：下载中的文件先进入 `$EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/`，成功 Asset 经 `resource_archive` 后发布到用户可直接找到的 `Documents/学习资料库`。
+
+SQLite、Job 临时目录、Cookie/Token 和浏览器档案不得放入源码目录；正式归档资料可以位于用户 Documents 或显式配置的独立资料盘。
 
 ## 安全与数据边界
 
