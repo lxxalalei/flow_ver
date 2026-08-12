@@ -151,10 +151,10 @@ Should not change:
 
 - [x] completed：SmartEdu active 工程链路由 0038 完成并作为参考切片归档。
 - [x] completed：确定下一批实现顺序和明确排除项；停止 Coding Agent 代做 OpenClaw 验收。
-- [ ] in_progress：实现 Douyin concrete Representation、exact Provider route 与定向测试。
-- [ ] pending：实现 Ximalaya concrete track Representation、exact Provider route 与定向测试。
-- [ ] pending：处理 Bilibili Windows 最终 MP4 合并依赖，并据此决定开放或显式 blocked。
-- [ ] pending：更新平台契约/架构说明，交付用户真实测试步骤。
+- [x] completed：实现 Douyin concrete Representation、exact Provider route 与定向测试。
+- [x] completed：实现 Ximalaya concrete track Representation、exact Provider route 与定向测试。
+- [x] completed：处理 Bilibili Windows 最终 MP4 合并依赖——Bilibili DASH 下载依赖 ffmpeg 合并音视频，Windows 当前无 ffmpeg；决定保持 non-materializable inspector，不注册 active provider（显式 blocked），待 ffmpeg 可用后开放。
+- [ ] in_progress：更新平台契约/架构说明，交付用户真实测试步骤。
 - [ ] pending：根据用户在 0028 中的实际测试结果修复真实平台问题。
 
 ## Milestone checkpoint
