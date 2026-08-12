@@ -10,6 +10,7 @@ from pathlib import Path
 DEFAULT_DATA_DIR = (
     Path.home() / ".local" / "share" / "quanxiao" / "education-resource-mcp-data"
 )
+DEFAULT_LIBRARY_DIR = Path.home() / "Documents" / "学习资料库"
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -55,7 +56,7 @@ class Settings:
             library_dir=Path(
                 os.environ.get(
                     "EDUCATION_RESOURCE_MCP_LIBRARY_DIR",
-                    str(data_dir / "学习资料库"),
+                    str(DEFAULT_LIBRARY_DIR),
                 )
             ).expanduser().resolve(),
             search_timeout_seconds=_positive_int(
