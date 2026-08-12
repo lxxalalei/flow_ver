@@ -18,6 +18,7 @@ description: 教育与学习资源的唯一对话入口。用户想寻找、推�
 - 理解 `goal`、`user_role`、`resource_target` 和显式 `constraints`；
 - 判断是否需要澄清；
 - 设计少量 `SearchDirection`，选择合适来源并执行有界检索；
+- 必要时使用 OpenClaw leaf sub-agent 并行规划互补搜索方向，再由 Main Agent 统一汇总；
 - 对候选做私有 `SemanticReview`；
 - 决定是否 Selective Inspect；
 - 生成私有 `Gap`，并在每轮作出唯一 `StopDecision`；
@@ -56,6 +57,8 @@ Skill reads facts + task context -> private SemanticReview -> private Gap -> Sto
 - MCP Search 为空、partial、失败或 Inspector 只能给出部分事实时，只能在当前 Flow 内 Replan、Clarify、StopWithGap 或按证据强度 Present；
 - 通用工具调用成功不算本产品证据，失败也不能成为继续旁路的理由。
 
+OpenClaw 的 `sessions_spawn` / `sessions_yield` / `subagents` 是唯一例外：它们可以用于**搜索语义规划编排**，但不能成为资源数据面。leaf child 只返回 SearchDirection、来源职责、query 和不确定性建议，不直接调用或伪造任何 `resource_*` 业务状态；详细边界见 [`references/multi-agent.md`](references/multi-agent.md)。
+
 当前 native `search_tasks[].platform` 命名空间只有：
 
 `generic`、`bilibili`、`douyin`、`zhihu`、`smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、`annas-archive`、`weibo`、`wechat`。
@@ -84,12 +87,13 @@ Understand
   -> Clarify?                         # 仅缺失事实会改变结果时
   -> resource_flow_start / flow_status
   -> Plan SearchDirection
+       └─ optional leaf sub-agents    # 只规划，Main Agent 汇总
   -> resource_search / resource_browse_creator
   -> Evaluate MCP facts
   -> private SemanticReview
   -> Inspect?                         # 只检查会改变决策的高潜候选
   -> private Gap + one StopDecision
-       ├─ Replan -> resource_search mode=extend -> Evaluate
+       ├─ Replan -> optional Gap worker -> resource_search mode=extend -> Evaluate
        ├─ Clarify -> ask one minimal question
        ├─ StopWithGap -> explain limitation
        └─ Present
@@ -140,6 +144,22 @@ Plan -> Search -> Evaluate -> SemanticReview -> Inspect? -> Gap -> StopDecision
 `task_version` 只使用 `resource_flow_start` / `resource_flow_status` 返回值；Search 不会自动增加它。出现 `TASK_VERSION_CONFLICT` 时先读取 Flow，再用当前值纠正一次，不猜递增版本。
 
 一个 Flow 的首个成功 Search 只能是一次 `replace`；后续搜索必须是带当前 `base_result_set_id` 的 `extend`，不得用连续 `replace` 的近义查询覆盖前一轮事实。
+
+### 可选多 Agent 搜索规划
+
+多 Agent 只用于**复杂搜索的语义规划**，不改变 MCP 搜索执行和状态所有权。默认不 spawn；普通、窄、Main Agent 可以直接形成 1–2 个高质量 SearchDirection 的任务继续使用单 Agent。
+
+只有存在至少两个相对独立、真正互补的语义方向，并且并行规划有实际收益时，第一版最多同时 spawn 2 个 leaf sub-agent。不要按平台拆 Agent，不为同义 query、平台数量或形式多样性使用多 Agent。
+
+Main Agent 给 child 传递完成该方向所需的最小上下文，优先 isolated context；不能假定 child 自动拥有 `USER.md` / `MEMORY.md`。Child 只提出方向、来源职责、聚焦 query 和不确定性，不能执行 `resource_search` / Inspect / 下载 / 归档，也不能生成业务 ID 或可获取性事实。
+
+Child 返回后 Main Agent 必须重新审查、去重和裁剪，再形成当前预算内的少量 `search_tasks[]`，由 Main Agent 对同一 Flow **一次或有序串行**提交 MCP。禁止多个 child 并发 Extend 同一个 Flow，也不为 child 建 Branch Flow 或跨 Flow merge。
+
+如果本轮已经 spawn 所需 child 且 `sessions_yield` 可用，用它等待完成事件，不建立 session 轮询循环。Sub-agent 不可用、失败或建议低价值时，Main Agent 继续使用自身语义能力；这不改变资源后端，也不能解释为“没有资源”。
+
+Replan 时只有当前 Gap 的搜索规划本身仍复杂才使用 1 个 Gap worker，并明确哪些方向已经满足、不得重做。简单 Gap 由 Main Agent 直接 Replan。
+
+完整规则、任务模板和部署边界见 [`references/multi-agent.md`](references/multi-agent.md)。
 
 ### 轮次与容量
 
@@ -259,6 +279,7 @@ Job 是异步资源。使用 `resource_job_status` 查询，用户要求取消�
 | --- | --- |
 | 如何理解需求、什么时候澄清、如何回复用户 | [`conversation.md`](references/conversation.md) |
 | 如何搜索、审查候选、判断 Gap 和停止 | [`retrieval.md`](references/retrieval.md) |
+| 复杂搜索何时并行规划、如何委派和汇总 sub-agent | [`multi-agent.md`](references/multi-agent.md) |
 | 去哪些平台/来源、如何避免全平台乱搜 | [`source-routing.md`](references/source-routing.md) |
 | 什么时候 Inspect、Inspect 后如何处理 | [`inspection.md`](references/inspection.md) |
 | 用户选择后如何获取、解释 scope/provider/outcome | [`acquisition.md`](references/acquisition.md) |
