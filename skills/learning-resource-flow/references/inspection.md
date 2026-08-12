@@ -39,7 +39,7 @@ Inspect 完成后重新读取当前事实，并重新做 SemanticReview / Gap �
 
 - 内容与目标匹配，可以进入 Presentation；
 - 只确认到 metadata / landing page，不能承诺资源本体；
-- 存在 concrete representation，可进入后续 Eligibility / Prepare；
+- 存在 concrete representation，可在用户选择后进入 Prepare；Prepare/Start 再根据当前 Representation 和 exact Provider runtime route 决定是否可执行；
 - AUTH_REQUIRED / unsupported / policy blocked；
 - identity/版本仍然模糊，需要 Clarify 或 StopWithGap；
 - 内容不相关，淘汰候选。
