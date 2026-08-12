@@ -57,3 +57,4 @@
 | [0035-deleted-skill-reference-complete-audit.md](0035-deleted-skill-reference-complete-audit.md) | completed | 旧 Skill/reference 逐文件语义守恒审计 |
 | [0036-platform-acquisition-capability-recovery.md](0036-platform-acquisition-capability-recovery.md) | superseded | 平台恢复目标保留；旧 Capability Authority 和重新引入大小/哈希门禁的路线被 0037 覆盖 |
 | [0040-search-subagent-orchestration.md](0040-search-subagent-orchestration.md) | completed | OpenClaw leaf sub-agent 并行规划 SearchDirection；MCP 继续统一串行执行搜索与业务状态 |
+| [0042-web-resource-current-path-fix.md](0042-web-resource-current-path-fix.md) | completed | 修正当前 Generic HTML primary/landing 语义，并将网页主归档物改为图片自包含 HTML；0041 benchmark 继续 pending |
