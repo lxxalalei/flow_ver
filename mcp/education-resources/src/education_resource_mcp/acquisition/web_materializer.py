@@ -720,7 +720,7 @@ class WebMaterializer:
             _write_output(zip_path, zip_data, job_dir)
 
             artifact_specs: list[tuple[Path, str, str, bool]] = [
-                (job_dir / "index.html", "text/html", "sanitized_html", True),
+                (job_dir / "index.html", "text/html", "primary", True),
                 (zip_path, "application/zip", "bundle", False),
                 (job_dir / "content.md", "text/markdown", "markdown", False),
                 (job_dir / "metadata.json", "application/json", "metadata", False),
