@@ -1,14 +1,20 @@
 """Static web-page materialization into a safe, portable resource bundle.
 
-The materializer is intentionally HTTP-client agnostic.  A bounded fetcher is
+The materializer is intentionally HTTP-client agnostic. A bounded fetcher is
 injected by the acquisition layer, so redirect, DNS, timeout, and response
-limits remain owned by one network policy implementation.  This module owns
+limits remain owned by one network policy implementation. This module owns
 the second half of the boundary: same-origin image selection, Block IR
 rendering, server-controlled output paths, and deterministic packaging.
+
+The user-facing primary artifact is a standalone sanitized HTML document.
+Markdown, metadata, downloaded images, and a deterministic ZIP remain job
+artifacts so later extraction work can evolve without changing the archive
+contract.
 """
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
@@ -23,6 +29,7 @@ import zipfile
 from ..errors import DomainError
 from ..policy import ensure_within_root
 from .models import (
+    AcquisitionRequest,
     AcquisitionResult,
     AcquisitionStrategy,
     Artifact,
@@ -89,8 +96,6 @@ class MaterializerConfig:
                 raise ValueError(f"{name} must be positive")
 
 
-# This is kept as a public alias because callers often refer to materializer
-# limits as a policy rather than a configuration object.
 WebMaterializerConfig = MaterializerConfig
 
 
@@ -272,9 +277,6 @@ def _escape_text(value: str) -> str:
 
 
 def _markdown_text(value: str) -> str:
-    # Markdown is a text artifact, but escaping HTML metacharacters prevents a
-    # viewer from interpreting a source fragment as raw HTML.  Backticks and
-    # table pipes are escaped by their block-specific renderers.
     value = html_module.escape(value, quote=False)
     value = value.replace("\\", "\\\\")
     value = value.replace("`", "\\`")
@@ -382,7 +384,7 @@ def render_sanitized_html(ir: BlockIR, image_paths: Mapping[int, str] | None = N
         elif block.kind == "placeholder":
             body.append(f"<p class=\"placeholder\">{_escape_text(block.text)}</p>")
     title = _escape_text(ir.title or "教育资源")
-    csp = "default-src 'none'; img-src 'self'; style-src 'none'; script-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    csp = "default-src 'none'; img-src 'self' data:; style-src 'none'; script-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     return (
         "<!doctype html>\n"
         '<html lang="zh-CN">\n'
@@ -466,7 +468,7 @@ def _artifact(
 
 
 class WebMaterializer:
-    """Materialize a statically fetchable web page into a safe ZIP bundle."""
+    """Materialize a statically fetchable web page into portable artifacts."""
 
     def __init__(
         self,
@@ -664,16 +666,23 @@ class WebMaterializer:
                 image_cache[image_url] = None
 
         _check_cancel(cancel_event)
+        embedded_image_sources: dict[int, str] = {}
+        for block_index, relative_path in image_paths.items():
+            asset = image_assets.get(relative_path)
+            if asset is None:
+                continue
+            encoded = base64.b64encode(asset.data).decode("ascii")
+            embedded_image_sources[block_index] = (
+                f"data:{asset.media_type};base64,{encoded}"
+            )
+
         markdown = render_markdown(ir, image_paths)
-        sanitized_html = render_sanitized_html(ir, image_paths)
+        sanitized_html = render_sanitized_html(ir, embedded_image_sources)
         _check_cancel(cancel_event)
         metadata_blocks: list[dict[str, object]] = []
         for block_index, block in enumerate(ir.blocks):
             block_metadata = block_to_mapping(block)
             if block.kind == "image":
-                # The persisted bundle must not retain a rejected or
-                # cross-origin image locator.  Only the controlled local path
-                # (when one exists) is useful to a later archive reader.
                 block_metadata.pop("url", None)
                 block_metadata["asset"] = image_paths.get(block_index)
             metadata_blocks.append(block_metadata)
@@ -711,8 +720,8 @@ class WebMaterializer:
             _write_output(zip_path, zip_data, job_dir)
 
             artifact_specs: list[tuple[Path, str, str, bool]] = [
-                (zip_path, "application/zip", "bundle", True),
-                (job_dir / "index.html", "text/html", "sanitized_html", False),
+                (job_dir / "index.html", "text/html", "sanitized_html", True),
+                (zip_path, "application/zip", "bundle", False),
                 (job_dir / "content.md", "text/markdown", "markdown", False),
                 (job_dir / "metadata.json", "application/json", "metadata", False),
             ]
