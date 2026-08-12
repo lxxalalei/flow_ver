@@ -8,22 +8,22 @@
 
 优先选择能直接提供所需内容或证据的少量来源；不同来源应有互补价值，而不是为了“平台数量”机械扩散。
 
-## 三层事实不要混淆
+## 三类事实不要混淆
 
 1. **Platform Registry**：平台身份、resource types、search / creator browse / Inspect 等静态声明，以及 `auth_mode` / `auth_kind` 等认证属性；
-2. **Capability Descriptor**：设计上支持的 resource/scope/strategy/provider 组合；
-3. **Deployment Readiness / Session State / Resolution / Eligibility**：当前部署、当前合法登录态、当前候选、当前权限与表示的实际事实。
+2. **Session State**：当前用户是否具有合法、有效的平台会话；
+3. **Resolution / Representation + Provider runtime**：当前候选实际是什么、有哪些表示、当前是否可用，以及服务端能否用已注册的 exact Provider 执行当前 route。
 
-Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”。当前是否登录由 session-manager/实际服务状态判断；当前是否可获取必须继续进入 Readiness → Resolution/Representation → Eligibility → Plan/Execution 权威链。平台能力机器事实的开发/运维入口见 [`mcp/education-resources/contracts/`](../../../mcp/education-resources/contracts/README.md)。
+Registry 存在不能单独证明“现在能下载这个资源”。当前是否登录由 session-manager / 实际服务状态判断；当前是否可获取必须先形成 fresh `Resolution / Representation`，再由 `resource_download_prepare` 基于服务端 `ProviderSpec` 选择 exact route，并在 Start 前重新核验 Representation 与 Provider 当前注册状态。平台机器事实的开发/运维入口见 [`mcp/education-resources/contracts/`](../../../mcp/education-resources/contracts/README.md)。
 
 不要在本文件维护完整平台能力表、固定登录状态表或 acquisition route 快照。真实用户 Flow 中也不得
-通过 `read` / `exec` / MCP protocol resources 去打开仓库或运行时 Registry/Descriptor；候选和当前状态只看
+通过 `read` / `exec` / MCP protocol resources 去打开仓库或运行时 Registry / ProviderSpec；候选和当前状态只看
 13 个业务 `resource_*` Tool 的返回。若对 native platform ID 没有明确依据，不猜测、不扫描本地文件，
 改用当前目标本来就允许的 `generic` discovery route，或 StopWithGap。
 
 当前 0028 runtime 冻结的 native platform ID 命名空间是：`generic`、`bilibili`、`douyin`、`zhihu`、
 `smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、
-`annas-archive`、`weibo`、`wechat`。这只是封闭 ID 集，不是 readiness 或 Capability 表；未列出的站点
+`annas-archive`、`weibo`、`wechat`。这只是封闭 ID 集，不是当前可获取能力表；未列出的站点
 只能作为 `generic` query 中的来源线索，不能临时发明 native platform ID。
 
 ## 来源路线
@@ -48,7 +48,7 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 
 ## 可信来源定向搜索
 
-有些来源知识属于 Skill 的 discovery guidance，而不是平台 Capability。它们用于在“明确需要高可信来源且宽泛搜索质量不足”时缩小搜索空间。
+有些来源知识属于 Skill 的 discovery guidance，而不是平台获取能力声明。它们用于在“明确需要高可信来源且宽泛搜索质量不足”时缩小搜索空间。
 
 可以在 Generic Web 查询中使用 `site:域名` 做定向发现，但遵守：
 
@@ -71,7 +71,7 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 | 艺术 | `namoc.cn` |
 | 消防/防灾/健康 | `119.gov.cn`、`data.earthquake.cn`、`chinacdc.cn` |
 
-这些域名是“curated preferred discovery sources”，不是 security allowlist、network allowlist、Capability Descriptor 或内容审批清单。实际搜索与页面可用性仍以当前工具结果为准。
+这些域名是“curated preferred discovery sources”，不是 security allowlist、network allowlist、ProviderSpec 或内容审批清单。实际搜索与页面可用性仍以当前工具结果为准。
 
 ## 资源类型不是平台路由器
 
@@ -83,7 +83,7 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 - video 平台可能当前只有搜索/Inspect，没有 primary acquisition；
 - 普通网页可能通过 web materialization 得到可离线阅读的 representation。
 
-是否能获取必须进入 Inspect/Capability/Eligibility 权威链确认。
+是否能获取必须先 Inspect 得到当前 `Resolution / Representation`，再由 Prepare 选择服务端 exact route，并在 Start 时重新核验；不能从资源类型或平台名直接推导。
 
 ## 搜索词
 
@@ -115,4 +115,4 @@ Registry/Descriptor 存在都不能单独证明“现在能下载这个资源”
 
 需要登录、版权/许可判断或平台策略限制时，不通过其他 Provider 静默绕过。把结构化限制保留给后续 Inspect/Acquisition 和用户解释。
 
-如果某个平台当前没有 native search/browse 能力，不把 Generic Web 结果伪装成该平台原生搜索。只有用户目标允许“查找该平台公开网页”这一不同 discovery route 时，才可明确标注为 Generic Web 发现；它仍不改变后续 Capability/Eligibility 权威链。
+如果某个平台当前没有 native search/browse 能力，不把 Generic Web 结果伪装成该平台原生搜索。只有用户目标允许“查找该平台公开网页”这一不同 discovery route 时，才可明确标注为 Generic Web 发现；它仍不改变后续 `Inspect -> Resolution / Representation -> Prepare -> Confirm -> Start -> exact Provider` 的获取边界。
