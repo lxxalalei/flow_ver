@@ -43,10 +43,12 @@ Platform Registry 只描述平台身份、Search/Inspect 与历史能力声明�
 | generic webpage primary | `web_materialize` / `primary_resource` | `generic-web-materializer@1.0.0` |
 | generic webpage landing | `web_materialize` / `landing_page` | `generic-web-materializer@1.0.0` |
 | SmartEdu document primary | `direct_file` / `primary_resource` | `smartedu-resource@1.0.0`（仅实际注册时） |
+| Douyin video primary | `direct_file` / `primary_resource` | `douyin-video@1.0.0` |
+| Ximalaya audio primary | `direct_file` / `primary_resource` | `ximalaya-audio@1.0.0` |
 
 Prepare 根据 fresh Representation 生成 PlanItem；Start 重新读取当前 Resolution，核对 representation 未漂移，并确认 Plan 中的 exact Provider 仍注册且支持相同 scope/strategy。该检查不生成 Readiness Snapshot、Eligibility ID 或 binding digest。
 
-Provider 失败后不切换 Generic/其他 Provider、scope 或 strategy。Bilibili、Douyin、Ximalaya、Anna/Libgen 等路线如果没有当前 `ProviderSpec + Representation + exact Provider`，就保持结构化 blocked/unsupported，不能从 Registry 的历史 `acquire=true` 推导执行能力。
+Provider 失败后不切换 Generic/其他 Provider、scope 或 strategy。SmartEdu、Douyin、Ximalaya 已有 active exact route（见上表）；Bilibili、Anna/Libgen 等路线目前没有当前 `ProviderSpec + Representation + exact Provider`，保持结构化 blocked/unsupported，不能从 Registry 的历史 `acquire=true` 推导执行能力。
 
 未来新增 acquisition route 时，应最小化地新增/调整 ProviderSpec、Inspector 产生的 Representation、Provider registration 和业务回归测试；不得重新建立 Descriptor → Readiness → Eligibility → digest 状态链。
 

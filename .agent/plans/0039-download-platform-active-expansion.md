@@ -112,6 +112,28 @@ Should not change:
 - 每个平台提供最短真实测试说明：需要的会话前置、示例自然语言、预期确认点、成功/失败状态。
 - Coding Agent 只运行与 diff 匹配的离线/子系统验证；真实 Windows OpenClaw 平台测试由用户执行并把结果记录到 0028。
 
+
+## 用户真实测试步骤（AC-04 交付，2026-08-12）
+
+测试入口：Windows OpenClaw 启动 education-resources MCP 后，用自然语言发起需求。
+Coding Agent 不代跑真实下载；真实结果由用户记录到 0028。
+
+### Douyin（`douyin-video@1.0.0`，direct_file / primary_resource / video / mp4）
+
+- 会话前置：MCP 已启动；Douyin 详情核验走 a_bogus 签名 detail API，需要可用的 Douyin 登录态（与 `douyin_download` 同源）。无登录态时 Inspect 应结构化失败，不得误报可获取。
+- 示例自然语言：`帮我在抖音搜索<主题/关键词>的视频，先搜索不要下载。`；候选审查后：`查看这条视频能否下载，然后生成下载计划。`
+- 预期确认点：Search 返回候选 → Inspect 展示具体 MP4 可获取（materializable）→ Prepare 生成 Plan（exact `douyin-video@1.0.0`）→ 用户明确确认 → Start → Job `succeeded`。
+- 成功状态：Job succeeded，产生非空 MP4 Asset（格式与声明一致），可 Archive。
+- 失败状态：详情不可用、非 MP4 内容或绑定事实漂移 → 结构化失败，不产生 ready Asset；无 generic fallback。
+
+### Ximalaya（`ximalaya-audio@1.0.0`，direct_file / primary_resource / audio / mp3|m4a）
+
+- 会话前置：MCP 已启动；Inspect 解析具体 `track_id`（`/sound/{id}` 或显式元数据）后调用 signed baseInfo API 核验可播放音频流。
+- 示例自然语言：`帮我在喜马拉雅搜索<主题>的音频节目。`；选到具体一集后：`下载这一集，先生成下载计划。`
+- 预期确认点：候选绑定具体 `track_id` → Inspect 展示可获取的 MP3/M4A primary → Prepare 生成 Plan（exact `ximalaya-audio@1.0.0`）→ 用户确认 → Start → Job `succeeded`。
+- 成功状态：Job succeeded，产生非空 MP3/M4A Asset。
+- 失败状态：album 级候选不会静默变成第一首；track 不可用或内容签名不匹配 → 显式失败；无 generic fallback。
+
 ## Worker strategy
 
 下一会话应主动并行使用子 Agent，但写入必须隔离：
@@ -154,7 +176,7 @@ Should not change:
 - [x] completed：实现 Douyin concrete Representation、exact Provider route 与定向测试。
 - [x] completed：实现 Ximalaya concrete track Representation、exact Provider route 与定向测试。
 - [x] completed：处理 Bilibili Windows 最终 MP4 合并依赖——Bilibili DASH 下载依赖 ffmpeg 合并音视频，Windows 当前无 ffmpeg；决定保持 non-materializable inspector，不注册 active provider（显式 blocked），待 ffmpeg 可用后开放。
-- [ ] in_progress：更新平台契约/架构说明，交付用户真实测试步骤。
+- [x] completed：更新平台契约/架构说明（`contracts/platforms/README.md` 路由表同步），并在本计划交付用户真实测试步骤。
 - [ ] pending：根据用户在 0028 中的实际测试结果修复真实平台问题。
 
 ## Milestone checkpoint
