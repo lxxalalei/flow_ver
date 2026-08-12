@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 import copy
 import threading
 from typing import Any
@@ -78,7 +79,7 @@ class AcquisitionRequest:
             raise ValueError("jobs_root must be an absolute server-controlled root")
 
         self.job_id = job_id
-        self.resource = copy.deepcopy(dict(resource))
+        self.resource = MappingProxyType(copy.deepcopy(dict(resource)))
         self.strategy = selected_strategy
         self.provider_id = provider_id
         self.provider_version = provider_version

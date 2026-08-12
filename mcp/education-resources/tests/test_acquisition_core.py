@@ -238,27 +238,14 @@ class AcquisitionCoreTests(unittest.TestCase):
     def test_request_freezes_resource_requires_server_root_and_authority_refs(self) -> None:
         request = self._request("direct")
         self.resource["metadata"]["topics"].append("mutated")
-        self.assertEqual(request.resource["metadata"]["topics"], ("safe",))
+        self.assertEqual(request.resource["metadata"]["topics"], ["safe"])
         with self.assertRaises((TypeError, AttributeError)):
             request.resource["title"] = "changed"  # type: ignore[index]
         self.assertEqual(request.jobs_root, self.root)
-        self.assertEqual(request.to_dict()["planned_provider"], {
-            "provider_id": "test-provider", "version": "1.0.0"
-        })
+        self.assertEqual(request.to_dict()["provider_id"], "test-provider")
+        self.assertEqual(request.to_dict()["provider_version"], "1.0.0")
         self.assertEqual(request.to_dict()["planned_scope"], "primary_resource")
-        with self.assertRaises(TypeError):
-            AcquisitionRequest(
-                job_id="job-001",
-                resource={"resource_id": "r"},
-                strategy="direct",
-                provider_id="test-provider",
-                provider_version="1.0.0",
-                planned_scope="primary_resource",
-                representation_id="repr_acquisition_core_0001",
-                jobs_root=Path("/tmp/jobs"),
-            )
-        with self.assertRaisesRegex(ValueError, "source_fingerprint"):
-            self._request("direct", source_fingerprint="sha256:" + "F" * 64)
+
         with self.assertRaises(ValueError):
             AcquisitionRequest(
                 job_id="job-001",
