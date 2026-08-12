@@ -1,6 +1,6 @@
 # 当前架构
 
-> 快照日期：2026-08-12
+> 快照日期：2026-08-13
 
 ## Active 边界
 
@@ -80,7 +80,21 @@ ProviderSpec 存在不等于平台 production-ready。真实网络、认证、�
 
 导航/预览页：`role=landing, scope=landing_page`。
 
-`web_materialize` 只描述"如何保存网页"，不能把正文降级成 landing 或把 landing 冒充正文。
+当前 `GenericWebInspector` 只在页面自身提供明确结构化语义时提升网页为 primary：OpenGraph `og:type=article`，或 JSON-LD `@type` 为 `Article`、`NewsArticle`、`BlogPosting`、`TechArticle`、`ScholarlyArticle`、`LearningResource`。没有这些明确证据的普通 HTML 继续保守标记为 landing；正文抽取与更完整的网页分类留给 pending 的 `0041-web-content-extraction-benchmark`，当前不增加自研正文评分规则。
+
+`web_materialize` 只描述“如何保存网页”，不能把正文降级成 landing 或把 landing 冒充正文。
+
+当前 `generic-web-materializer` 仍在 Job 目录生成完整工作产物：
+
+```text
+index.html
+content.md
+metadata.json
+assets/*
+webbundle.zip
+```
+
+其中公开 primary Asset 是可直接打开的 `index.html`。成功抓取并校验的同源正文图片以内嵌 `data:` 形式写入该 HTML，因此 Archive 可以直接发布 `.html`；`content.md`、`metadata.json`、`assets/*` 与 `webbundle.zip` 继续作为 Job 工作产物保留，不扩展公共 Asset / Archive 状态模型。当前跨域/CDN 图片仍按既有策略跳过，这一问题不在本次修正范围内。
 
 ## 安全边界
 
