@@ -1,10 +1,10 @@
 """Preview-based inspection of public generic HTTP resources.
 
-This adapter intentionally keeps the network boundary private.  It follows
+This adapter intentionally keeps the network boundary private. It follows
 only a small, explicitly bounded redirect chain, validates every URL with the
 shared public-network policy, and returns metadata that has already passed the
-inspection core's locator/secret boundary.  The transport and DNS resolver
-are injectable so tests never need to access the network.
+inspection core's locator/secret boundary. The transport and DNS resolver are
+injectable so tests never need to access the network.
 """
 
 from __future__ import annotations
@@ -42,6 +42,16 @@ _HTML_MIME_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 _MIME_RE = re.compile(r"^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$", re.IGNORECASE)
 _LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")
 _RESOURCE_ID_RE = re.compile(r"^res_[A-Za-z0-9_-]{16,64}$")
+_PRIMARY_WEB_TYPES = frozenset(
+    {
+        "article",
+        "newsarticle",
+        "blogposting",
+        "techarticle",
+        "scholarlyarticle",
+        "learningresource",
+    }
+)
 
 
 class _Response(Protocol):
@@ -84,6 +94,7 @@ class _HTMLMetadata:
     author: str | None = None
     language: str | None = None
     published_date: str | None = None
+    primary_page: bool = False
 
 
 class _HTMLMetadataParser(HTMLParser):
@@ -381,14 +392,28 @@ def _walk_jsonld(value: Any, keys: tuple[str, ...], *, author: bool = False) -> 
     return None
 
 
+def _jsonld_has_primary_web_type(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        raw_type = value.get("@type")
+        if isinstance(raw_type, str):
+            if raw_type.casefold().strip() in _PRIMARY_WEB_TYPES:
+                return True
+        elif isinstance(raw_type, Sequence) and not isinstance(raw_type, (str, bytes, bytearray)):
+            for item in raw_type:
+                if isinstance(item, str) and item.casefold().strip() in _PRIMARY_WEB_TYPES:
+                    return True
+        return any(_jsonld_has_primary_web_type(child) for child in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return any(_jsonld_has_primary_web_type(child) for child in value)
+    return False
+
+
 def _extract_html_metadata(body: bytes) -> _HTMLMetadata:
     parser = _HTMLMetadataParser()
     try:
         parser.feed(body.decode("utf-8", errors="replace"))
         parser.close()
     except Exception:
-        # Malformed HTML should not turn an otherwise bounded response into a
-        # raw parser exception.  The resource fallback remains available.
         pass
 
     meta = parser.meta
@@ -406,6 +431,7 @@ def _extract_html_metadata(body: bytes) -> _HTMLMetadata:
         or meta.get("date")
         or meta.get("datepublished")
     )
+    primary_page = (meta.get("og:type") or "").casefold().strip() == "article"
 
     for document in parser.jsonld_documents:
         title = title or _walk_jsonld(document, ("headline", "name", "title")) or ""
@@ -415,6 +441,7 @@ def _extract_html_metadata(body: bytes) -> _HTMLMetadata:
         published_date = published_date or _walk_jsonld(
             document, ("datePublished", "dateCreated", "uploadDate")
         )
+        primary_page = primary_page or _jsonld_has_primary_web_type(document)
 
     return _HTMLMetadata(
         title=_safe_text(title, 512),
@@ -422,6 +449,7 @@ def _extract_html_metadata(body: bytes) -> _HTMLMetadata:
         author=_safe_text(author, 256),
         language=_safe_language(language),
         published_date=_safe_text(published_date, 256),
+        primary_page=primary_page,
     )
 
 
@@ -474,9 +502,6 @@ class GenericWebInspector:
     platform_id = "generic"
     inspector_id = INSPECTOR_ID
     version = INSPECTOR_VERSION
-    # Runtime capability inventory is derived from this implementation fact,
-    # not from the retrieval catalog. Platform wrappers inherit the same
-    # bounded scope set and may add non-primary companion representations.
     supported_scopes = ("primary_resource", "representation", "landing_page", "metadata")
 
     def __init__(
@@ -630,10 +655,6 @@ class GenericWebInspector:
                 fingerprint = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
             seed = f"{fingerprint}:{rep.get('kind', 'other')}:{rep.get('mime_type', '')}"
             rep.setdefault("representation_id", "repr_" + hashlib.sha256(seed.encode()).hexdigest()[:32])
-            # Every adapter result carries explicit capability scope and
-            # bounded evidence.  Legacy role/materializable fields remain in
-            # the envelope for old consumers but are never used to infer a
-            # primary resource when the authority fields disagree.
             scope = rep.get("scope")
             role = rep.get("role")
             if isinstance(scope, str) and isinstance(role, str):
@@ -719,9 +740,6 @@ class GenericWebInspector:
                 "retriable": True,
             }, None
 
-        # Content-Length is advisory metadata only.  Large resources are
-        # classified from the preview and continue to the streaming download
-        # path instead of being rejected during inspection.
         observed_size = declared_size
         if observed_size is None and total < INSPECTION_MAX_BYTES:
             observed_size = total
@@ -731,9 +749,6 @@ class GenericWebInspector:
         try:
             return self._inspect(resource)
         except Exception:
-            # The adapter boundary must not expose parser, resolver, or
-            # transport exception text.  Keep this fallback deliberately
-            # boring and let the inspection core validate the envelope.
             safe_resource = resource if isinstance(resource, Mapping) else {}
             try:
                 return self._error_result(
@@ -974,24 +989,17 @@ class GenericWebInspector:
                 and mime_error is None
                 and read_error is None
             )
-            if concrete_evidence:
+            if concrete_evidence or (page_evidence and html_metadata.primary_page):
                 scope = "primary_resource"
                 role = "primary"
                 materializable = True
-                technical_availability = "available"
+                technical_availability = "available" if not failures else "unknown"
             elif page_evidence:
                 scope = "landing_page"
                 role = "landing"
-                # A successfully inspected public HTML response is concrete
-                # landing-page evidence.  It can be materialized by the exact
-                # web-materializer capability while remaining a landing page;
-                # this never upgrades it to a primary resource.
                 materializable = True
                 technical_availability = "available" if not failures else "unknown"
             else:
-                # A declared file MIME without a matching magic signature, a
-                # MIME/magic conflict, or an unclassified body is only a
-                # representation fact.  It must not become a primary plan.
                 scope = "representation"
                 role = "attachment"
                 materializable = False
