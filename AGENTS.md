@@ -99,7 +99,7 @@ docs/                              # 架构、开发和运维文档
 
 ## 计划管理
 
-- 非平凡但局部的任务，先使用 `.agent/TASK_TEMPLATE.md` 冻结 Goal、Non-goals、业务不变量、变更面、验收标准和最小验证。
+- 非平凡但局部的任务，先使用 `.agent/TASK_TEMPLATE.md` 冻结必填的 Goal、Non-goals、Acceptance Criteria（其余段落按需填写）。
 - 多步骤任务开始前必须建立简短计划；跨会话、影响多个模块或包含多个 milestone 的任务还要在 `.agent/plans/` 新建计划文件。
 - 计划步骤只使用 `pending`、`in_progress`、`completed`、`blocked` 四种状态。
 - 同一时间最多一个步骤为 `in_progress`。
