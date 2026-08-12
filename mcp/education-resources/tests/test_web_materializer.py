@@ -140,7 +140,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
                 self.assertLessEqual(len(ir.blocks), 4096)
                 self.assertNotIn("script", {block.kind for block in ir.blocks})
 
-    def test_materializer_returns_zip_primary_and_exposes_readable_artifacts(self) -> None:
+    def test_materializer_returns_standalone_html_primary_and_keeps_bundle(self) -> None:
         url = "https://example.com/article"
         fetcher = FakeFetcher({url: self._fixture("ordinary-article.html")})
         result = WebMaterializer(fetcher=fetcher).acquire(_request(self.root, url))
@@ -148,11 +148,14 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         artifacts = tuple(result.bundle.artifacts)
         self.assertGreaterEqual(len(artifacts), 4)
         self.assertTrue(_get(artifacts[0], "primary"))
-        self.assertEqual(_get(artifacts[0], "role"), "bundle")
-        self.assertEqual(_get(artifacts[0], "filename"), "webbundle.zip")
+        self.assertEqual(_get(artifacts[0], "role"), "sanitized_html")
+        self.assertEqual(_get(artifacts[0], "filename"), "index.html")
+        self.assertFalse(_get(artifacts[1], "primary"))
+        self.assertEqual(_get(artifacts[1], "role"), "bundle")
+        self.assertEqual(_get(artifacts[1], "filename"), "webbundle.zip")
         self.assertEqual(
-            {"sanitized_html", "markdown", "metadata"},
-            {_get(artifact, "role") for artifact in artifacts[1:4]},
+            {"markdown", "metadata"},
+            {_get(artifact, "role") for artifact in artifacts[2:4]},
         )
         job_dir = self.root / "job-web-001"
         self.assertEqual(
@@ -162,7 +165,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         self.assertIn("<h1>云为什么会下雨</h1>", (job_dir / "index.html").read_text())
         self.assertNotIn("site-nav", (job_dir / "index.html").read_text())
 
-    def test_output_is_deterministic_and_zip_links_are_relative(self) -> None:
+    def test_output_is_deterministic_and_primary_html_embeds_images(self) -> None:
         url = "https://example.com/image-blog"
         html = self._fixture("image-blog.html")
         fetcher = FakeFetcher({url: html}, {"https://example.com/images/seed.png": _PNG})
@@ -171,10 +174,17 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         first_zip = (self.root / "job-a" / "webbundle.zip").read_bytes()
         second_zip = (self.root / "job-b" / "webbundle.zip").read_bytes()
         self.assertEqual(first_zip, second_zip)
+        bundle_artifact = next(
+            artifact for artifact in first.bundle.artifacts if _get(artifact, "role") == "bundle"
+        )
         self.assertEqual(
             hashlib.sha256(first_zip).hexdigest(),
-            _get(first.bundle.artifacts[0], "sha256"),
+            _get(bundle_artifact, "sha256"),
         )
+        primary_html = (self.root / "job-a" / "index.html").read_text()
+        self.assertIn("data:image/png;base64,", primary_html)
+        self.assertNotIn("assets/image-", primary_html)
+        self.assertIn("img-src 'self' data:", primary_html)
         with zipfile.ZipFile(io.BytesIO(first_zip)) as archive:
             names = archive.namelist()
             self.assertEqual(names, sorted(names))
@@ -183,7 +193,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
             self.assertTrue(all(".." not in name.split("/") for name in names))
             index = archive.read("index.html").decode()
             markdown = archive.read("content.md").decode()
-            self.assertIn("assets/image-", index)
+            self.assertIn("data:image/png;base64,", index)
             self.assertIn("assets/image-", markdown)
             self.assertNotIn("https://", index)
             self.assertNotIn("https://", markdown)
