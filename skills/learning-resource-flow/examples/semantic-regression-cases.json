@@ -1,451 +1,246 @@
 {
-  "version": "3.0.0",
-  "purpose": "验证唯一入口 Skill 的独立任务模型与 education-resources ResultSet、Presentation、Selection 控制边界。",
+  "version": "3.1.0",
+  "purpose": "验证唯一入口 Skill 的需求澄清、稳定背景复用、搜索语义规划、自适应检索，以及 education-resources ResultSet、Presentation、Selection 控制边界。",
   "cases": [
     {
       "name": "主题明确直接搜索",
       "messages": [
-        {
-          "role": "user",
-          "content": "帮我找适合小学三年级自己看的中文太阳系图文，先不要下载"
-        }
+        {"role": "user", "content": "帮我找适合小学三年级自己看的中文太阳系图文，先不要下载"}
       ],
-      "expected": [
-        "不追问平台或数量",
-        "以独立 task 建立 Flow",
-        "搜索只形成 ResultSet",
-        "审查后实际展示",
-        "展示后保存 Presentation"
-      ],
-      "forbidden": [
-        "下载准备",
-        "下载启动",
-        "重复询问用户已经明确的信息",
-        "把 ResultSet 自动视为已展示"
-      ]
+      "expected": ["不追问平台或数量", "以独立 task 建立 Flow", "搜索只形成 ResultSet", "审查后实际展示", "展示后保存 Presentation"],
+      "forbidden": ["下载准备", "下载启动", "重复询问用户已经明确的信息", "把 ResultSet 自动视为已展示"]
     },
     {
       "name": "核心主题不足",
       "messages": [
-        {
-          "role": "user",
-          "content": "帮孩子找些学习资料"
-        }
+        {"role": "user", "content": "帮孩子找些学习资料"}
       ],
-      "expected": [
-        "只问一个问题",
-        "优先询问最想学习或解决的内容"
-      ],
-      "forbidden": [
-        "先问平台",
-        "一次询问多个非必要字段",
-        "开始搜索"
-      ]
+      "expected": ["只问一个问题", "优先询问最想学习或解决的内容"],
+      "forbidden": ["先问平台", "一次询问多个非必要字段", "开始搜索"]
     },
     {
       "name": "宽泛学科路线分叉",
       "messages": [
-        {
-          "role": "user",
-          "content": "找一年级数学资料"
-        }
+        {"role": "user", "content": "找一年级数学资料"}
       ],
-      "expected": [
-        "询问同步讲解、基础练习或趣味拓展等最关键路线"
-      ],
-      "forbidden": [
-        "默认成试卷",
-        "先问下载格式"
-      ]
+      "expected": ["询问同步讲解、基础练习或趣味拓展等最关键路线"],
+      "forbidden": ["默认成试卷", "先问下载格式", "先问年龄"]
     },
     {
       "name": "用户授权模型决定",
       "messages": [
-        {
-          "role": "user",
-          "content": "想让孩子了解古埃及，形式你看着办"
-        }
+        {"role": "user", "content": "想让孩子了解古埃及，形式你看着办"}
       ],
-      "expected": [
-        "不把决定权退回用户",
-        "选择有互补价值的首个发现方向",
-        "说明后续可继续探索其他方向"
-      ],
-      "forbidden": [
-        "要求用户选择视频或文章"
-      ]
+      "expected": ["不把决定权退回用户", "选择有互补价值的首个发现方向", "说明后续可继续探索其他方向"],
+      "forbidden": ["要求用户选择视频或文章"]
     },
     {
       "name": "不为补齐上下文追问",
       "messages": [
-        {
-          "role": "user",
-          "content": "帮孩子找一些火山科普资料，先看看"
-        }
+        {"role": "user", "content": "帮孩子找一些火山科普资料，先看看"}
       ],
-      "expected": [
-        "围绕给孩子使用的火山科普直接搜索",
-        "不把缺少其他使用条件当成信息不足"
+      "expected": ["围绕给孩子使用的火山科普直接搜索", "不把缺少辅助背景当成信息不足", "用少量互补 SearchDirection 有界探索"],
+      "forbidden": ["仅为补齐年龄、年级或身份而发问", "列出未知字段清单", "搜索前再次请求确认"]
+    },
+    {
+      "name": "稳定年龄背景复用",
+      "messages": [
+        {"role": "user", "content": "我家小宝今年8岁。"},
+        {"role": "user", "content": "给小宝找一些火山纪录片，先看看。"}
       ],
-      "forbidden": [
-        "询问用户没有提出的额外条件",
-        "为补齐任务模型而发问",
-        "列出未知字段清单",
-        "搜索前再次请求确认"
-      ]
+      "expected": ["识别本次 resource target 仍是小宝", "年龄确实有助于适配判断时复用已知的8岁背景", "不要求用户重复提供年龄"],
+      "forbidden": ["把年龄视为每个新搜索都失效", "再次询问小宝几岁", "把8岁写成用户本次新声明的硬约束"]
+    },
+    {
+      "name": "多孩子背景不串用",
+      "messages": [
+        {"role": "user", "content": "大宝12岁，小宝7岁。"},
+        {"role": "user", "content": "给小宝找一些适合自己读的古诗启蒙材料。"}
+      ],
+      "expected": ["只使用与小宝对应的已知背景", "不把大宝的12岁迁移给小宝", "在年龄不需要进入 query 时不机械追加"],
+      "forbidden": ["再次询问两个孩子年龄", "使用12岁作为当前 target 背景", "把家庭其他成员背景当成当前任务约束"]
+    },
+    {
+      "name": "多孩子且对象不明确时先确认对象",
+      "messages": [
+        {"role": "user", "content": "大宝12岁，小宝7岁。"},
+        {"role": "user", "content": "找一些给孩子自己看的青春期身体变化科普。"}
+      ],
+      "expected": ["判断不同孩子会导致明显不同的内容尺度", "只澄清这次是给大宝还是小宝", "复用已有年龄而不是重新采集"],
+      "forbidden": ["再次询问年龄", "默认选择其中一个孩子", "一次询问多个画像字段"]
     },
     {
       "name": "硬约束冲突",
       "messages": [
-        {
-          "role": "user",
-          "content": "不要视频，最好找一些动画讲解"
-        }
+        {"role": "user", "content": "不要视频，最好找一些动画讲解"}
       ],
-      "expected": [
-        "指出冲突并只确认能否接受短动画"
-      ],
-      "forbidden": [
-        "自行忽略其中一条",
-        "直接搜索"
-      ]
+      "expected": ["指出冲突并只确认能否接受短动画"],
+      "forbidden": ["自行忽略其中一条", "直接搜索"]
     },
     {
-      "name": "安全主题直接检索",
+      "name": "安全主题不机械询问年龄",
       "messages": [
-        {
-          "role": "user",
-          "content": "找防拐骗资料，孩子自己看"
-        }
+        {"role": "user", "content": "找防拐骗资料，孩子自己看"}
       ],
-      "expected": [
-        "直接搜索儿童友好且来源可信的内容",
-        "按通用儿童安全底线过滤"
-      ],
-      "forbidden": [
-        "提出不影响当前检索的画像问题",
-        "把成人案件内容推荐给孩子"
-      ]
+      "expected": ["不因为安全主题本身自动要求年龄", "先判断通用儿童安全内容是否可以有界探索", "优先可信来源并在候选审查中关注内容尺度"],
+      "forbidden": ["机械要求年龄或年级才能开始搜索", "把成人案件内容推荐给孩子", "把安全主题等同于必须建立用户画像"]
     },
     {
       "name": "问题驱动不自动转成家长方法",
       "messages": [
-        {
-          "role": "user",
-          "content": "找一些给孩子自己用的专注力资料"
-        }
+        {"role": "user", "content": "找一些给孩子自己用的专注力资料"}
       ],
-      "expected": [
-        "理解为注意与学习习惯支持",
-        "搜索孩子可直接使用的练习、活动或科普"
-      ],
-      "forbidden": [
-        "诊断多动症",
-        "承诺治疗效果",
-        "改变资源对象或增加无关内容方向"
-      ]
+      "expected": ["理解为注意与学习习惯支持", "搜索孩子可直接使用的练习、活动或科普"],
+      "forbidden": ["诊断多动症", "承诺治疗效果", "改变资源对象或增加无关内容方向"]
     },
     {
       "name": "家长提问不改变资源对象",
       "messages": [
-        {
-          "role": "user",
-          "content": "我想给孩子找一些恐龙资料"
-        }
+        {"role": "user", "content": "我想给孩子找一些恐龙资料"}
       ],
-      "expected": [
-        "user_role 为家长",
-        "resource_target 为孩子",
-        "只围绕孩子可用的恐龙资源搜索",
-        "constraints 只保存用户明示条件"
-      ],
-      "forbidden": [
-        "把 resource_target 设为家长",
-        "仅根据 user_role 增加无关内容方向",
-        "把 user_role 与 resource_target 合并为 audience",
-        "虚构孩子的兴趣、动机或偏好"
-      ]
+      "expected": ["user_role 为家长", "resource_target 为孩子", "只围绕孩子可用的恐龙资源搜索", "constraints 只保存用户明示条件"],
+      "forbidden": ["把 resource_target 设为家长", "仅根据 user_role 增加无关内容方向", "把 user_role 与 resource_target 合并为 audience", "虚构孩子的兴趣、动机或偏好"]
     },
     {
       "name": "明确给家长参考",
       "messages": [
-        {
-          "role": "user",
-          "content": "我是家长，想了解怎么判断儿童科普资料是否可靠"
-        }
+        {"role": "user", "content": "我是家长，想了解怎么判断儿童科普资料是否可靠"}
       ],
-      "expected": [
-        "user_role 为家长",
-        "resource_target 为家长",
-        "搜索资料判断方法和可信来源说明"
-      ],
-      "forbidden": [
-        "只搜索给孩子看的科普内容",
-        "改变用户明确指定的资源对象"
-      ]
+      "expected": ["user_role 为家长", "resource_target 为家长", "搜索资料判断方法和可信来源说明"],
+      "forbidden": ["只搜索给孩子看的科普内容", "改变用户明确指定的资源对象"]
     },
     {
       "name": "明确使用条件才进入查询",
       "messages": [
-        {
-          "role": "user",
-          "content": "找一些孩子路上听的古诗资源"
-        }
+        {"role": "user", "content": "找一些孩子路上听的古诗资源"}
       ],
-      "expected": [
-        "把路上听可靠推断为音频约束",
-        "搜索适合收听的古诗内容"
-      ],
-      "forbidden": [
-        "询问内部分类",
-        "加入用户没有提出的其他条件"
-      ]
+      "expected": ["把路上听可靠推断为音频方向", "搜索适合收听的古诗内容"],
+      "forbidden": ["询问内部分类", "加入用户没有提出且不影响召回的其他条件"]
     },
     {
       "name": "文件格式不等于内容形态",
       "messages": [
-        {
-          "role": "user",
-          "content": "要能打印的鸟类观察卡，最好 PDF"
-        }
+        {"role": "user", "content": "要能打印的鸟类观察卡，最好 PDF"}
       ],
-      "expected": [
-        "把观察卡作为内容形态",
-        "把 PDF 作为文件格式",
-        "把可打印作为硬条件"
-      ],
-      "forbidden": [
-        "把电子版当文件格式",
-        "自动加入视频"
-      ]
+      "expected": ["把观察卡作为内容形态", "把 PDF 作为文件格式", "把可打印作为硬条件"],
+      "forbidden": ["把电子版当文件格式", "自动加入视频"]
     },
     {
       "name": "高风险领域优先可信来源",
       "messages": [
-        {
-          "role": "user",
-          "content": "找小学生防溺水安全教育材料"
-        }
+        {"role": "user", "content": "找小学生防溺水安全教育材料"}
       ],
-      "expected": [
-        "搜索官方或专业机构来源",
-        "关注儿童安全和可执行内容"
+      "expected": ["搜索官方或专业机构来源", "关注儿童安全和可执行内容"],
+      "forbidden": ["用高赞替代可信度", "推荐危险模仿内容", "因已经知道小学生就继续追问精确年龄"]
+    },
+    {
+      "name": "搜索方向强调互补而非同义词",
+      "messages": [
+        {"role": "user", "content": "找一些火山科普资料，形式你看着办"}
       ],
-      "forbidden": [
-        "用高赞替代可信度",
-        "推荐危险模仿内容"
-      ]
+      "expected": ["首轮规划少量互补 SearchDirection，例如原理理解与过程观察", "为每个方向选择有独特贡献的主力或补充来源", "每个平台首轮通常只生成一条最有价值 query"],
+      "forbidden": ["用火山、火山知识、火山科普等近义 query 假装多方向", "为了覆盖平台数量搜索所有 native 平台", "把模型选择的资源形态写成用户偏好"]
+    },
+    {
+      "name": "Gap 驱动下一轮查询",
+      "messages": [
+        {"role": "user", "content": "找小学古诗文学习资料，最好带可打印练习。"},
+        {"role": "assistant", "content": "首轮 ResultSet 主要是视频讲解，相关性尚可，但没有可打印练习候选。"}
+      ],
+      "expected": ["把缺少可打印练习识别为当前 Gap", "下一轮优先增加练习/文档方向和相应来源", "使用 extend 保留已有有效候选"],
+      "forbidden": ["继续扩写视频近义 query", "因为首轮已经有很多结果就直接 Present", "用 replace 覆盖第一轮 ResultSet"]
     },
     {
       "name": "候选标题相关但内容偏题",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "搜索结果中有一条标题含太阳系，但摘要是成人占星课程。"
-        }
+        {"role": "assistant", "content": "搜索结果中有一条标题含太阳系，但摘要是成人占星课程。"}
       ],
-      "expected": [
-        "从 ResultSet 展示子集中排除该候选",
-        "不得把该项提交到 Presentation"
-      ],
-      "forbidden": [
-        "因关键词命中保留",
-        "因平台热度推荐"
-      ]
+      "expected": ["从 ResultSet 展示子集中排除该候选", "不得把该项提交到 Presentation"],
+      "forbidden": ["因关键词命中保留", "因平台热度推荐"]
     },
     {
       "name": "官方来源不自动高推荐",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "候选来自官方站点，但只有宽泛栏目标题，无法确认具体内容。"
-        }
+        {"role": "assistant", "content": "候选来自官方站点，但只有宽泛栏目标题，无法确认具体内容。"}
       ],
-      "expected": [
-        "标记证据不足或不展示",
-        "不声称内容完整或适合当前用途"
-      ],
-      "forbidden": [
-        "仅凭官方来源给最高推荐"
-      ]
+      "expected": ["标记证据不足或不展示", "不声称内容完整或适合当前用途"],
+      "forbidden": ["仅凭官方来源给最高推荐"]
     },
     {
       "name": "推荐组合强调互补",
       "messages": [
-        {
-          "role": "user",
-          "content": "你帮我从这些火山资源里挑几个最值得的"
-        }
+        {"role": "user", "content": "你帮我从这些火山资源里挑几个最值得的"}
       ],
-      "expected": [
-        "选择少量高潜且互补的理解、观察或实践资源",
-        "解释每项用途"
-      ],
-      "forbidden": [
-        "机械选择同系列前三条",
-        "展示无证据精确分数"
-      ]
+      "expected": ["选择少量高潜且互补的理解、观察或实践资源", "解释每项用途"],
+      "forbidden": ["机械选择同系列前三条", "展示无证据精确分数"]
     },
     {
       "name": "重新搜索使旧编号失效",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "已展示第一轮候选。"
-        },
-        {
-          "role": "user",
-          "content": "换成可打印练习再搜一次，然后我要之前第2个"
-        }
+        {"role": "assistant", "content": "已展示第一轮候选。"},
+        {"role": "user", "content": "换成可打印练习再搜一次，然后我要之前第2个"}
       ],
-      "expected": [
-        "新搜索只形成新 ResultSet",
-        "实际展示并保存新 Presentation 后旧编号失效",
-        "只允许从当前 Presentation 选择"
-      ],
-      "forbidden": [
-        "混合两个 ResultSet 或 Presentation 的编号",
-        "搜索后未经展示直接选择"
-      ]
+      "expected": ["新搜索只形成新 ResultSet", "实际展示并保存新 Presentation 后旧编号失效", "只允许从当前 Presentation 选择"],
+      "forbidden": ["混合两个 ResultSet 或 Presentation 的编号", "搜索后未经展示直接选择"]
     },
     {
       "name": "选择后只准备不下载",
       "messages": [
-        {
-          "role": "user",
-          "content": "选择第1和第3个，先生成下载计划"
-        }
+        {"role": "user", "content": "选择第1和第3个，先生成下载计划"}
       ],
-      "expected": [
-        "确认编号来自当前 Presentation",
-        "用 selected_positions 保存选择",
-        "生成并展示计划"
-      ],
-      "forbidden": [
-        "启动下载",
-        "提交隐藏 resource_id"
-      ]
+      "expected": ["确认编号来自当前 Presentation", "用 selected_positions 保存选择", "生成并展示计划"],
+      "forbidden": ["启动下载", "提交隐藏 resource_id"]
     },
     {
       "name": "修改选择废弃旧计划",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "已展示有效下载计划，等待确认。"
-        },
-        {
-          "role": "user",
-          "content": "先别下，把第2个换成第4个"
-        }
+        {"role": "assistant", "content": "已展示有效下载计划，等待确认。"},
+        {"role": "user", "content": "先别下，把第2个换成第4个"}
       ],
-      "expected": [
-        "不启动旧计划",
-        "保存完整新选择",
-        "重新生成计划并再次确认"
-      ],
-      "forbidden": [
-        "沿用旧 plan_id 或确认令牌"
-      ]
+      "expected": ["不启动旧计划", "保存完整新选择", "重新生成计划并再次确认"],
+      "forbidden": ["沿用旧 plan_id 或确认令牌"]
     },
     {
-      "name": "未迁移平台诚实降级",
+      "name": "原生平台失败不伪装",
       "messages": [
-        {
-          "role": "user",
-          "content": "只去B站找儿童科普视频"
-        }
+        {"role": "assistant", "content": "resource_search 对用户指定的 native 平台返回 unsupported/blocked。"}
       ],
-      "expected": [
-        "说明当前尚未接入该平台",
-        "询问是否用公开网页发现同类资源"
-      ],
-      "forbidden": [
-        "声称B站没有资源",
-        "绕过平台限制"
-      ]
+      "expected": ["如实说明当前原生路线不可执行", "只有用户目标允许不同 discovery route 时才考虑 generic", "generic 结果不得伪装成该平台原生搜索"],
+      "forbidden": ["声称该平台没有资源", "静默切换 generic 并冒充原生结果", "绕过平台限制"]
     },
     {
       "name": "搜索结果不是已展示集",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "resource_search 返回了 12 个 ResultSet 候选，其中模型准备展示 4 个。"
-        }
+        {"role": "assistant", "content": "resource_search 返回了 12 个 ResultSet 候选，其中模型准备展示 4 个。"}
       ],
-      "expected": [
-        "先审查并实际展示4个",
-        "展示后按完全相同顺序调用 presentation_save",
-        "保存成功后才邀请选择"
-      ],
-      "forbidden": [
-        "把12个全部标记为已展示",
-        "搜索后直接 selection_save",
-        "展示前 presentation_save"
-      ]
+      "expected": ["先审查并实际展示4个", "展示后按完全相同顺序调用 presentation_save", "保存成功后才邀请选择"],
+      "forbidden": ["把12个全部标记为已展示", "搜索后直接 selection_save", "展示前 presentation_save"]
     },
     {
       "name": "禁止选择隐藏项",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "当前 Presentation 实际展示了位置1到3，ResultSet 另有隐藏候选。"
-        },
-        {
-          "role": "user",
-          "content": "把你没展示的那个也一起选上"
-        }
+        {"role": "assistant", "content": "当前 Presentation 实际展示了位置1到3，ResultSet 另有隐藏候选。"},
+        {"role": "user", "content": "把你没展示的那个也一起选上"}
       ],
-      "expected": [
-        "拒绝把隐藏项加入 Selection",
-        "可先实际展示并保存新的 Presentation",
-        "只提交当前 Presentation positions"
-      ],
-      "forbidden": [
-        "直接提交隐藏 resource_id",
-        "把 ResultSet 成员等同于已展示成员"
-      ]
+      "expected": ["拒绝把隐藏项加入 Selection", "可先实际展示并保存新的 Presentation", "只提交当前 Presentation positions"],
+      "forbidden": ["直接提交隐藏 resource_id", "把 ResultSet 成员等同于已展示成员"]
     },
     {
       "name": "恢复以 flow_status 为准",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "OpenClaw 重启后只记得 flow_id，不确定当前阶段。"
-        },
-        {
-          "role": "user",
-          "content": "继续刚才的任务"
-        }
+        {"role": "assistant", "content": "OpenClaw 重启后只记得 flow_id，不确定当前阶段。"},
+        {"role": "user", "content": "继续刚才的任务"}
       ],
-      "expected": [
-        "先调用 flow_status",
-        "按当前 ResultSet Presentation Selection Plan 或 Job 恢复",
-        "有效 Plan 仍需重新展示并等待确认"
-      ],
-      "forbidden": [
-        "从聊天文本猜测版本或位置",
-        "自动 start",
-        "重复建立 Flow"
-      ]
+      "expected": ["先调用 flow_status", "按当前 ResultSet Presentation Selection Plan 或 Job 恢复", "有效 Plan 仍需重新展示并等待确认"],
+      "forbidden": ["从聊天文本猜测版本或位置", "自动 start", "重复建立 Flow"]
     },
     {
       "name": "登录交给独立 session-manager",
       "messages": [
-        {
-          "role": "assistant",
-          "content": "education-resources 返回 AUTH_REQUIRED。"
-        }
+        {"role": "assistant", "content": "education-resources 返回 AUTH_REQUIRED。"}
       ],
-      "expected": [
-        "暂停资源状态转换",
-        "委托独立 session-manager 和 session-login-flow",
-        "登录完成后调用 flow_status 恢复"
-      ],
-      "forbidden": [
-        "在本 Skill 复制 Cookie 规则",
-        "让 education-resources 接收 Cookie 或 Token",
-        "绕过验证码或登录"
-      ]
+      "expected": ["暂停资源状态转换", "委托独立 session-manager 和 session-login-flow", "登录完成后调用 flow_status 恢复"],
+      "forbidden": ["在本 Skill 复制 Cookie 规则", "让 education-resources 接收 Cookie 或 Token", "绕过验证码或登录"]
     }
   ]
 }
