@@ -17,10 +17,16 @@ dependencies = [
 [project.scripts]
 education-resource-mcp = "education_resource_mcp.server:main"
 
+[project.optional-dependencies]
+dev = ["pytest>=9"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "slow: long-running or environment-sensitive tests (E2E subprocess, storage migrations, contract parsing); use -m 'not slow' for fast daily runs",
+]
 

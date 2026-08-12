@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from contextlib import closing
@@ -779,3 +780,7 @@ class StorageMigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+import pytest
+
+pytestmark = pytest.mark.slow

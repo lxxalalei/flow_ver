@@ -1,5 +1,6 @@
 """Process-level restart and authentication recovery through public MCP tools."""
 
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -326,3 +327,7 @@ class ProcessRecoveryE2ETests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+import pytest
+
+pytestmark = pytest.mark.slow

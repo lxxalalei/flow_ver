@@ -1,5 +1,6 @@
 """Tests for platform-specific search adapters and the multi-platform dispatcher."""
 
+
 from __future__ import annotations
 
 import json
@@ -707,3 +708,7 @@ class AnnasArchiveDownloaderTests(unittest.TestCase):
                     dl.download(self._resource(), "job1", "direct",
                                 threading.Event())
             self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+
+import pytest
+
+pytestmark = pytest.mark.slow

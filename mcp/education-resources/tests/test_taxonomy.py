@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import importlib.util
@@ -368,3 +369,7 @@ class ToolsListNestedSchemaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+import pytest
+
+pytestmark = pytest.mark.slow

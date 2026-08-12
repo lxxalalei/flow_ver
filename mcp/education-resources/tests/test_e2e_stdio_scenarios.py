@@ -1,5 +1,6 @@
 """Complete offline business scenarios over a real MCP stdio subprocess."""
 
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -515,3 +516,7 @@ class StdioScenarioE2ETests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+import pytest
+
+pytestmark = pytest.mark.slow

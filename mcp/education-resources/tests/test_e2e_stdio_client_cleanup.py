@@ -1,5 +1,6 @@
 """Regression tests for RawMcpClient startup cleanup."""
 
+
 from __future__ import annotations
 
 import os
@@ -250,3 +251,7 @@ class RawMcpClientStartupCleanupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+import pytest
+
+pytestmark = pytest.mark.slow

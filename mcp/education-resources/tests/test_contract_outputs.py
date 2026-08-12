@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import ast
@@ -843,3 +844,7 @@ class ContractOutputTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+import pytest
+
+pytestmark = pytest.mark.slow
