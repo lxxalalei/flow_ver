@@ -11,17 +11,14 @@
 
 ## 验证等级
 
-只勾选本次**实际执行**的等级，不得用低一级验证冒充高一级。
+只勾选本次**实际执行**的等级，语义与 `AGENTS.md`「验证要求」一致，不得用低一级验证冒充高一级。
 
 ```text
-[ ] implemented
-[ ] statically checked
-[ ] targeted unit tested
-[ ] subsystem/integration tested
-[ ] backend E2E tested
-[ ] real Agent/user-flow tested
-[ ] visual behavior inspected
-[ ] full regression tested
+[ ] Level 1 — 小改动：直接受影响的单元测试、必要的语法/静态检查
+[ ] Level 2 — 子系统改动：受影响 package/module 测试和直接相关 integration
+[ ] Level 3 — milestone/用户链路改动：受影响回归、相关 E2E，以及适用时的真实 Agent/用户流程
+[ ] Level 4 — release/跨切面改动/明确要求：有具体风险依据时运行全量回归
+[ ] 未执行真实 Agent/用户流程验证（如适用）
 ```
 
 对每项实际验证说明：
