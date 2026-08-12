@@ -56,3 +56,4 @@
 | [0034-skill-semantic-loss-audit.md](0034-skill-semantic-loss-audit.md) | completed | 对照 0031 前 Skill 语义补回仍有效规则 |
 | [0035-deleted-skill-reference-complete-audit.md](0035-deleted-skill-reference-complete-audit.md) | completed | 旧 Skill/reference 逐文件语义守恒审计 |
 | [0036-platform-acquisition-capability-recovery.md](0036-platform-acquisition-capability-recovery.md) | superseded | 平台恢复目标保留；旧 Capability Authority 和重新引入大小/哈希门禁的路线被 0037 覆盖 |
+| [0040-search-subagent-orchestration.md](0040-search-subagent-orchestration.md) | completed | OpenClaw leaf sub-agent 并行规划 SearchDirection；MCP 继续统一串行执行搜索与业务状态 |
