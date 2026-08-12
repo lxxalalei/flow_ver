@@ -36,7 +36,7 @@ Plan 指定哪个 Provider，Start 就执行哪个。失败返回真实失败，
 
 ### 5. 保留必要安全边界
 
-prepare → 确认 → start、SSRF / 重定向保护、受控任务目录、取消 / 超时、MIME 检查、登录 / 付费墙边界。
+prepare → 确认 → start、受控任务目录、取消 / 超时、MIME 检查。
 
 ## 路线
 

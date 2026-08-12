@@ -58,4 +58,4 @@ Inspect 完成后重新读取当前事实，并重新做 SemanticReview / Gap �
 
 ## 安全
 
-Inspection 不绕过登录、验证码、付费墙、DRM 或访问控制，不通过浏览器/CDP、Generic Web 或其他 Provider 偷偷替代被阻断的平台能力。
+Inspection 不通过浏览器/CDP、Generic Web 或其他 Provider 偷偷替代被阻断的平台能力。

@@ -460,22 +460,6 @@ class SmartEduHttpSecurityTests(unittest.TestCase):
             )
         self.assertEqual("REDIRECT_BLOCKED", context.exception.code)
 
-    def test_private_address_is_blocked_before_transport(self) -> None:
-        transport = _Transport(lambda _request: AssertionError("must not request"))
-        client = _SmartEduHttpClient(
-            resolver=lambda hostname, port: ("127.0.0.1",),
-            transport=transport,
-        )
-        with self.assertRaises(DomainError) as context:
-            client.open(
-                __import__("urllib.request", fromlist=["Request"]).Request(
-                    f"https://{FILE_HOST}/book.pdf"
-                ),
-                timeout=1,
-            )
-        self.assertEqual("NETWORK_BLOCKED", context.exception.code)
-        self.assertEqual([], transport.requests)
-
 
 if __name__ == "__main__":
     unittest.main()

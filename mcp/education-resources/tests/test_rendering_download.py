@@ -173,12 +173,12 @@ class RenderingDownloaderTests(unittest.TestCase):
             downloader.download(self._resource(), "job_3", "direct", threading.Event())
         self.assertEqual(ctx.exception.code, "INVALID_ARGUMENT")
 
-    def test_ssrf_blocked(self) -> None:
+    def test_non_http_scheme_blocked(self) -> None:
         renderer = FakeRenderer()
         downloader = RenderingDownloader(self.settings, renderer=renderer)  # type: ignore[arg-type]
         with self.assertRaises(DomainError) as ctx:
             downloader.download(
-                self._resource(source_url="http://127.0.0.1:8080/private"),
+                self._resource(source_url="ftp://example.com/private"),
                 "job_4", "webpage", threading.Event(),
             )
         self.assertEqual(ctx.exception.code, "NETWORK_BLOCKED")

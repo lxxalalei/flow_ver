@@ -86,8 +86,7 @@ ProviderSpec 存在不等于平台 production-ready。真实网络、认证、�
 - Selection / Plan 版本与幂等关系由服务端校验
 - Start 重新核验当前 Resolution / Representation
 - Router 只执行 Plan 的 exact Provider；失败不 silent fallback
-- SSRF、逐跳重定向、路径逃逸、取消、超时、MIME 检查保留
-- 不绕过登录、验证码、付费墙、DRM 或访问控制
+- 路径逃逸、取消、超时、MIME 检查保留
 - Archive 只接受服务端 ready `asset_id`
 
 ## 搜索分权

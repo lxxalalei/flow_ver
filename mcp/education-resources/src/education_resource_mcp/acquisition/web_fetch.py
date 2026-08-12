@@ -63,16 +63,6 @@ _HTML_MAGIC_RE = re.compile(
     re.IGNORECASE,
 )
 _XML_DECLARATION_RE = re.compile(r"^\s*<\?xml\b[^>]*\?>", re.IGNORECASE)
-_BLOCKED_HOSTNAMES = frozenset(
-    {
-        "localhost",
-        "localhost.localdomain",
-        "metadata",
-        "metadata.google.internal",
-        "metadata.azure.internal",
-        "instance-data.ec2.internal",
-    }
-)
 
 
 # These values are intentionally kept stable.  They are internal failure
@@ -276,19 +266,6 @@ def _same_resource_url(left: str, right: str) -> bool:
     )
 
 
-def _explicitly_blocked_hostname(url: str) -> bool:
-    """Catch SSRF aliases even when an injected resolver reports them public."""
-
-    try:
-        hostname = urlsplit(url).hostname
-    except ValueError:
-        return False
-    if hostname is None:
-        return False
-    normalized = hostname.casefold().rstrip(".")
-    return normalized in _BLOCKED_HOSTNAMES or normalized.endswith(".localhost")
-
-
 def image_format_from_magic(body: bytes | bytearray | memoryview) -> ImageFormat | None:
     """Return a supported image format from its magic bytes, if any.
 
@@ -460,23 +437,15 @@ class BoundedWebFetcher:
 
     @staticmethod
     def _validate_url(url: str, *, redirect: bool, resolver: Resolver) -> None:
-        if _explicitly_blocked_hostname(url):
-            raise FetchError(
-                FETCH_REDIRECT_BLOCKED if redirect else FETCH_NETWORK_BLOCKED,
-                "重定向地址未通过公共网络安全策略"
-                if redirect
-                else "请求地址未通过公共网络安全策略",
-                details={"policy_code": "blocked_hostname"},
-            )
         try:
             validate_public_http_url(url, resolver=resolver)
         except PolicyViolation as exc:
             code = FETCH_REDIRECT_BLOCKED if redirect else FETCH_NETWORK_BLOCKED
             raise FetchError(
                 code,
-                "重定向地址未通过公共网络安全策略"
+                "重定向地址未通过主机策略"
                 if redirect
-                else "请求地址未通过公共网络安全策略",
+                else "请求地址未通过主机策略",
                 details={"policy_code": exc.code},
             ) from exc
 

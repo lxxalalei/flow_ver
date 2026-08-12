@@ -239,13 +239,13 @@
       "code": "NETWORK_BLOCKED",
       "category": "security",
       "retriable": false,
-      "meaning": "The target protocol, host, address, or network class is blocked."
+      "meaning": "The target protocol or host is blocked."
     },
     {
       "code": "REDIRECT_BLOCKED",
       "category": "security",
       "retriable": false,
-      "meaning": "A redirect target failed protocol, host, or address policy."
+      "meaning": "A redirect target failed protocol or host policy."
     },
     {
       "code": "DOWNLOAD_TOO_LARGE",

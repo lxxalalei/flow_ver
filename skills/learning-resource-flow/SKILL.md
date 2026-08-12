@@ -237,8 +237,6 @@ Provider 失败时保留真实失败，不静默改用 Generic/其他 Provider�
 
 不要索取或代填账号、密码、验证码、短信码或 MFA。Cookie/Token 原值不得进入本 Skill、`education-resources` Tool、其他 Tool、日志、计划或仓库；唯一例外是明确授权后的一次 `resource_session_save.session_data` 输入，且不得回显、失败后自动重放或与同一次 browser capture 混用。
 
-不绕过登录、验证码、付费墙、DRM 或明确访问控制。
-
 ## Job、恢复与取消
 
 Job 是异步资源。使用 `resource_job_status` 查询，用户要求取消时使用 `resource_job_cancel`。

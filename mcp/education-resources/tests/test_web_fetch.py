@@ -89,10 +89,6 @@ class QueueTransport:
 
 
 def public_resolver(hostname: str, port: int):
-    if hostname == "private.test":
-        return ("10.0.0.8",)
-    if hostname == "link-local.test":
-        return ("169.254.169.254",)
     return (PUBLIC_IP,)
 
 
@@ -112,24 +108,6 @@ def error_code(callback) -> str:
 
 
 class WebFetchTests(unittest.TestCase):
-    def test_initial_private_link_local_and_metadata_targets_are_blocked(self) -> None:
-        for url in (
-            "http://127.0.0.1/private",
-            "http://localhost/private",
-            "http://10.0.0.8/private",
-            "https://169.254.169.254/latest/meta-data",
-            "https://metadata.google.internal/computeMetadata/v1",
-            "https://private.test/private",
-            "https://link-local.test/private",
-        ):
-            with self.subTest(url=url):
-                transport = QueueTransport()
-                self.assertEqual(
-                    FETCH_NETWORK_BLOCKED,
-                    error_code(lambda url=url: fetcher(transport).fetch(url)),
-                )
-                self.assertEqual([], transport.requests)
-
     def test_redirects_are_explicitly_followed_and_request_has_no_auth_or_cookie(self) -> None:
         first = FakeResponse(
             status=302,
@@ -155,7 +133,7 @@ class WebFetchTests(unittest.TestCase):
     def test_redirect_target_and_final_url_are_validated_before_use(self) -> None:
         malicious_redirect = FakeResponse(
             status=302,
-            headers={"Location": "http://127.0.0.1/metadata"},
+            headers={"Location": "file:///etc/passwd"},
         )
         transport = QueueTransport(malicious_redirect)
         self.assertEqual(

@@ -208,10 +208,10 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("resolved", mapped["resolution_status"])
         self.assertEqual([], mapped["failures"])
 
-    def test_initial_private_url_is_policy_blocked(self) -> None:
+    def test_initial_non_http_url_is_policy_blocked(self) -> None:
         transport = QueueTransport()
         mapped = inspector(transport).inspect(
-            resource(source_url="http://127.0.0.1/private")
+            resource(source_url="ftp://example.com/private")
         ).to_mapping()
 
         self.assertEqual("policy_blocked", mapped["resolved_resource"]["availability"]["status"])
@@ -221,7 +221,7 @@ class GenericWebInspectorTests(unittest.TestCase):
     def test_malicious_redirect_is_validated_before_following(self) -> None:
         first = FakeResponse(
             status=302,
-            headers={"Location": "http://127.0.0.1/metadata"},
+            headers={"Location": "file:///etc/passwd"},
             final_url="https://public.test/resource",
         )
         transport = QueueTransport(first)

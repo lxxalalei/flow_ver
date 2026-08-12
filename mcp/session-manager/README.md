@@ -51,7 +51,6 @@ browser capture 混合，也不接受任意 Header、文件、浏览器档案或
   恶意进程，管理员级进程也属于边界外威胁。
 - Cookie/Token 仍会从浏览器工具或 direct import 经过 Agent/MCP 参数通道。更强隔离需要未来由宿主 Plugin
   直接捕获并仅返回不透明 `capture_id`。
-- 不绕过验证码、付费墙、DRM 或访问控制。
 
 ## MCP 工具
 

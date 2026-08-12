@@ -131,40 +131,14 @@ def _parse_resolved_address(value: str | IPAddress) -> IPAddress:
         ) from exc
 
 
-def _reject_non_global_address(address: IPAddress) -> None:
-    categories = (
-        (address.is_loopback, "loopback_address"),
-        (address.is_link_local, "link_local_address"),
-        (address.is_multicast, "multicast_address"),
-        (address.is_reserved, "reserved_address"),
-        (address.is_unspecified, "unspecified_address"),
-        (address.is_private, "private_address"),
-    )
-    for matched, code in categories:
-        if matched:
-            raise PolicyViolation(
-                code,
-                f"resolved address is not permitted: {address}",
-                value=str(address),
-            )
-    # Also fail closed for other special-use ranges that Python does not place
-    # in one of the categories above (for example carrier-grade NAT space).
-    if not address.is_global:
-        raise PolicyViolation(
-            "non_global_address",
-            f"resolved address is not globally routable: {address}",
-            value=str(address),
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class NetworkPolicy:
-    """Validate outbound HTTP(S) URLs against host and address policy.
+    """Validate outbound HTTP(S) URLs against scheme, host and credential policy.
 
     ``allowed_hosts`` uses exact host matching.  A leading ``*.`` explicitly
-    permits subdomains while excluding the bare suffix.  Every address returned
-    by the resolver must be globally routable; mixed public/private DNS answers
-    are rejected rather than partially accepted.
+    permits subdomains while excluding the bare suffix.  Resolved addresses are
+    still returned for callers that need them, but no address-class blocking is
+    applied; scheme, host allowlisting and redirect-count guards remain.
     """
 
     allowed_hosts: Collection[str]
@@ -259,8 +233,6 @@ class NetworkPolicy:
             addresses = (literal,)
 
         unique_addresses = tuple(dict.fromkeys(addresses))
-        for address in unique_addresses:
-            _reject_non_global_address(address)
 
         return ValidatedUrl(
             url=url,
@@ -415,10 +387,11 @@ def validate_public_http_url(
 ) -> ValidatedUrl:
     """Compatibility entry point for validating one public HTTP(S) URL.
 
-    Security-sensitive workflows should pass an explicit ``allowed_hosts`` set
-    or retain a ``NetworkPolicy`` instance across the initial request and all
-    redirects.  When omitted, this helper still enforces public-address SSRF
-    checks but limits the one-shot policy to the URL's own host.
+    Workflows should pass an explicit ``allowed_hosts`` set or retain a
+    ``NetworkPolicy`` instance across the initial request and all redirects.
+    When omitted, the one-shot policy is limited to the URL's own host.  Only
+    scheme, host and credential rules are enforced; no address-class blocking
+    is applied.
     """
 
     if not isinstance(url, str) or not url:

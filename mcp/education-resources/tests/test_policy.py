@@ -105,36 +105,6 @@ class NetworkPolicyTests(unittest.TestCase):
             lambda: policy.validate_url("https://assets.example/file"),
         )
 
-    def test_rejects_each_non_global_address_category(self) -> None:
-        cases = (
-            ("127.0.0.1", "loopback_address"),
-            ("10.10.0.1", "private_address"),
-            ("169.254.10.1", "link_local_address"),
-            ("224.0.0.1", "multicast_address"),
-            ("240.0.0.1", "reserved_address"),
-            ("0.0.0.0", "unspecified_address"),
-            ("::1", "loopback_address"),
-            ("fe80::1", "link_local_address"),
-            ("ff02::1", "multicast_address"),
-        )
-        for address, code in cases:
-            with self.subTest(address=address):
-                policy, _resolver = self.make_policy(
-                    {"assets.example": (address,)}
-                )
-                self.assert_policy_code(
-                    code, lambda policy=policy: policy.validate_url("https://assets.example")
-                )
-
-    def test_rejects_mixed_public_and_private_dns_answers(self) -> None:
-        policy, _resolver = self.make_policy(
-            {"assets.example": ("93.184.216.34", "127.0.0.1")}
-        )
-
-        self.assert_policy_code(
-            "loopback_address", lambda: policy.validate_url("https://assets.example")
-        )
-
     def test_rejects_empty_and_invalid_resolver_answers(self) -> None:
         empty_policy, _resolver = self.make_policy({"assets.example": ()})
         invalid_policy, _resolver = self.make_policy(
@@ -184,26 +154,13 @@ class NetworkPolicyTests(unittest.TestCase):
             ],
         )
 
-    def test_redirect_cannot_escape_host_or_address_policy(self) -> None:
+    def test_redirect_cannot_escape_host_policy(self) -> None:
         host_policy, _resolver = self.make_policy()
-        private_policy, _resolver = self.make_policy(
-            {
-                "assets.example": ("93.184.216.34",),
-                "private.example": ("192.168.1.10",),
-            },
-            allowed_hosts=("assets.example", "private.example"),
-        )
 
         self.assert_policy_code(
             "host_not_allowed",
             lambda: host_policy.validate_redirect(
                 "https://assets.example/start", "//evil.example/file"
-            ),
-        )
-        self.assert_policy_code(
-            "private_address",
-            lambda: private_policy.validate_redirect(
-                "https://assets.example/start", "https://private.example/file"
             ),
         )
 
