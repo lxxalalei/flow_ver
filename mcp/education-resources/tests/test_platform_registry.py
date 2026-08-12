@@ -102,7 +102,7 @@ class PlatformRegistryTests(unittest.TestCase):
                         }[strategy],
                     )
 
-    def test_inspection_platform_set_is_exactly_seven_and_other_nine_are_disabled(self) -> None:
+    def test_inspection_platform_set_matches_code_constant(self) -> None:
         registry = load_platform_registry()
         enabled = {
             item["platform_id"]
@@ -110,11 +110,10 @@ class PlatformRegistryTests(unittest.TestCase):
             if item["capabilities"]["inspect"]
         }
         self.assertEqual(enabled, INSPECTION_PLATFORM_IDS)
-        self.assertEqual(len(enabled), 7)
+        self.assertEqual(len(enabled), 8)
         self.assertEqual(
             EXPECTED_PLATFORM_IDS - enabled,
             {
-                "douyin",
                 "cctv",
                 "yixi",
                 "kepu",
@@ -223,11 +222,11 @@ class PlatformRegistryTests(unittest.TestCase):
 
         inspect_enabled = copy.deepcopy(registry)
         wrong_inspection_platform = next(
-            item for item in inspect_enabled["platforms"] if item["platform_id"] == "douyin"
+            item for item in inspect_enabled["platforms"] if item["platform_id"] == "cctv"
         )
         wrong_inspection_platform["capabilities"]["inspect"] = True
         wrong_inspection_platform["inspection"]["supported"] = True
-        with self.assertRaisesRegex(PlatformRegistryError, "extra=.*douyin"):
+        with self.assertRaisesRegex(PlatformRegistryError, "extra=.*cctv"):
             validate_platform_registry(inspect_enabled)
 
         unsafe = copy.deepcopy(registry)

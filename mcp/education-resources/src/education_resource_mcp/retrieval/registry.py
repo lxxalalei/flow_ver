@@ -62,6 +62,7 @@ INSPECTION_PLATFORM_IDS = frozenset(
     {
         "generic",
         "bilibili",
+        "douyin",
         "nlc",
         "annas-archive",
         "ximalaya",

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from .adapters.inspect_annas_archive import AnnasArchiveInspector
 from .adapters.inspect_bilibili import BilibiliInspector
+from .adapters.inspect_douyin import DouyinInspector
 from .adapters.inspect_generic import GenericWebInspector
 from .adapters.inspect_nlc import NlcInspector
 from .adapters.inspect_smartedu import SmartEduInspector
@@ -42,6 +43,7 @@ def default_inspection_router(
     inspectors = (
         GenericWebInspector(**inspector_options),
         BilibiliInspector(**inspector_options),
+        DouyinInspector(session_store=session_store),
         NlcInspector(**inspector_options),
         AnnasArchiveInspector(**inspector_options),
         XimalayaInspector(**inspector_options),

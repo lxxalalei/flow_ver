@@ -89,6 +89,7 @@ fallback 由测试锁定一致，错误平台不能复用其他平台的可清�
 - Generic 使用受限 GET、逐跳重定向校验、1 MiB 流式上限和 MIME/魔数交叉验证。
 - Bilibili、NLC、Anna/Libgen、Ximalaya、Zhihu、SmartEdu 使用各自平台域名和元数据策略；
   Anna/Libgen 的当前实现事实不等于已完成 Anna's Archive 官方来源或生产授权验收。
+- Douyin 使用 a_bogus 签名的 detail API 核验具体 MP4 可获取性，需要有效登录态。
 - 输出只允许服务端生成的 Representation 元数据和可用性/失败状态，不返回 locator、文件字节、
   本地路径、Cookie 或 Token；Inspect 不下载、不归档。
 - Registry 的 inspect 开关表示对应 Inspection Router 代码能力已接入，不表示真实平台网络、

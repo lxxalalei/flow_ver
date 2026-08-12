@@ -64,10 +64,11 @@ migration 9 物理删除旧 authority 表（`capability_readiness_snapshots`、`
 Planner 内置以下 route（`DEFAULT_PROVIDER_SPECS`）：
 
 1. SmartEdu document/video/audio → `direct_file` → `smartedu-resource@1.0.0`
-2. Generic document → `direct_file` → `generic-direct@1.0.0`
-3. Generic video → `direct_file` → `generic-direct@1.0.0`
-4. Generic webpage (primary) → `web_materialize` → `generic-web-materializer@1.0.0`
-5. Generic webpage (landing) → `web_materialize` → `generic-web-materializer@1.0.0`
+2. Douyin video → `direct_file` → `douyin-video@1.0.0`
+3. Generic document → `direct_file` → `generic-direct@1.0.0`
+4. Generic video → `direct_file` → `generic-direct@1.0.0`
+5. Generic webpage (primary) → `web_materialize` → `generic-web-materializer@1.0.0`
+6. Generic webpage (landing) → `web_materialize` → `generic-web-materializer@1.0.0`
 
 ProviderSpec 存在不等于平台 production-ready。真实网络、认证、许可仍需 E2E 验证。
 

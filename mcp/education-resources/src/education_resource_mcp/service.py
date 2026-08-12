@@ -162,6 +162,20 @@ class ResourceService:
                 )
             except Exception:
                 pass
+            try:
+                from .adapters.douyin_download import DouyinDownloader
+
+                registrations.append(
+                    ProviderRegistration(
+                        provider_id="douyin-video",
+                        provider_version="1.0.0",
+                        provider=DouyinDownloader(self.session_store, self.settings),
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    )
+                )
+            except Exception:
+                pass
             self.acquisition_router = AcquisitionRouter(registrations)
         elif isinstance(acquisition_router, AcquisitionRouter):
             self.acquisition_router = acquisition_router
