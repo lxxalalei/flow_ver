@@ -264,8 +264,6 @@ class McpStdioTests(unittest.TestCase):
                         self.assertEqual(len(job.get("outcomes", [])), 1)
                         outcome = job["outcomes"][0]
                         self.assertNotIn("outcome_digest", outcome)
-                        self.assertNotIn("plan_binding_digest", outcome)
-                        self.assertNotIn("execution_binding_digest", outcome)
 
                         recovered = await call(
                             session,

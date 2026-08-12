@@ -23,7 +23,7 @@ from education_resource_mcp.inspection import (
 )
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.server import create_server
-from education_resource_mcp.simple_service import ResourceService
+from education_resource_mcp.service import ResourceService
 
 
 class FixtureInspector:

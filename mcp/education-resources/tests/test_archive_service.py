@@ -271,7 +271,6 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             selection_version=plan["selection_version"],
             selection_digest=plan["selection_digest"],
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
@@ -387,27 +386,8 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
         asset_id = assets[0]["asset_id"]
         with service.store.transaction(immediate=True) as connection:
             connection.execute(
-                "DELETE FROM job_execution_items WHERE job_id = ?",
+                "DELETE FROM job_items WHERE job_id = ?",
                 (job["job_id"],),
-            )
-            outcome_row = connection.execute(
-                "SELECT * FROM acquisition_outcomes WHERE job_id = ?",
-                (job["job_id"],),
-            ).fetchone()
-            assert outcome_row is not None
-            legacy_outcome = service.store._decode_acquisition_outcome(outcome_row)
-            legacy_outcome["execution_binding_digest"] = None
-            legacy_outcome.pop("outcome_digest", None)
-            connection.execute(
-                """
-                UPDATE acquisition_outcomes
-                SET execution_binding_digest = NULL, outcome_digest = ?
-                WHERE outcome_id = ?
-                """,
-                (
-                    service.store._request_digest(legacy_outcome),
-                    outcome_row["outcome_id"],
-                ),
             )
 
         with self.assertRaises(DomainError) as captured:
@@ -415,7 +395,7 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
                 flow["flow_id"],
                 job["job_id"],
                 asset_id,
-                idempotency_key="archive-legacy-authority-reject-001",
+                idempotency_key="archive-authority-reject-001",
                 metadata=self._classification(),
             )
         self.assertEqual("ASSET_NOT_ARCHIVABLE", captured.exception.code)

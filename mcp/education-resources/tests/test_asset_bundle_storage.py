@@ -46,11 +46,9 @@ class AssetBundleStorageTests(unittest.TestCase):
 
     def _insert_job(self, job_id: str, plan_id: str, resource_id: str) -> None:
         marker = "a" if job_id.endswith("a") else "b"
-        canonical = "sha256:" + marker * 64
-        snapshot_id = f"readiness_{job_id}"
-        eligibility_id = f"eligibility_{job_id}"
+        fingerprint = marker * 64
         representation_id = f"representation_{job_id}"
-        capability_id = f"capability_{job_id}"
+        representation_json = json.dumps({"scope": "primary_resource"})
         with self.store.transaction() as connection:
             connection.execute(
                 """
@@ -78,99 +76,38 @@ class AssetBundleStorageTests(unittest.TestCase):
             )
             connection.execute(
                 """
-                INSERT INTO capability_readiness_snapshots(
-                    snapshot_id, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    platform_id, capability_scope, strategy, provider_id,
-                    provider_version, inspector_id, inspector_version, status,
-                    issues_json, observed_at, expires_at, snapshot_digest
-                ) VALUES (?, ?, '1.0.0', ?, '1.0.0', ?, 'generic',
-                          'primary_resource', 'direct_file', 'generic-direct',
-                          '1.0.0', 'generic', '1.0.0', 'ready', '[]', ?, ?, ?)
+                INSERT INTO acquisition_plan_items(
+                    plan_id, position, resource_id, resolution_id,
+                    representation_id, planned_scope, strategy, provider_id,
+                    provider_version, source_fingerprint, representation_json
+                ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
+                          'generic-direct', '1.0.0', ?, ?)
                 """,
                 (
-                    snapshot_id,
-                    capability_id,
-                    canonical,
-                    canonical,
-                    NOW,
-                    "2099-01-01T00:00:00+00:00",
-                    canonical,
-                ),
-            )
-            connection.execute(
-                """
-                INSERT INTO eligibility_decisions(
-                    eligibility_id, flow_id, resource_id, resolution_id,
-                    representation_id, action, status, policy_class,
-                    reason_codes_json, source_fingerprint, capability_id,
-                    descriptor_digest, readiness_snapshot_id, evaluated_at,
-                    expires_at, decision_digest
-                ) VALUES (?, 'flow_a', ?, NULL, ?, 'download', 'eligible',
-                          'public', '[]', ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    eligibility_id,
+                    plan_id,
                     resource_id,
                     representation_id,
-                    canonical,
-                    capability_id,
-                    canonical,
-                    snapshot_id,
-                    NOW,
-                    "2099-01-01T00:00:00+00:00",
-                    canonical,
+                    fingerprint,
+                    representation_json,
                 ),
             )
-            common = (
-                plan_id,
-                resource_id,
-                representation_id,
-                capability_id,
-                canonical,
-                canonical,
-                snapshot_id,
-                canonical,
-                eligibility_id,
-                canonical,
-                canonical,
-                json.dumps({"scope": "primary_resource"}),
-            )
             connection.execute(
                 """
-                INSERT INTO download_plan_items(
-                    plan_id, position, resource_id, resolution_id,
-                    representation_id, capability_scope, strategy, provider_id,
-                    provider_version, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    readiness_snapshot_id, readiness_digest, eligibility_id,
-                    eligibility_digest, source_fingerprint, representation_json,
-                    binding_digest
-                ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
-                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
-                          ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (*common, marker * 64),
-            )
-            connection.execute(
-                """
-                INSERT INTO job_execution_items(
+                INSERT INTO job_items(
                     job_id, plan_id, position, resource_id, resolution_id,
-                    representation_id, capability_scope, strategy, provider_id,
-                    provider_version, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    readiness_snapshot_id, readiness_digest, eligibility_id,
-                    eligibility_digest, source_fingerprint, representation_json,
-                    plan_binding_digest, execution_binding_digest, revalidated_at
+                    representation_id, planned_scope, strategy, provider_id,
+                    provider_version, source_fingerprint, representation_json,
+                    revalidated_at
                 ) VALUES (?, ?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
-                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          'generic-direct', '1.0.0', ?, ?, ?)
                 """,
                 (
                     job_id,
-                    *common,
-                    marker * 64,
-                    ("c" if marker == "a" else "d") * 64,
+                    plan_id,
+                    resource_id,
+                    representation_id,
+                    fingerprint,
+                    representation_json,
                     NOW,
                 ),
             )
@@ -399,7 +336,7 @@ class AssetBundleStorageTests(unittest.TestCase):
                 "job_a", "resource_a", [self.item("unknown", 0)]
             )
         self._insert_resource("resource_unplanned")
-        with self.assertRaisesRegex(RuntimeError, "execution_binding_missing"):
+        with self.assertRaisesRegex(RuntimeError, "job_item_missing"):
             self.store.persist_asset_bundle(
                 "job_a", "resource_unplanned", [self.item("primary", 0)]
             )
@@ -637,7 +574,7 @@ class AssetBundleStorageTests(unittest.TestCase):
     def test_bundle_mutation_requires_running_outcome(self) -> None:
         with self.store.transaction(immediate=True) as connection:
             connection.execute(
-                "DELETE FROM acquisition_outcomes WHERE job_id = 'job_a'"
+                "DELETE FROM execution_outcomes WHERE job_id = 'job_a'"
             )
         with self.assertRaisesRegex(LookupError, "acquisition_outcome_not_started"):
             self.store.persist_asset_bundle(

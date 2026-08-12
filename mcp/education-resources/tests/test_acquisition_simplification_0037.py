@@ -14,10 +14,9 @@ from education_resource_mcp.acquisition import (
     ProviderRegistration,
 )
 from education_resource_mcp.acquisition.planner import AcquisitionPlanner
-from education_resource_mcp.capability import CapabilityCoordinator
 from education_resource_mcp.config import Settings
-from education_resource_mcp.simple_service import ResourceService
-from education_resource_mcp.simple_storage import Store
+from education_resource_mcp.service import ResourceService, _provider_resource
+from education_resource_mcp.storage import Store
 
 
 class _Materializer:
@@ -44,10 +43,6 @@ class _InspectionRouter:
 
 
 class AcquisitionSimplification0037Tests(unittest.TestCase):
-    def test_retired_capability_coordinator_fails_fast(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "retired by 0037"):
-            CapabilityCoordinator()
-
     def test_active_service_initializes_without_capability_coordinator(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -64,7 +59,6 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
                 inspection_router=_InspectionRouter(),
             )
             try:
-                self.assertFalse(hasattr(service, "capability_coordinator"))
                 self.assertIsInstance(service.store, Store)
                 self.assertIsInstance(service.acquisition_planner, AcquisitionPlanner)
             finally:
@@ -162,6 +156,114 @@ class AcquisitionSimplification0037Tests(unittest.TestCase):
         self.assertEqual(items[0]["provider_id"], "generic-web-materializer")
         self.assertNotIn("authority_digest", items[0])
         self.assertNotIn("eligibility_id", items[0])
+
+    def test_smartedu_primary_media_routes_to_exact_provider(self) -> None:
+        router = AcquisitionRouter(
+            [
+                ProviderRegistration(
+                    provider_id="smartedu-resource",
+                    provider_version="1.0.0",
+                    provider=_Downloader(),
+                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                    scopes=("primary_resource",),
+                )
+            ]
+        )
+        planner = AcquisitionPlanner(router)
+        cases = (
+            ("document", "pdf", "document"),
+            ("video", "mp4", "course"),
+            ("audio", "mp3", "audio"),
+        )
+        for kind, container, resource_type in cases:
+            with self.subTest(kind=kind):
+                items = planner.plan_selection(
+                    [
+                        {
+                            "resource_id": f"res_smartedu_{kind}_0038",
+                            "platform": "smartedu",
+                            "resource_type": resource_type,
+                            "title": "SmartEdu 资源",
+                            "source_url": "https://basic.smartedu.cn/resource?contentId=item-1",
+                            "metadata": {},
+                        }
+                    ],
+                    [
+                        {
+                            "resolution_id": f"resolution_smartedu_{kind}_0038",
+                            "representations": [
+                                {
+                                    "representation_id": f"repr_smartedu_{kind}_0038",
+                                    "scope": "primary_resource",
+                                    "kind": kind,
+                                    "role": "primary",
+                                    "container": container,
+                                    "materializable": True,
+                                    "technical_availability": "available",
+                                }
+                            ],
+                        }
+                    ],
+                    preferred_container="original",
+                )
+                self.assertEqual("direct_file", items[0]["strategy"])
+                self.assertEqual("smartedu-resource", items[0]["provider_id"])
+                self.assertEqual("1.0.0", items[0]["provider_version"])
+                self.assertEqual("primary_resource", items[0]["planned_scope"])
+                self.assertEqual(container, items[0]["representation"]["selected_container"])
+
+    def test_only_smartedu_provider_receives_confirmed_representation_binding(self) -> None:
+        item = {
+            "resource": {
+                "resource_id": "res_smartedu_binding_0038",
+                "platform": "smartedu",
+                "source_url": "https://basic.smartedu.cn/resource?contentId=item-1",
+            },
+            "provider_id": "smartedu-resource",
+            "representation_id": "repr_smartedu_binding_0038",
+        }
+        bound = _provider_resource(item, "pdf")
+        self.assertEqual(
+            {
+                "representation_id": "repr_smartedu_binding_0038",
+                "container": "pdf",
+            },
+            bound["_planned_representation"],
+        )
+        self.assertNotIn("_planned_representation", item["resource"])
+
+        generic = dict(item)
+        generic["provider_id"] = "generic-direct"
+        self.assertNotIn(
+            "_planned_representation",
+            _provider_resource(generic, "pdf"),
+        )
+
+    def test_active_service_registers_only_exact_smartedu_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = Settings(
+                data_dir=root / "data",
+                database_path=root / "data" / "state.sqlite3",
+                jobs_dir=root / "data" / "jobs",
+                library_dir=root / "library",
+            )
+            service = ResourceService(
+                settings=settings,
+                search_provider=_SearchProvider(),
+                inspection_router=_InspectionRouter(),
+            )
+            try:
+                registry = service.acquisition_router.provider_registry
+                self.assertIn(("smartedu-resource", "1.0.0"), registry)
+                smartedu_registration = registry[("smartedu-resource", "1.0.0")]
+                self.assertEqual(
+                    frozenset({AcquisitionStrategy.DIRECT_FILE}),
+                    smartedu_registration.strategies,
+                )
+                self.assertEqual(frozenset({"primary_resource"}), smartedu_registration.scopes)
+            finally:
+                service.close()
 
     def test_migration_9_drops_legacy_authority_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

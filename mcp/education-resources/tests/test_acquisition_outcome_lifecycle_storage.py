@@ -98,19 +98,8 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
                 """,
                 (job_id, plan_id, status, progress, NOW, NOW),
             )
-            readiness_id = f"readiness_{name}"
-            eligibility_id = f"eligibility_{name}"
             representation_id = f"representation_{name}"
-            capability_id = "capability_lifecycle_direct"
-            readiness_digest = "sha256:" + self.store._request_digest(
-                {"fixture": name, "kind": "readiness"}
-            )
-            eligibility_digest = "sha256:" + self.store._request_digest(
-                {"fixture": name, "kind": "eligibility"}
-            )
-            descriptor_digest = "sha256:" + "d" * 64
-            registry_digest = "sha256:" + "a" * 64
-            source_fingerprint = "sha256:" + self.store._request_digest(
+            source_fingerprint = self.store._request_digest(
                 {"fixture": name, "kind": "source"}
             )
             representation_json = json.dumps(
@@ -118,110 +107,38 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             )
             connection.execute(
                 """
-                INSERT INTO capability_readiness_snapshots(
-                    snapshot_id, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    platform_id, capability_scope, strategy, provider_id,
-                    provider_version, inspector_id, inspector_version, status,
-                    issues_json, observed_at, expires_at, snapshot_digest
-                ) VALUES (?, ?, '1.0.0', ?, '1.0.0', ?, 'generic',
-                          'primary_resource', 'direct_file', 'generic-direct',
-                          '1.0.0', 'generic', '1.0.0', 'ready', '[]', ?, ?, ?)
-                """,
-                (
-                    readiness_id,
-                    capability_id,
-                    descriptor_digest,
-                    registry_digest,
-                    NOW,
-                    "2099-01-01T00:00:00+00:00",
-                    readiness_digest,
-                ),
-            )
-            connection.execute(
-                """
-                INSERT INTO eligibility_decisions(
-                    eligibility_id, flow_id, resource_id, resolution_id,
-                    representation_id, action, status, policy_class,
-                    reason_codes_json, source_fingerprint, capability_id,
-                    descriptor_digest, readiness_snapshot_id, evaluated_at,
-                    expires_at, decision_digest
-                ) VALUES (?, 'flow_lifecycle', ?, NULL, ?, 'download',
-                          'eligible', 'public', '[]', ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    eligibility_id,
-                    resource_id,
-                    representation_id,
-                    source_fingerprint,
-                    capability_id,
-                    descriptor_digest,
-                    readiness_id,
-                    NOW,
-                    "2099-01-01T00:00:00+00:00",
-                    eligibility_digest,
-                ),
-            )
-            connection.execute(
-                """
-                INSERT INTO download_plan_items(
+                INSERT INTO acquisition_plan_items(
                     plan_id, position, resource_id, resolution_id,
-                    representation_id, capability_scope, strategy, provider_id,
-                    provider_version, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    readiness_snapshot_id, readiness_digest, eligibility_id,
-                    eligibility_digest, source_fingerprint, representation_json,
-                    binding_digest
+                    representation_id, planned_scope, strategy, provider_id,
+                    provider_version, source_fingerprint, representation_json
                 ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
-                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
-                          ?, ?, ?, ?, ?, ?, ?)
+                          'generic-direct', '1.0.0', ?, ?)
                 """,
                 (
                     plan_id,
                     resource_id,
                     representation_id,
-                    capability_id,
-                    descriptor_digest,
-                    registry_digest,
-                    readiness_id,
-                    readiness_digest,
-                    eligibility_id,
-                    eligibility_digest,
                     source_fingerprint,
                     representation_json,
-                    "b" * 64,
                 ),
             )
             connection.execute(
                 """
-                INSERT INTO job_execution_items(
+                INSERT INTO job_items(
                     job_id, plan_id, position, resource_id, resolution_id,
-                    representation_id, capability_scope, strategy, provider_id,
-                    provider_version, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    readiness_snapshot_id, readiness_digest, eligibility_id,
-                    eligibility_digest, source_fingerprint, representation_json,
-                    plan_binding_digest, execution_binding_digest, revalidated_at
+                    representation_id, planned_scope, strategy, provider_id,
+                    provider_version, source_fingerprint, representation_json,
+                    revalidated_at
                 ) VALUES (?, ?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
-                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          'generic-direct', '1.0.0', ?, ?, ?)
                 """,
                 (
                     job_id,
                     plan_id,
                     resource_id,
                     representation_id,
-                    capability_id,
-                    descriptor_digest,
-                    registry_digest,
-                    readiness_id,
-                    readiness_digest,
-                    eligibility_id,
-                    eligibility_digest,
                     source_fingerprint,
                     representation_json,
-                    "b" * 64,
-                    "e" * 64,
                     NOW,
                 ),
             )
@@ -263,8 +180,6 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             "job_id": fixture["job_id"],
             "plan_id": fixture["plan_id"],
             "resource_id": resource_id,
-            "plan_binding_digest": "b" * 64,
-            "execution_binding_digest": "e" * 64,
             "planned_scope": "primary_resource",
             "planned_strategy": "direct_file",
             "planned_provider_id": "generic-direct",
@@ -283,29 +198,24 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             "started_at": NOW,
             "completed_at": COMPLETED_AT if terminal else None,
         }
-        projection["outcome_digest"] = self.store._request_digest(projection)
         with self.store.transaction() as connection:
             connection.execute(
                 """
-                INSERT INTO acquisition_outcomes(
+                INSERT INTO execution_outcomes(
                     outcome_id, job_id, plan_id, resource_id,
-                    plan_binding_digest, execution_binding_digest,
                     planned_scope, planned_strategy, planned_provider_id,
                     planned_provider_version, actual_scope, actual_strategy,
                     actual_provider_id, actual_provider_version, status,
                     failure_code, failure_message, retriable, bundle_id,
-                    asset_ids_json, metadata_json, started_at, completed_at,
-                    outcome_digest
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL,
-                          ?, ?, ?, ?, NULL, '[]', ?, ?, ?, ?)
+                    asset_ids_json, metadata_json, started_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL,
+                          ?, ?, ?, ?, NULL, '[]', ?, ?, ?)
                 """,
                 (
                     outcome_id,
                     fixture["job_id"],
                     fixture["plan_id"],
                     resource_id,
-                    projection["plan_binding_digest"],
-                    projection["execution_binding_digest"],
                     projection["planned_scope"],
                     projection["planned_strategy"],
                     projection["planned_provider_id"],
@@ -317,7 +227,6 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
                     json.dumps(projection["metadata"], ensure_ascii=False),
                     NOW,
                     projection["completed_at"],
-                    projection["outcome_digest"],
                 ),
             )
         return projection
@@ -354,12 +263,6 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             ],
         )
 
-    def assert_digest_matches_record(self, outcome: dict[str, object]) -> None:
-        persisted_digest = outcome["outcome_digest"]
-        preimage = dict(outcome)
-        preimage.pop("outcome_digest")
-        self.assertEqual(self.store._request_digest(preimage), persisted_digest)
-
     def test_batch_finalization_closes_only_running_outcomes(self) -> None:
         fixture = self._insert_job("batch")
         running = self._insert_outcome(fixture)
@@ -390,21 +293,16 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("INTERNAL_ERROR", outcome["failure_code"])
         self.assertTrue(outcome["retriable"])
         self.assertEqual(COMPLETED_AT, outcome["completed_at"])
-        self.assertEqual(running["plan_binding_digest"], outcome["plan_binding_digest"])
-        self.assertEqual(
-            running["execution_binding_digest"], outcome["execution_binding_digest"]
-        )
         self.assertEqual(running["metadata"], outcome["metadata"])
         self.assertIsNone(outcome["actual_provider_id"])
         self.assertIsNone(outcome["bundle_id"])
         self.assertEqual([], outcome["asset_ids"])
-        self.assert_digest_matches_record(outcome)
 
         unchanged = self.store.get_acquisition_outcome(
             fixture["job_id"], terminal_resource
         )
         assert unchanged is not None
-        self.assertEqual(terminal["outcome_digest"], unchanged["outcome_digest"])
+        self.assertEqual(terminal["outcome_id"], unchanged["outcome_id"])
         self.assertEqual("failed", unchanged["status"])
 
         self.assertEqual("running", self.store.get_job(fixture["job_id"])["status"])
@@ -413,7 +311,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("succeeded", refreshed_bundle["status"])
         self.assertEqual("ready", refreshed_bundle["items"][0]["status"])
 
-        digest = outcome["outcome_digest"]
+        outcome_id = outcome["outcome_id"]
         self.assertEqual(
             [],
             self.store.finalize_running_acquisition_outcomes(
@@ -426,10 +324,10 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            digest,
+            outcome_id,
             self.store.get_acquisition_outcome(
                 fixture["job_id"], fixture["resource_id"]
-            )["outcome_digest"],
+            )["outcome_id"],
         )
         with self.assertRaisesRegex(
             ValueError, "invalid_acquisition_outcome_cleanup_status"
@@ -461,7 +359,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         assert unchanged is not None
         self.assertEqual("running", unchanged["status"])
-        self.assertEqual(running["outcome_digest"], unchanged["outcome_digest"])
+        self.assertEqual(running["outcome_id"], unchanged["outcome_id"])
 
     def test_restart_recovery_terminalizes_outcomes_before_job(self) -> None:
         interrupted = self._insert_job("restart")
@@ -483,7 +381,6 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertIn("服务重启", outcome["failure_message"])
         self.assertTrue(outcome["retriable"])
         self.assertIsNotNone(outcome["completed_at"])
-        self.assert_digest_matches_record(outcome)
 
         failed_job = self.store.get_job(interrupted["job_id"])
         queued_job = self.store.get_job(queued["job_id"])
@@ -509,14 +406,14 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("ready", untouched_bundle["items"][0]["status"])
         self.assertEqual("succeeded", self.store.get_job(complete["job_id"])["status"])
 
-        digest = outcome["outcome_digest"]
+        outcome_id = outcome["outcome_id"]
         completed_at = outcome["completed_at"]
         self.assertEqual(0, self.store.mark_incomplete_jobs_failed())
         replayed = self.store.get_acquisition_outcome(
             interrupted["job_id"], interrupted["resource_id"]
         )
         assert replayed is not None
-        self.assertEqual(digest, replayed["outcome_digest"])
+        self.assertEqual(outcome_id, replayed["outcome_id"])
         self.assertEqual(completed_at, replayed["completed_at"])
 
     def test_restart_recovery_rolls_back_the_whole_authority_graph(self) -> None:
@@ -543,7 +440,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         assert outcome is not None
         self.assertEqual("running", outcome["status"])
-        self.assertEqual(original_outcome["outcome_digest"], outcome["outcome_digest"])
+        self.assertEqual(original_outcome["outcome_id"], outcome["outcome_id"])
         self.assertIsNone(outcome["completed_at"])
         self.assertEqual("running", self.store.get_job(fixture["job_id"])["status"])
         refreshed_bundle = self.store.get_asset_bundle(bundle["bundle_id"])
@@ -593,7 +490,6 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("任务已取消", outcome["failure_message"])
         self.assertFalse(outcome["retriable"])
         self.assertEqual(COMPLETED_AT, outcome["completed_at"])
-        self.assert_digest_matches_record(outcome)
 
         refreshed_bundle = self.store.get_asset_bundle(bundle["bundle_id"])
         assert refreshed_bundle is not None
@@ -604,7 +500,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             "quarantined", self.store.get_asset(bundle["items"][0]["asset_id"])["status"]
         )
 
-        outcome_digest = outcome["outcome_digest"]
+        outcome_id = outcome["outcome_id"]
         job_updated_at = cancelled["updated_at"]
         bundle_updated_at = refreshed_bundle["updated_at"]
         replayed = self.store.finalize_job_cancellation(
@@ -612,10 +508,10 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         self.assertEqual(job_updated_at, replayed["updated_at"])
         self.assertEqual(
-            outcome_digest,
+            outcome_id,
             self.store.get_acquisition_outcome(
                 fixture["job_id"], fixture["resource_id"]
-            )["outcome_digest"],
+            )["outcome_id"],
         )
         self.assertEqual(
             bundle_updated_at,
@@ -719,20 +615,19 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("JOB_CANCELLED", outcome["failure_code"])
         self.assertEqual("任务已取消", outcome["failure_message"])
         self.assertFalse(outcome["retriable"])
-        self.assert_digest_matches_record(outcome)
         refreshed = self.store.get_asset_bundle(bundle["bundle_id"])
         assert refreshed is not None
         self.assertEqual("cancelled", refreshed["status"])
         self.assertEqual("quarantined", refreshed["items"][0]["status"])
 
-        digest = outcome["outcome_digest"]
+        outcome_id = outcome["outcome_id"]
         completed_at = outcome["completed_at"]
         self.assertEqual(0, self.store.mark_incomplete_jobs_failed())
         replayed = self.store.get_acquisition_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert replayed is not None
-        self.assertEqual(digest, replayed["outcome_digest"])
+        self.assertEqual(outcome_id, replayed["outcome_id"])
         self.assertEqual(completed_at, replayed["completed_at"])
 
     def test_cancelled_job_rejects_late_bundle_publication(self) -> None:
@@ -782,7 +677,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         assert outcome is not None
         self.assertEqual("running", outcome["status"])
-        self.assertEqual(original_outcome["outcome_digest"], outcome["outcome_digest"])
+        self.assertEqual(original_outcome["outcome_id"], outcome["outcome_id"])
         refreshed = self.store.get_asset_bundle(bundle["bundle_id"])
         assert refreshed is not None
         self.assertEqual("succeeded", refreshed["status"])
@@ -840,16 +735,14 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         self.assertFalse(outcome["retriable"])
         self.assertEqual(COMPLETED_AT, outcome["completed_at"])
-        self.assertEqual(running["plan_binding_digest"], outcome["plan_binding_digest"])
         self.assertEqual(running["metadata"], outcome["metadata"])
-        self.assert_digest_matches_record(outcome)
 
         unchanged = self.store.get_acquisition_outcome(
             fixture["job_id"], terminal_resource
         )
         assert unchanged is not None
         self.assertEqual("cancelled", unchanged["status"])
-        self.assertEqual(terminal["outcome_digest"], unchanged["outcome_digest"])
+        self.assertEqual(terminal["outcome_id"], unchanged["outcome_id"])
         self.assertEqual(terminal["completed_at"], unchanged["completed_at"])
 
         refreshed_bundle = self.store.get_asset_bundle(bundle["bundle_id"])
@@ -862,7 +755,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             self.store.get_asset(bundle["items"][0]["asset_id"])["status"],
         )
 
-        outcome_digest = outcome["outcome_digest"]
+        outcome_id = outcome["outcome_id"]
         job_updated_at = failed["updated_at"]
         bundle_updated_at = refreshed_bundle["updated_at"]
         replayed = self.store.finalize_job_failure(
@@ -875,10 +768,10 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual(failed, replayed)
         self.assertEqual(job_updated_at, replayed["updated_at"])
         self.assertEqual(
-            outcome_digest,
+            outcome_id,
             self.store.get_acquisition_outcome(
                 fixture["job_id"], fixture["resource_id"]
-            )["outcome_digest"],
+            )["outcome_id"],
         )
         self.assertEqual(
             bundle_updated_at,
@@ -930,7 +823,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         assert outcome is not None
         self.assertEqual("running", outcome["status"])
-        self.assertEqual(original_outcome["outcome_digest"], outcome["outcome_digest"])
+        self.assertEqual(original_outcome["outcome_id"], outcome["outcome_id"])
         self.assertIsNone(outcome["completed_at"])
         self.assertEqual(original_job, self.store.get_job(fixture["job_id"]))
 

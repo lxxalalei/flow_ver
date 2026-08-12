@@ -27,7 +27,7 @@ SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-EXPECTED_CATALOG_VERSION = "1.5.0"
+EXPECTED_CATALOG_VERSION = "1.6.0"
 EXPECTED_CONTRACT_VERSION = "1.0.0"
 EXPECTED_TOOL_NAMES = (
     "resource_flow_start",
@@ -134,14 +134,11 @@ BINDING_FIELDS = {
     "selection_version",
     "selection_digest",
 }
-PLAN_ITEM_AUTHORITY_FIELDS = {
+PLAN_ITEM_FIELDS = {
     "representation_id",
     "planned_scope",
     "planned_strategy",
     "planned_provider",
-    "capability",
-    "eligibility",
-    "binding_digest",
 }
 
 
@@ -699,15 +696,11 @@ class ContractOutputTests(unittest.TestCase):
             self.assertNotIn("displayed_items", presentation)
         with self.subTest(public_shape="prepare"):
             self.assertIn("plan_digest", plan)
-            self.assertIn("authority_digest", plan)
-            self.assertEqual(
-                "capability-binding-v1", plan["capability_binding_version"]
-            )
             self.assertEqual(
                 {field: plan[field] for field in BINDING_FIELDS}, binding
             )
             item = plan["items"][0]
-            self.assertTrue(PLAN_ITEM_AUTHORITY_FIELDS.issubset(item))
+            self.assertTrue(PLAN_ITEM_FIELDS.issubset(item))
             self.assertEqual("landing_page", item["planned_scope"])
             self.assertEqual("web_materialize", item["planned_strategy"])
             self.assertEqual(
@@ -718,10 +711,6 @@ class ContractOutputTests(unittest.TestCase):
                 },
                 item["planned_provider"],
             )
-            self.assertEqual(
-                "cap_generic_webpage_landing_materialize_v1",
-                item["capability"]["capability_id"],
-            )
 
         status_before_start = self.service.flow_status(flow["flow_id"])
         with self.subTest(public_shape="flow_status_before_start"):
@@ -730,10 +719,6 @@ class ContractOutputTests(unittest.TestCase):
             self.assertEqual(
                 status_before_start["current_plan"]["plan_digest"],
                 plan["plan_digest"],
-            )
-            self.assertEqual(
-                status_before_start["current_plan"]["authority_digest"],
-                plan["authority_digest"],
             )
             self.assertNotIn(
                 "confirmation_token", status_before_start["current_plan"]
@@ -746,7 +731,6 @@ class ContractOutputTests(unittest.TestCase):
             "contract-start-success-001",
             **binding,
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         status = self._wait(flow["flow_id"], started["job_id"])
         self.assertEqual("succeeded", status["status"])
@@ -755,7 +739,6 @@ class ContractOutputTests(unittest.TestCase):
                 {field: started[field] for field in BINDING_FIELDS}, binding
             )
             self.assertEqual(started["plan_digest"], plan["plan_digest"])
-            self.assertEqual(started["authority_digest"], plan["authority_digest"])
         with self.subTest(public_shape="job_status"):
             self.assertEqual(status["plan_id"], plan["plan_id"])
             self.assertEqual(
@@ -768,10 +751,6 @@ class ContractOutputTests(unittest.TestCase):
             self.assertTrue(EXPECTED_FLOW_STATUS_FIELDS.issubset(status_after_start))
             self.assertEqual(
                 status_after_start["current_job"]["job_id"], started["job_id"]
-            )
-            self.assertEqual(
-                status_after_start["current_job"]["authority_digest"],
-                plan["authority_digest"],
             )
 
         archived = self.service.archive(
@@ -801,35 +780,6 @@ class ContractOutputTests(unittest.TestCase):
             with self.subTest(contract=tool_name):
                 self.assert_contract(tool_name, ok(output))
 
-        with self.service.store.transaction(immediate=True) as connection:
-            outcome_row = connection.execute(
-                "SELECT * FROM acquisition_outcomes WHERE job_id = ?",
-                (started["job_id"],),
-            ).fetchone()
-            assert outcome_row is not None
-            legacy_outcome = self.service.store._decode_acquisition_outcome(outcome_row)
-            legacy_outcome["execution_binding_digest"] = None
-            legacy_outcome.pop("outcome_digest", None)
-            connection.execute(
-                """
-                UPDATE acquisition_outcomes
-                SET execution_binding_digest = NULL, outcome_digest = ?
-                WHERE outcome_id = ?
-                """,
-                (
-                    self.service.store._request_digest(legacy_outcome),
-                    outcome_row["outcome_id"],
-                ),
-            )
-            connection.execute(
-                "DELETE FROM job_execution_items WHERE job_id = ?",
-                (started["job_id"],),
-            )
-        legacy_status = self.service.job_status(flow["flow_id"], started["job_id"])
-        self.assertTrue(legacy_status["outcomes"])
-        self.assertNotIn("execution", legacy_status["outcomes"][0])
-        self.assert_contract("resource_job_status", ok(legacy_status))
-
     def test_job_cancel_success_output_matches_contract(self) -> None:
         self.service.close()
         self.service = self._build_service(self.provider, wait_for_cancel=True)
@@ -844,7 +794,6 @@ class ContractOutputTests(unittest.TestCase):
             "contract-start-cancel-0001",
             **binding,
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         self.assertTrue(
             self.fixture_fetcher.started.wait(1),

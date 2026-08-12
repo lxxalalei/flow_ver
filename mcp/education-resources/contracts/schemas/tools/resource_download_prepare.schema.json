@@ -13,7 +13,7 @@
       "properties": {
         "preferred_container": {
           "type": "string",
-          "enum": ["original", "pdf", "epub", "mp4", "mp3", "html", "text"]
+          "enum": ["original", "pdf", "epub", "mp4", "mp3", "m4a", "html", "text"]
         },
         "allow_safe_fallback": {
           "type": "boolean",

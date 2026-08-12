@@ -220,15 +220,6 @@ class AcquisitionCoreTests(unittest.TestCase):
             provider_version=provider_version,
             planned_scope=planned_scope,
             representation_id="repr_acquisition_core_0001",
-            binding_digest="a" * 64,
-            source_fingerprint=source_fingerprint,
-            capability_id="cap_acquisition_core_v1",
-            descriptor_version="1.0.0",
-            descriptor_digest="sha256:" + "b" * 64,
-            readiness_snapshot_id="ready_acquisition_core_v1",
-            readiness_digest="sha256:" + "c" * 64,
-            eligibility_id="elig_acquisition_core_v1",
-            eligibility_digest="sha256:" + "d" * 64,
             preferred_container="html",
             cancel_event=cancel_event or threading.Event(),
             jobs_root=self.root,
@@ -255,7 +246,6 @@ class AcquisitionCoreTests(unittest.TestCase):
             "provider_id": "test-provider", "version": "1.0.0"
         })
         self.assertEqual(request.to_dict()["planned_scope"], "primary_resource")
-        self.assertEqual(request.to_dict()["source_fingerprint"], "sha256:" + "e" * 64)
         with self.assertRaises(TypeError):
             AcquisitionRequest(
                 job_id="job-001",
@@ -265,14 +255,6 @@ class AcquisitionCoreTests(unittest.TestCase):
                 provider_version="1.0.0",
                 planned_scope="primary_resource",
                 representation_id="repr_acquisition_core_0001",
-                binding_digest="a" * 64,
-                capability_id="cap_acquisition_core_v1",
-                descriptor_version="1.0.0",
-                descriptor_digest="sha256:" + "b" * 64,
-                readiness_snapshot_id="ready_acquisition_core_v1",
-                readiness_digest="sha256:" + "c" * 64,
-                eligibility_id="elig_acquisition_core_v1",
-                eligibility_digest="sha256:" + "d" * 64,
                 jobs_root=Path("/tmp/jobs"),
             )
         with self.assertRaisesRegex(ValueError, "source_fingerprint"):
@@ -286,15 +268,6 @@ class AcquisitionCoreTests(unittest.TestCase):
                 provider_version="1.0.0",
                 planned_scope="primary_resource",
                 representation_id="repr_acquisition_core_0001",
-                binding_digest="a" * 64,
-                source_fingerprint="sha256:" + "e" * 64,
-                capability_id="cap_acquisition_core_v1",
-                descriptor_version="1.0.0",
-                descriptor_digest="sha256:" + "b" * 64,
-                readiness_snapshot_id="ready_acquisition_core_v1",
-                readiness_digest="sha256:" + "c" * 64,
-                eligibility_id="elig_acquisition_core_v1",
-                eligibility_digest="sha256:" + "d" * 64,
                 jobs_root=Path("relative-root"),
             )
 
@@ -318,8 +291,6 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertEqual(facts["planned_scope"], "primary_resource")
         self.assertEqual(facts["actual_scope"], "primary_resource")
         self.assertEqual(facts["representation_id"], "repr_acquisition_core_0001")
-        self.assertEqual(facts["binding_digest"], "a" * 64)
-        self.assertEqual(facts["source_fingerprint"], "sha256:" + "e" * 64)
         self.assertTrue(result.to_json() == result.to_json())
         self.assertNotIn(str(self.root), result.to_json())
 
@@ -397,7 +368,6 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertEqual(result.provider_id, "platform-exact")
         self.assertEqual(result.provider_version, "1.0.0")
         self.assertEqual(result.actual_scope, "primary_resource")
-        self.assertEqual(result.source_fingerprint, "sha256:" + "e" * 64)
 
     def test_auth_failure_never_falls_back_to_direct_provider(self) -> None:
         direct = _DirectProvider(self.root)
@@ -431,15 +401,11 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertEqual(result.strategy, AcquisitionStrategy.WEB_MATERIALIZE)
         self.assertEqual(result.bundle.artifacts[0].role, "bundle")  # type: ignore[union-attr]
         self.assertEqual(result.metadata, {"renderer": "test"})
-        self.assertEqual(result.source_fingerprint, request.source_fingerprint)
-        self.assertEqual(result.to_dict()["source_fingerprint"], request.source_fingerprint)
-        self.assertNotIn("source_fingerprint", result.metadata)
 
         captured = router.acquire(self._request("web_capture", provider_id="capture-exact"))
         self.assertFalse(captured.ok)
         self.assertEqual(captured.strategy, AcquisitionStrategy.WEB_CAPTURE)
         self.assertEqual(captured.failure.code, "CAPTURE_EMPTY")  # type: ignore[union-attr]
-        self.assertEqual(captured.source_fingerprint, "sha256:" + "e" * 64)
         self.assertEqual(materializer.calls, 1)
         self.assertEqual(browser.calls, 1)
         self.assertEqual(captured.provider_id, "capture-exact")
@@ -545,7 +511,6 @@ class AcquisitionCoreTests(unittest.TestCase):
         unknown = router.acquire(self._request("direct", provider_id="missing-exact"))
         self.assertEqual(unknown.failure.code, "PROVIDER_UNAVAILABLE")  # type: ignore[union-attr]
         self.assertIsNone(unknown.provider_id)
-        self.assertEqual(unknown.source_fingerprint, "sha256:" + "e" * 64)
 
         drifted = router.acquire(
             self._request(

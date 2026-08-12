@@ -1,6 +1,7 @@
 skills/.learning-resource-flow/
 __pycache__/
 *.pyc
+.venv/
 
 # Build artifacts
 *.zip

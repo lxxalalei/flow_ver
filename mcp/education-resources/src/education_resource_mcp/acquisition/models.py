@@ -59,7 +59,7 @@ ArtifactRole: TypeAlias = Literal[
     "bundle",
 ]
 PreferredContainer: TypeAlias = Literal[
-    "original", "pdf", "epub", "mp4", "mp3", "html", "text"
+    "original", "pdf", "epub", "mp4", "mp3", "m4a", "html", "text"
 ]
 
 ACQUISITION_STRATEGIES: frozenset[str] = frozenset(
@@ -376,11 +376,10 @@ class AcquisitionStrategy(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class AcquisitionRequest:
-    """Immutable, authority-bound input passed to one acquisition provider.
+    """Immutable input passed to one acquisition provider.
 
     A request is formed only after ``download_prepare`` has bound a selected
-    resource to a concrete representation, capability descriptor, deployment
-    readiness snapshot, eligibility decision, and exact provider version.  A
+    resource to a concrete representation and exact provider version.  A
     router must never reconstruct those facts from a platform name or use a
     fallback provider.  ``resource`` is copied and recursively frozen before
     it is exposed; providers receive a new mutable copy only for their own
@@ -394,15 +393,6 @@ class AcquisitionRequest:
     provider_version: str
     planned_scope: CapabilityScope | str
     representation_id: str
-    binding_digest: str
-    source_fingerprint: str
-    capability_id: str
-    descriptor_version: str
-    descriptor_digest: str
-    readiness_snapshot_id: str
-    readiness_digest: str
-    eligibility_id: str
-    eligibility_digest: str
     preferred_container: PreferredContainer = "html"
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
     # ``None`` is rejected in ``__post_init__``.  Keeping a sentinel default
@@ -428,7 +418,7 @@ class AcquisitionRequest:
             raise ValueError("jobs_root must be an absolute server-controlled root")
         object.__setattr__(self, "jobs_root", self.jobs_root.resolve(strict=False))
         if self.preferred_container not in {
-            "original", "pdf", "epub", "mp4", "mp3", "html", "text"
+            "original", "pdf", "epub", "mp4", "mp3", "m4a", "html", "text"
         }:
             raise ValueError(f"unsupported preferred container: {self.preferred_container}")
         _validate_provider_id(self.provider_id, label="provider_id")
@@ -440,19 +430,6 @@ class AcquisitionRequest:
             _REPRESENTATION_ID_PATTERN,
             label="representation_id",
         )
-        _validate_sha256(self.binding_digest, label="binding_digest")
-        _validate_canonical_digest(self.source_fingerprint, label="source_fingerprint")
-        _validate_pattern(self.capability_id, _DESCRIPTOR_ID_PATTERN, label="capability_id")
-        _validate_component_version(self.descriptor_version, label="descriptor_version")
-        _validate_canonical_digest(self.descriptor_digest, label="descriptor_digest")
-        _validate_pattern(
-            self.readiness_snapshot_id,
-            _READINESS_SNAPSHOT_ID_PATTERN,
-            label="readiness_snapshot_id",
-        )
-        _validate_canonical_digest(self.readiness_digest, label="readiness_digest")
-        _validate_pattern(self.eligibility_id, _ELIGIBILITY_ID_PATTERN, label="eligibility_id")
-        _validate_canonical_digest(self.eligibility_digest, label="eligibility_digest")
 
         object.__setattr__(self, "resource", snapshot)
         object.__setattr__(self, "strategy", AcquisitionStrategy.from_value(self.strategy))
@@ -479,15 +456,6 @@ class AcquisitionRequest:
             },
             "planned_scope": self.planned_scope,
             "representation_id": self.representation_id,
-            "binding_digest": self.binding_digest,
-            "source_fingerprint": self.source_fingerprint,
-            "capability_id": self.capability_id,
-            "descriptor_version": self.descriptor_version,
-            "descriptor_digest": self.descriptor_digest,
-            "readiness_snapshot_id": self.readiness_snapshot_id,
-            "readiness_digest": self.readiness_digest,
-            "eligibility_id": self.eligibility_id,
-            "eligibility_digest": self.eligibility_digest,
             "preferred_container": self.preferred_container,
         }
 
@@ -956,8 +924,6 @@ class AcquisitionResult:
             "planned_scope": self.planned_scope,
             "actual_scope": self.actual_scope,
             "representation_id": self.representation_id,
-            "binding_digest": self.binding_digest,
-            "source_fingerprint": self.source_fingerprint,
             "warnings": list(self.warnings),
             "metadata": thaw(self.metadata),
             "item_failures": [item.to_dict() for item in self.item_failures],

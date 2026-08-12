@@ -203,7 +203,6 @@ class ResolutionStorageTests(unittest.TestCase):
     ) -> None:
         resolved = self._save(
             resource_id="res_a",
-            source_fingerprint="resolved-fingerprint",
             idempotency_key="resolved-attempt",
             request_hash="resolved-request",
             resolution_status="resolved",
@@ -244,7 +243,6 @@ class ResolutionStorageTests(unittest.TestCase):
 
         unresolved = self._save(
             resource_id="res_b",
-            source_fingerprint="unresolved-fingerprint",
             resolution_status="unresolved",
             idempotency_key="unresolved-attempt",
             request_hash="unresolved-request",
@@ -302,7 +300,6 @@ class ResolutionStorageTests(unittest.TestCase):
     ) -> None:
         self._save(
             resource_id="res_a",
-            source_fingerprint="old-fingerprint",
             resolution_status="resolved",
             idempotency_key="old-attempt",
             request_hash="old-request",
@@ -323,7 +320,6 @@ class ResolutionStorageTests(unittest.TestCase):
         )
         self._save(
             resource_id="res_b",
-            source_fingerprint="failed-fingerprint",
             resolution_status="unresolved",
             idempotency_key="failed-attempt",
             request_hash="failed-request",

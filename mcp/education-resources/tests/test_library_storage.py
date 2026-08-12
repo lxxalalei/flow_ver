@@ -49,18 +49,9 @@ class LibraryStorageTests(unittest.TestCase):
         resource_id = f"res_{suffix}"
         plan_id = f"plan_{suffix}"
         job_id = f"job_{suffix}"
-        snapshot_id = f"readiness_{suffix}"
-        eligibility_id = f"eligibility_{suffix}"
         representation_id = f"representation_{suffix}"
-        capability_id = f"capability_{suffix}"
-        authority_digest = "sha256:" + hashlib.sha256(
-            f"library-authority:{suffix}".encode("utf-8")
-        ).hexdigest()
-        plan_binding_digest = hashlib.sha256(
-            f"library-plan:{suffix}".encode("utf-8")
-        ).hexdigest()
-        execution_binding_digest = hashlib.sha256(
-            f"library-execution:{suffix}".encode("utf-8")
+        source_fingerprint = hashlib.sha256(
+            f"library-source:{suffix}".encode("utf-8")
         ).hexdigest()
         filename = f"{suffix}.mp4" if resource_type == "video" else f"{suffix}.pdf"
         media_type = "video/mp4" if resource_type == "video" else "application/pdf"
@@ -94,8 +85,8 @@ class LibraryStorageTests(unittest.TestCase):
                     json.dumps([resource_id]),
                     "2099-01-01T00:00:00+00:00",
                     NOW,
-                    plan_binding_digest,
-                    plan_binding_digest,
+                    "selection",
+                    "plan",
                 ),
             )
             connection.execute(
@@ -109,100 +100,38 @@ class LibraryStorageTests(unittest.TestCase):
             )
             connection.execute(
                 """
-                INSERT INTO capability_readiness_snapshots(
-                    snapshot_id, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    platform_id, capability_scope, strategy, provider_id,
-                    provider_version, inspector_id, inspector_version, status,
-                    issues_json, observed_at, expires_at, snapshot_digest
-                ) VALUES (?, ?, '1.0.0', ?, '1.0.0', ?, ?,
-                          'primary_resource', 'direct_file', 'generic-direct',
-                          '1.0.0', 'generic', '1.0.0', 'ready', '[]', ?, ?, ?)
+                INSERT INTO acquisition_plan_items(
+                    plan_id, position, resource_id, resolution_id,
+                    representation_id, planned_scope, strategy, provider_id,
+                    provider_version, source_fingerprint, representation_json
+                ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
+                          'generic-direct', '1.0.0', ?, ?)
                 """,
                 (
-                    snapshot_id,
-                    capability_id,
-                    authority_digest,
-                    authority_digest,
-                    platform,
-                    NOW,
-                    "2099-01-01T00:00:00+00:00",
-                    authority_digest,
-                ),
-            )
-            connection.execute(
-                """
-                INSERT INTO eligibility_decisions(
-                    eligibility_id, flow_id, resource_id, resolution_id,
-                    representation_id, action, status, policy_class,
-                    reason_codes_json, source_fingerprint, capability_id,
-                    descriptor_digest, readiness_snapshot_id, evaluated_at,
-                    expires_at, decision_digest
-                ) VALUES (?, 'flow_test', ?, NULL, ?, 'download', 'eligible',
-                          'public', '[]', ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    eligibility_id,
+                    plan_id,
                     resource_id,
                     representation_id,
-                    authority_digest,
-                    capability_id,
-                    authority_digest,
-                    snapshot_id,
-                    NOW,
-                    "2099-01-01T00:00:00+00:00",
-                    authority_digest,
+                    source_fingerprint,
+                    json.dumps({"scope": "primary_resource"}),
                 ),
             )
-            common = (
-                plan_id,
-                resource_id,
-                representation_id,
-                capability_id,
-                authority_digest,
-                authority_digest,
-                snapshot_id,
-                authority_digest,
-                eligibility_id,
-                authority_digest,
-                authority_digest,
-                json.dumps({"scope": "primary_resource"}),
-            )
             connection.execute(
                 """
-                INSERT INTO download_plan_items(
-                    plan_id, position, resource_id, resolution_id,
-                    representation_id, capability_scope, strategy, provider_id,
-                    provider_version, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    readiness_snapshot_id, readiness_digest, eligibility_id,
-                    eligibility_digest, source_fingerprint, representation_json,
-                    binding_digest
-                ) VALUES (?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
-                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
-                          ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (*common, plan_binding_digest),
-            )
-            connection.execute(
-                """
-                INSERT INTO job_execution_items(
+                INSERT INTO job_items(
                     job_id, plan_id, position, resource_id, resolution_id,
-                    representation_id, capability_scope, strategy, provider_id,
-                    provider_version, capability_id, descriptor_version,
-                    descriptor_digest, registry_version, registry_digest,
-                    readiness_snapshot_id, readiness_digest, eligibility_id,
-                    eligibility_digest, source_fingerprint, representation_json,
-                    plan_binding_digest, execution_binding_digest, revalidated_at
+                    representation_id, planned_scope, strategy, provider_id,
+                    provider_version, source_fingerprint, representation_json,
+                    revalidated_at
                 ) VALUES (?, ?, 0, ?, NULL, ?, 'primary_resource', 'direct_file',
-                          'generic-direct', '1.0.0', ?, '1.0.0', ?, '1.0.0', ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          'generic-direct', '1.0.0', ?, ?, ?)
                 """,
                 (
                     job_id,
-                    *common,
-                    plan_binding_digest,
-                    execution_binding_digest,
+                    plan_id,
+                    resource_id,
+                    representation_id,
+                    source_fingerprint,
+                    json.dumps({"scope": "primary_resource"}),
                     NOW,
                 ),
             )

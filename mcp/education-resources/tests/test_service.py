@@ -271,7 +271,6 @@ class ResourceServiceTests(unittest.TestCase):
                 selection_version=plan["selection_version"],
                 selection_digest=plan["selection_digest"],
                 plan_digest=plan["plan_digest"],
-                authority_digest=plan["authority_digest"],
             )
         started = self.service.download_start(
             flow["flow_id"],
@@ -283,7 +282,6 @@ class ResourceServiceTests(unittest.TestCase):
             selection_version=plan["selection_version"],
             selection_digest=plan["selection_digest"],
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         replayed_start = self.service.download_start(
             flow["flow_id"],
@@ -295,7 +293,6 @@ class ResourceServiceTests(unittest.TestCase):
             selection_version=plan["selection_version"],
             selection_digest=plan["selection_digest"],
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         self.assertEqual(replayed_start["job_id"], started["job_id"])
         status = self._wait_terminal(flow["flow_id"], started["job_id"])
@@ -359,41 +356,6 @@ class ResourceServiceTests(unittest.TestCase):
             )
         self.assertEqual(captured.exception.code, "POSITION_NOT_PRESENTED")
 
-    def test_download_start_authority_digest_is_optional_but_checked(self) -> None:
-        flow, plan = self._prepare_first_candidate()
-        bindings = {
-            "presentation_id": plan["presentation_id"],
-            "presented_version": plan["presented_version"],
-            "selection_version": plan["selection_version"],
-            "selection_digest": plan["selection_digest"],
-            "plan_digest": plan["plan_digest"],
-        }
-
-        with self.assertRaises(DomainError) as captured:
-            self.service.download_start(
-                flow["flow_id"],
-                plan["plan_id"],
-                plan["confirmation_token"],
-                "start-authority-wrong-0001",
-                **bindings,
-                authority_digest="0" * 64,
-            )
-        self.assertEqual("PLAN_BINDING_CONFLICT", captured.exception.code)
-
-        # Compatibility omission is not an execution fallback: the server
-        # still reads the immutable Plan authority and returns its exact digest.
-        started = self.service.download_start(
-            flow["flow_id"],
-            plan["plan_id"],
-            plan["confirmation_token"],
-            "start-authority-omitted-0001",
-            **bindings,
-        )
-        self.assertEqual(plan["authority_digest"], started["authority_digest"])
-        status = self._wait_terminal(flow["flow_id"], started["job_id"])
-        self.assertEqual("succeeded", status["status"])
-        self.assertEqual(plan["authority_digest"], status["authority_digest"])
-
     def test_download_start_runtime_failures_have_stable_public_codes(self) -> None:
         flow, plan = self._prepare_first_candidate()
         bindings = {
@@ -402,25 +364,11 @@ class ResourceServiceTests(unittest.TestCase):
             "selection_version": plan["selection_version"],
             "selection_digest": plan["selection_digest"],
             "plan_digest": plan["plan_digest"],
-            "authority_digest": plan["authority_digest"],
         }
         reserve_mappings = {
-            "idempotency record points to a missing job": "INTERNAL_ERROR",
-            "execution_binding_missing": "CAPABILITY_BINDING_CONFLICT",
             "plan_binding_mismatch": "PLAN_BINDING_CONFLICT",
             "plan_used": "PLAN_ALREADY_USED",
-            "capability_binding_missing": "CAPABILITY_BINDING_CONFLICT",
-            "capability_binding_conflict": "CAPABILITY_BINDING_CONFLICT",
-            "execution_binding_conflict": "CAPABILITY_BINDING_CONFLICT",
-            "capability_strategy_mismatch": "CAPABILITY_STRATEGY_MISMATCH",
-            "readiness_not_ready": "CAPABILITY_NOT_READY",
-            "readiness_expired": "READINESS_EXPIRED",
-            "readiness_drift": "READINESS_DRIFT",
-            "eligibility_required": "ELIGIBILITY_REQUIRED",
-            "eligibility_expired": "ELIGIBILITY_EXPIRED",
-            "eligibility_drift": "ELIGIBILITY_DRIFT",
             "resolution_stale": "RESOLUTION_STALE",
-            "representation_drift": "REPRESENTATION_DRIFT",
             "selection_changed": "SELECTION_VERSION_CONFLICT",
             "failed to reserve job": "INTERNAL_ERROR",
         }
@@ -456,7 +404,7 @@ class ResourceServiceTests(unittest.TestCase):
                     "start-replay-corrupt-0001",
                     **bindings,
                 )
-        self.assertEqual("INTERNAL_ERROR", captured.exception.code)
+        self.assertEqual("FLOW_STATE_CONFLICT", captured.exception.code)
 
     def test_cancelled_selection_cannot_prepare(self) -> None:
         flow, search, presentation = self._start_and_search()
@@ -540,7 +488,6 @@ class ResourceServiceTests(unittest.TestCase):
                 selection_version=plan["selection_version"],
                 selection_digest=plan["selection_digest"],
                 plan_digest=plan["plan_digest"],
-                authority_digest=plan["authority_digest"],
             )
         self.assertEqual("RESOLUTION_STALE", captured.exception.code)
         self.assertIsNone(self.service.store.get_latest_job_for_flow(flow["flow_id"]))
@@ -570,7 +517,6 @@ class ResourceServiceTests(unittest.TestCase):
             selection_version=plan["selection_version"],
             selection_digest=plan["selection_digest"],
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         self.assertTrue(self.fixture_fetcher.started.wait(1))
         cancelled = self.service.job_cancel(

@@ -121,7 +121,7 @@ class AssetBundleContractTests(unittest.TestCase):
 
     def test_catalog_minor_addition_keeps_contract_and_tool_set(self) -> None:
         catalog = load_json(CATALOG_PATH)
-        self.assertEqual("1.5.0", catalog["catalog_version"])
+        self.assertEqual("1.6.0", catalog["catalog_version"])
         self.assertEqual("1.0.0", catalog["contract_version"])
         self.assertEqual(EXPECTED_TOOLS, tuple(tool["name"] for tool in catalog["tools"]))
         self.assertEqual(13, len(catalog["tools"]))

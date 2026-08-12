@@ -97,15 +97,6 @@ class AcquisitionBatchTests(unittest.TestCase):
             provider_version=provider_version,
             planned_scope=planned_scope,
             representation_id="repr_acquisition_batch001",
-            binding_digest="a" * 64,
-            source_fingerprint="sha256:" + "e" * 64,
-            capability_id="cap_acquisition_batch_v1",
-            descriptor_version="1.0.0",
-            descriptor_digest="sha256:" + "b" * 64,
-            readiness_snapshot_id="ready_acquisition_batch_v1",
-            readiness_digest="sha256:" + "c" * 64,
-            eligibility_id="elig_acquisition_batch_v1",
-            eligibility_digest="sha256:" + "d" * 64,
             cancel_event=cancel_event or threading.Event(),
             jobs_root=self.root,
         )
@@ -272,7 +263,6 @@ class AcquisitionBatchTests(unittest.TestCase):
         self.assertEqual(provider.calls, 0)
         self.assertEqual(result.planned_provider_id, "batch-provider")
         self.assertIsNone(result.provider_id)
-        self.assertEqual(result.source_fingerprint, "sha256:" + "e" * 64)
 
 
 if __name__ == "__main__":

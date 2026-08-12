@@ -15,7 +15,7 @@ from .models import (
     SearchFilters,
     SearchTask,
 )
-from .simple_service import ResourceService
+from .service import ResourceService
 
 
 CONTRACT_VERSION = "1.0.0"

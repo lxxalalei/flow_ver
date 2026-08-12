@@ -84,8 +84,30 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         strategy=AcquisitionStrategy.DIRECT_FILE,
         provider_id="smartedu-resource",
         provider_version="1.0.0",
-        containers=frozenset({"pdf", "zip"}),
-        resource_types=frozenset({"course", "document", "other"}),
+        containers=frozenset({"pdf"}),
+        resource_types=frozenset({"book", "course", "document", "other"}),
+    ),
+    ProviderSpec(
+        platform_id="smartedu",
+        scope="primary_resource",
+        representation_kind="video",
+        role="primary",
+        strategy=AcquisitionStrategy.DIRECT_FILE,
+        provider_id="smartedu-resource",
+        provider_version="1.0.0",
+        containers=frozenset({"mp4"}),
+        resource_types=frozenset({"course", "video"}),
+    ),
+    ProviderSpec(
+        platform_id="smartedu",
+        scope="primary_resource",
+        representation_kind="audio",
+        role="primary",
+        strategy=AcquisitionStrategy.DIRECT_FILE,
+        provider_id="smartedu-resource",
+        provider_version="1.0.0",
+        containers=frozenset({"mp3", "m4a"}),
+        resource_types=frozenset({"audio", "course"}),
     ),
     ProviderSpec(
         platform_id="generic",
@@ -99,6 +121,17 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         resource_types=frozenset(
             {"article", "book", "course", "dataset", "document", "other"}
         ),
+    ),
+    ProviderSpec(
+        platform_id="generic",
+        scope="primary_resource",
+        representation_kind="video",
+        role="primary",
+        strategy=AcquisitionStrategy.DIRECT_FILE,
+        provider_id="generic-direct",
+        provider_version="1.0.0",
+        containers=frozenset({"mp4"}),
+        resource_types=frozenset({"course", "video"}),
     ),
     # When the page itself is the selected article/resource, materialised HTML
     # is the primary resource. A navigation/preview page remains landing_page.
@@ -308,7 +341,15 @@ class AcquisitionPlanner:
                 )
             spec = self._resolve_spec(resource, representation)
             snapshot = dict(representation)
-            snapshot["selected_container"] = preferred_container
+            representation_container = str(
+                representation.get("container") or ""
+            ).strip().lower()
+            snapshot["selected_container"] = (
+                representation_container
+                if str(resource.get("platform") or "generic") == "smartedu"
+                and representation_container
+                else preferred_container
+            )
             items.append(
                 {
                     "position": position,

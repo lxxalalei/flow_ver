@@ -43,7 +43,7 @@
     },
     "planned_container": {
       "type": "string",
-      "enum": ["original", "pdf", "epub", "mp4", "mp3", "html", "text"]
+      "enum": ["original", "pdf", "epub", "mp4", "mp3", "m4a", "html", "text"]
     },
     "estimated_size_bytes": {
       "type": ["integer", "null"],

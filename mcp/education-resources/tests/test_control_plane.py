@@ -233,7 +233,6 @@ class V2ControlPlaneTests(unittest.TestCase):
                 selection_version=plan["selection_version"],
                 selection_digest=plan["selection_digest"],
                 plan_digest=plan["plan_digest"],
-                authority_digest=plan["authority_digest"],
             )
         self.assertEqual(old_plan.exception.code, "SELECTION_VERSION_CONFLICT")
 
@@ -278,7 +277,6 @@ class V2ControlPlaneTests(unittest.TestCase):
                 selection_version=old_plan["selection_version"],
                 selection_digest=old_plan["selection_digest"],
                 plan_digest=old_plan["plan_digest"],
-                authority_digest=old_plan["authority_digest"],
             )
         self.assertEqual(old_plan_error.exception.code, "SELECTION_VERSION_CONFLICT")
 

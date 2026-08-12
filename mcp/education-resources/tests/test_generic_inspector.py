@@ -123,7 +123,6 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("landing", representation["role"])
         self.assertTrue(representation["materializable"])
         self.assertEqual("inspection", representation["evidence"]["source"])
-        self.assertRegex(representation["evidence"]["source_fingerprint"], r"^sha256:[a-f0-9]{64}$")
         self.assertEqual("bounded_get", mapped["inspection"]["method"])
         self.assertEqual("generic", mapped["inspection"]["inspector_id"])
 

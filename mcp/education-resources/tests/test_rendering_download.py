@@ -386,7 +386,6 @@ class ServiceRoutingTests(unittest.TestCase):
             selection_version=plan["selection_version"],
             selection_digest=plan["selection_digest"],
             plan_digest=plan["plan_digest"],
-            authority_digest=plan["authority_digest"],
         )
         job_id = started["job_id"]
         deadline = time.monotonic() + 3

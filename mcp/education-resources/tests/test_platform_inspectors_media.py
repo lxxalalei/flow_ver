@@ -5,6 +5,10 @@ import unittest
 
 from education_resource_mcp.adapters.inspect_bilibili import BilibiliInspector
 from education_resource_mcp.adapters.inspect_smartedu import SmartEduInspector
+from education_resource_mcp.adapters.smartedu_download import (
+    _detail_api_url,
+    _resolve_content,
+)
 from education_resource_mcp.adapters.inspect_zhihu import ZhihuInspector
 
 
@@ -94,6 +98,11 @@ def inspect_with(inspector_type, candidate: dict, response: FakeResponse):
 
 
 class PlatformInspectorMediaTests(unittest.TestCase):
+    @staticmethod
+    def _smartedu_detail_url(source_url: str) -> str:
+        content_id, content_type = _resolve_content(source_url)
+        return _detail_api_url(content_id, content_type, source_url)
+
     def test_bilibili_enriches_allowlisted_metadata_without_synthetic_primary(self) -> None:
         candidate = resource(
             platform="bilibili",
@@ -165,7 +174,31 @@ class PlatformInspectorMediaTests(unittest.TestCase):
             any(item["kind"] == "webpage" for item in mapped["resolved_resource"]["representations"])
         )
 
-    def test_smartedu_keeps_native_resource_id_without_synthetic_primary(self) -> None:
+    @staticmethod
+    def _smartedu_detail(*items: dict) -> bytes:
+        return json.dumps(
+            {
+                "relations": {
+                    "course_resource": [
+                        {"id": "lesson-1", "global_title": "课程资源", "ti_items": list(items)}
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+    @staticmethod
+    def _smartedu_item(item_id: str, url: str, fmt: str, *, size: int = 16) -> dict:
+        return {
+            "id": item_id,
+            "ti_storage": url,
+            "ti_format": fmt,
+            "ti_file_flag": "source",
+            "ti_size": size,
+            "title": "平台主文件",
+        }
+
+    def test_smartedu_pdf_detail_produces_concrete_primary_without_locators(self) -> None:
         candidate = resource(
             platform="smartedu",
             source_url="https://basic.smartedu.cn/tchMaterial/detail?contentId=native-9",
@@ -179,52 +212,126 @@ class PlatformInspectorMediaTests(unittest.TestCase):
                 "provider": "国家中小学智慧教育平台",
             },
         )
-        mapped, _ = inspect_with(
-            SmartEduInspector,
-            candidate,
-            FakeResponse(final_url=candidate["source_url"]),
-        )
-
-        self.assertEqual("resolved", mapped["resolution_status"])
-        self.assertEqual("smartedu", mapped["inspection"]["inspector_id"])
-        metadata = mapped["resolved_resource"]["metadata"]
-        self.assertEqual("native-resource-9", metadata["resource_id"])
-        self.assertNotEqual(candidate["resource_id"], metadata["resource_id"])
-        self.assertEqual("三年级", metadata["grade"])
-        self.assertEqual("科学", metadata["subject"])
-        self.assertEqual("国家中小学智慧教育平台", metadata["provider"])
-        self.assertTrue(
-            any(
-                item["kind"] == "document"
-                and item["scope"] == "representation"
-                and item["role"] == "companion"
-                and item["mime_type"] == "application/pdf"
-                and item["materializable"] is False
-                for item in mapped["resolved_resource"]["representations"]
+        detail_transport = QueueTransport(
+            FakeResponse(
+                final_url=self._smartedu_detail_url(candidate["source_url"]),
+                headers={"Content-Type": "application/json"},
+                body=self._smartedu_detail(
+                    self._smartedu_item(
+                        "book-pdf",
+                        "https://r1-ndr.ykt.cbern.com.cn/book.pdf?accessToken=private-token",
+                        "pdf",
+                        size=1024,
+                    )
+                ),
             )
         )
+        page_transport = QueueTransport(FakeResponse(final_url=candidate["source_url"]))
+        inspector = SmartEduInspector(
+            resolver=public_resolver,
+            transport=page_transport,
+            detail_transport=detail_transport,
+            timeout=0.25,
+        )
+        mapped = inspector.inspect(candidate).to_mapping()
 
-    def test_smartedu_course_uses_non_primary_course_webpage_representation(self) -> None:
+        self.assertEqual("resolved", mapped["resolution_status"])
+        self.assertEqual("platform_detail_api", mapped["inspection"]["method"])
+        metadata = mapped["resolved_resource"]["metadata"]
+        self.assertEqual("native-resource-9", metadata["resource_id"])
+        self.assertEqual("三年级", metadata["grade"])
+        representations = mapped["resolved_resource"]["representations"]
+        primary = next(item for item in representations if item["role"] == "primary")
+        self.assertEqual("document", primary["kind"])
+        self.assertEqual("pdf", primary["container"])
+        self.assertEqual("primary_resource", primary["scope"])
+        self.assertEqual("available", primary["technical_availability"])
+        self.assertTrue(primary["materializable"])
+        self.assertEqual(1024, primary["size_bytes"])
+        encoded = json.dumps(mapped, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("https://r1-ndr.ykt.cbern.com.cn", encoded)
+        self.assertNotIn("private-token", encoded)
+        self.assertNotIn("ti_storage", encoded)
+
+    def test_smartedu_course_detail_prefers_direct_mp4_and_keeps_landing(self) -> None:
         candidate = resource(
             platform="smartedu",
             source_url="https://basic.smartedu.cn/qualityCourse?courseId=course-9",
             resource_type="course",
             metadata={"course_id": "course-9", "provider": "SmartEdu"},
         )
-        mapped, _ = inspect_with(
-            SmartEduInspector,
-            candidate,
-            FakeResponse(final_url=candidate["source_url"]),
+        detail_transport = QueueTransport(
+            FakeResponse(
+                final_url=self._smartedu_detail_url(candidate["source_url"]),
+                headers={"Content-Type": "application/json"},
+                body=self._smartedu_detail(
+                    self._smartedu_item(
+                        "video-1",
+                        "https://r1-ndr.ykt.cbern.com.cn/video.m3u8?accessToken=private-token",
+                        "m3u8",
+                    ),
+                    self._smartedu_item(
+                        "video-2",
+                        "https://r1-ndr.ykt.cbern.com.cn/video.mp4?accessToken=private-token",
+                        "mp4",
+                    ),
+                    self._smartedu_item(
+                        "handout-1",
+                        "https://r1-ndr.ykt.cbern.com.cn/handout.pdf?accessToken=private-token",
+                        "pdf",
+                    ),
+                ),
+            )
         )
+        page_transport = QueueTransport(FakeResponse(final_url=candidate["source_url"]))
+        mapped = SmartEduInspector(
+            resolver=public_resolver,
+            transport=page_transport,
+            detail_transport=detail_transport,
+            timeout=0.25,
+        ).inspect(candidate).to_mapping()
+
+        representations = mapped["resolved_resource"]["representations"]
+        primary = next(item for item in representations if item["role"] == "primary")
+        self.assertEqual("video", primary["kind"])
+        self.assertEqual("mp4", primary["container"])
+        self.assertEqual("video/mp4", primary["mime_type"])
+        self.assertTrue(primary["materializable"])
         self.assertTrue(
             any(
                 item["kind"] == "webpage"
-                and item["container"] == "course"
-                and item["scope"] == "representation"
-                and item["role"] == "companion"
-                and item["materializable"] is False
-                for item in mapped["resolved_resource"]["representations"]
+                and item["scope"] == "landing_page"
+                and item["role"] == "landing"
+                for item in representations
             )
+        )
+
+    def test_smartedu_detail_auth_failure_never_produces_primary(self) -> None:
+        candidate = resource(
+            platform="smartedu",
+            source_url="https://basic.smartedu.cn/qualityCourse?courseId=course-auth",
+            resource_type="course",
+        )
+        detail_transport = QueueTransport(
+            FakeResponse(
+                status=403,
+                final_url=self._smartedu_detail_url(candidate["source_url"]),
+                headers={"Content-Type": "application/json"},
+                body=b"{}",
+            )
+        )
+        mapped = SmartEduInspector(
+            resolver=public_resolver,
+            transport=QueueTransport(FakeResponse(final_url=candidate["source_url"])),
+            detail_transport=detail_transport,
+            timeout=0.25,
+        ).inspect(candidate).to_mapping()
+
+        self.assertEqual("partial", mapped["resolution_status"])
+        self.assertEqual("auth_required", mapped["resolved_resource"]["availability"]["status"])
+        self.assertEqual("AUTH_REQUIRED", mapped["failures"][0]["code"])
+        self.assertFalse(
+            any(item.get("role") == "primary" for item in mapped["resolved_resource"]["representations"])
         )
 
     def test_wrong_host_is_policy_blocked_without_a_request(self) -> None:

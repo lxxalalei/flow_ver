@@ -15,7 +15,7 @@ from typing import Any, Iterator, Mapping
 import uuid
 
 
-LATEST_SCHEMA_VERSION = 7
+LATEST_SCHEMA_VERSION = 9
 ARCHIVE_STATES = {"pending", "ready", "failed", "missing", "corrupt"}
 ASSET_BUNDLE_STATUSES = frozenset(
     {"pending", "running", "succeeded", "partial", "failed", "cancelled", "quarantined"}
@@ -38,55 +38,10 @@ RESOLUTION_CACHEABLE_STATUSES = frozenset({"resolved", "partial"})
 CAPABILITY_SCOPES = frozenset(
     {"primary_resource", "representation", "landing_page", "metadata"}
 )
-CAPABILITY_SCOPE_STRENGTH = {
-    "metadata": 0,
-    "landing_page": 1,
-    "representation": 2,
-    "primary_resource": 3,
-}
-READINESS_STATUSES = frozenset(
-    {
-        "ready",
-        "degraded",
-        "blocked",
-        "experimental",
-        "unsupported",
-        "unavailable",
-        "auth_required",
-        "policy_blocked",
-        "feature_not_supported",
-        "missing_provider",
-        "missing_inspector",
-        "import_failed",
-        "version_mismatch",
-        "scope_mismatch",
-        "legacy",
-        "expired",
-        "descriptor_changed",
-        "not_checked",
-        "unknown",
-    }
-)
-ELIGIBILITY_STATUSES = frozenset(
-    {
-        "eligible",
-        "ineligible",
-        "unknown",
-        "auth_required",
-        "policy_blocked",
-        "unsupported",
-        "manual_review",
-    }
-)
-ELIGIBILITY_ACTIONS = frozenset({"inspect", "materialize", "download", "archive"})
-ACQUISITION_STRATEGY_ACTIONS = {
-    "direct_file": "download",
-    "web_materialize": "materialize",
-    "web_capture": "materialize",
-}
 ACQUISITION_OUTCOME_STATUSES = frozenset(
     {"running", "succeeded", "partial", "failed", "cancelled"}
 )
+_STRATEGIES = frozenset({"direct_file", "web_materialize", "web_capture"})
 _RESOLUTION_PRIVATE_KEYS = frozenset(
     {
         "source_url",
@@ -138,6 +93,18 @@ def _json(value: Any) -> str:
 
 
 def _load(value: str | None, default: Any) -> Any:
+    if value is None:
+        return default
+    return json.loads(value)
+
+
+def _bare_fingerprint(value: Any) -> str:
+    text = str(value or "")
+    if text.startswith("sha256:"):
+        text = text[7:]
+    if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
+        raise ValueError("invalid_source_fingerprint")
+    return text
     if value is None:
         return default
     return json.loads(value)
@@ -350,30 +317,6 @@ class Store:
             )
         self._apply_migrations()
 
-    def _apply_migrations(self) -> None:
-        migrations = (
-            (1, "v2_control_plane_columns", self._migration_control_plane_columns),
-            (2, "learning_archive_foundation", self._migration_archive_foundation),
-            (3, "resource_resolution_foundation", self._migration_resource_resolution_foundation),
-            (4, "result_set_extend_storage", self._migration_result_set_extend_storage),
-            (5, "multimodal_asset_bundle", self._migration_asset_bundle),
-            (6, "capability_authority_chain", self._migration_capability_authority),
-            (7, "job_execution_authority", self._migration_job_execution_authority),
-        )
-        for version, name, migration in migrations:
-            with self.transaction(immediate=True) as connection:
-                applied = connection.execute(
-                    "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
-                ).fetchone()
-                if applied is not None:
-                    continue
-                migration(connection)
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
-                    (version, name, utc_now()),
-                )
-                connection.execute(f"PRAGMA user_version = {version}")
-
     @staticmethod
     def _add_columns(
         connection: sqlite3.Connection,
@@ -394,6 +337,32 @@ class Store:
             sql = statement.strip()
             if sql:
                 connection.execute(sql)
+
+    def _apply_migrations(self) -> None:
+        migrations = (
+            (1, "v2_control_plane_columns", self._migration_control_plane_columns),
+            (2, "learning_archive_foundation", self._migration_archive_foundation),
+            (3, "resource_resolution_foundation", self._migration_resource_resolution_foundation),
+            (4, "result_set_extend_storage", self._migration_result_set_extend_storage),
+            (5, "multimodal_asset_bundle", self._migration_asset_bundle),
+            (6, "capability_authority_chain", self._migration_capability_authority),
+            (7, "job_execution_authority", self._migration_job_execution_authority),
+            (8, "simple_acquisition_state", self._migration_simple_acquisition),
+            (9, "drop_legacy_acquisition_authority", self._migration_drop_legacy_acquisition_authority),
+        )
+        for version, name, migration in migrations:
+            with self.transaction(immediate=True) as connection:
+                applied = connection.execute(
+                    "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+                ).fetchone()
+                if applied is not None:
+                    continue
+                migration(connection)
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                    (version, name, utc_now()),
+                )
+                connection.execute(f"PRAGMA user_version = {version}")
 
     def _migration_control_plane_columns(self, connection: sqlite3.Connection) -> None:
         migrations = {
@@ -1400,67 +1369,6 @@ class Store:
         result["result"] = _load(result.pop("result_json"), None)
         return result
 
-    def lookup_download_start_replay(
-        self,
-        *,
-        idempotency_key: str,
-        request_hash: str,
-        flow_id: str,
-        plan_id: str,
-    ) -> dict[str, Any] | None:
-        """Look up an already-accepted ``download.start`` request.
-
-        This is a read-only preflight seam for the Service layer.  An exact
-        idempotency hit returns the immutable Job owned by the existing
-        request, allowing callers to replay without re-probing capability
-        readiness or eligibility.  A miss returns ``None``; the authoritative
-        create/replay decision remains :meth:`reserve_job`, which rechecks the
-        same identity inside its write transaction for concurrent callers.
-
-        The flow and Plan bindings are part of the request identity here.  A
-        key cannot be reused for a different request even when its hash is
-        unchanged, and a persisted Job without execution authority is never
-        considered replayable.
-        """
-
-        scope = "download.start"
-        with self._connect() as connection:
-            idempotency = connection.execute(
-                """
-                SELECT result_id, request_hash
-                FROM idempotency_keys
-                WHERE scope = ? AND key = ?
-                """,
-                (scope, idempotency_key),
-            ).fetchone()
-            if idempotency is None:
-                return None
-            if idempotency["request_hash"] != request_hash:
-                raise ValueError("idempotency_conflict")
-
-            job = connection.execute(
-                "SELECT * FROM jobs WHERE job_id = ?",
-                (idempotency["result_id"],),
-            ).fetchone()
-            if job is None:
-                raise RuntimeError("idempotency record points to a missing job")
-            if job["flow_id"] != flow_id or job["plan_id"] != plan_id:
-                raise ValueError("idempotency_conflict")
-
-            execution = connection.execute(
-                """
-                SELECT 1
-                FROM job_execution_items
-                WHERE job_id = ?
-                LIMIT 1
-                """,
-                (job["job_id"],),
-            ).fetchone()
-            if execution is None:
-                raise RuntimeError("execution_binding_missing")
-
-            return self._decode_job(job)
-
     def put_idempotency(
         self,
         scope: str,
@@ -1582,26 +1490,6 @@ class Store:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @classmethod
-    def _canonical_authority_digest(cls, value: Any) -> str:
-        """Return the contract canonical-digest spelling for server facts."""
-
-        return f"sha256:{cls._request_digest(value)}"
-
-    @staticmethod
-    def _normalize_canonical_digest(value: Any, field: str) -> str:
-        normalized = Store._bounded_authority_text(value, field, maximum=71)
-        if re.fullmatch(r"sha256:[a-f0-9]{64}", normalized) is None:
-            raise ValueError(f"invalid_{field}")
-        return normalized
-
-    @staticmethod
-    def _normalize_bare_digest(value: Any, field: str) -> str:
-        normalized = Store._bounded_authority_text(value, field, maximum=64)
-        if re.fullmatch(r"[a-f0-9]{64}", normalized) is None:
-            raise ValueError(f"invalid_{field}")
-        return normalized
-
-    @staticmethod
     def _canonicalize_source_fingerprint(value: Any, field: str) -> str:
         """Normalize cache-key and authority spellings at their boundary.
 
@@ -2523,188 +2411,6 @@ class Store:
         return parsed.astimezone(timezone.utc).isoformat()
 
     @classmethod
-    def _normalize_plan_capability_items(
-        cls,
-        value: Any,
-        *,
-        resource_ids: list[str],
-    ) -> list[dict[str, Any]]:
-        """Validate the immutable per-resource authority bound into a Plan."""
-
-        if not isinstance(value, list) or not value:
-            raise ValueError("capability_binding_missing")
-        if len(value) != len(resource_ids):
-            raise ValueError("capability_binding_resource_mismatch")
-        normalized: list[dict[str, Any]] = []
-        required_text = (
-            "resource_id",
-            "representation_id",
-            "capability_scope",
-            "strategy",
-            "provider_id",
-            "provider_version",
-            "capability_id",
-            "descriptor_version",
-            "descriptor_digest",
-            "registry_version",
-            "registry_digest",
-            "readiness_snapshot_id",
-            "readiness_digest",
-            "eligibility_id",
-            "eligibility_digest",
-            "source_fingerprint",
-        )
-        seen_resources: set[str] = set()
-        seen_positions: set[int] = set()
-        seen_bindings: set[str] = set()
-        for index, raw in enumerate(value):
-            if not isinstance(raw, Mapping):
-                raise ValueError("invalid_capability_binding")
-            item: dict[str, Any] = {
-                field: cls._bounded_authority_text(raw.get(field), field)
-                for field in required_text
-            }
-            for digest_field in (
-                "descriptor_digest",
-                "registry_digest",
-                "readiness_digest",
-                "eligibility_digest",
-                "source_fingerprint",
-            ):
-                item[digest_field] = cls._normalize_canonical_digest(
-                    item[digest_field], digest_field
-                )
-            position = raw.get("position", index)
-            if not isinstance(position, int) or isinstance(position, bool) or position < 0:
-                raise ValueError("invalid_capability_binding_position")
-            item["position"] = position
-            resolution_id = raw.get("resolution_id")
-            if resolution_id is not None:
-                item["resolution_id"] = cls._bounded_authority_text(
-                    resolution_id, "resolution_id"
-                )
-            else:
-                item["resolution_id"] = None
-            scope = item["capability_scope"]
-            if scope not in CAPABILITY_SCOPES:
-                raise ValueError("invalid_capability_scope")
-            if item["strategy"] not in ACQUISITION_STRATEGY_ACTIONS:
-                raise ValueError("invalid_capability_strategy")
-            representation = raw.get("representation")
-            if not isinstance(representation, Mapping):
-                raise ValueError("invalid_capability_representation")
-            # Round-trip through canonical JSON to reject paths, arbitrary
-            # objects, NaN and provider-owned mutable values at persistence.
-            try:
-                encoded = json.dumps(
-                    representation,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                )
-                item["representation"] = json.loads(encoded)
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise ValueError("invalid_capability_representation") from exc
-            if len(encoded.encode("utf-8")) > 64 * 1024:
-                raise ValueError("capability_representation_too_large")
-            expected_binding_digest = cls._request_digest(item)
-            supplied_binding_digest = raw.get("binding_digest")
-            if supplied_binding_digest is not None:
-                supplied_binding_digest = cls._normalize_bare_digest(
-                    supplied_binding_digest, "binding_digest"
-                )
-                if supplied_binding_digest != expected_binding_digest:
-                    raise ValueError("capability_binding_digest_mismatch")
-            item["binding_digest"] = expected_binding_digest
-            resource_id = item["resource_id"]
-            if resource_id in seen_resources or position in seen_positions:
-                raise ValueError("duplicate_capability_binding")
-            if item["binding_digest"] in seen_bindings:
-                raise ValueError("duplicate_capability_binding_digest")
-            seen_resources.add(resource_id)
-            seen_positions.add(position)
-            seen_bindings.add(item["binding_digest"])
-            normalized.append(item)
-        ordered = sorted(normalized, key=lambda row: row["position"])
-        if [item["position"] for item in ordered] != list(range(len(resource_ids))):
-            raise ValueError("invalid_capability_binding_position")
-        if [item["resource_id"] for item in ordered] != resource_ids:
-            raise ValueError("capability_binding_resource_mismatch")
-        return ordered
-
-    @staticmethod
-    def _eligibility_action_for_strategy(strategy: str) -> str:
-        """Return the policy action for one exact persisted strategy.
-
-        This intentionally has no option-, scope- or resource-based fallback.
-        In particular, ``landing_page + web_materialize`` remains a landing
-        page whose required eligibility action is ``materialize``.
-        """
-
-        try:
-            return ACQUISITION_STRATEGY_ACTIONS[strategy]
-        except KeyError as exc:
-            raise RuntimeError("capability_strategy_mismatch") from exc
-
-    @classmethod
-    def _normalize_execution_bindings(
-        cls,
-        value: Any,
-        *,
-        resource_ids: list[str],
-    ) -> list[dict[str, Any]]:
-        """Normalize freshly observed execution bindings without fallback.
-
-        Execution bindings have the same canonical shape as Plan items, but
-        they are a distinct credential.  Missing rows and malformed/drifting
-        facts use execution-specific internal errors so the Service can map
-        them to the public capability catalogue without exposing validators.
-        """
-
-        if not isinstance(value, list) or not value or len(value) != len(resource_ids):
-            raise RuntimeError("execution_binding_missing")
-        try:
-            return cls._normalize_plan_capability_items(
-                value,
-                resource_ids=resource_ids,
-            )
-        except ValueError as exc:
-            raise RuntimeError("execution_binding_conflict") from exc
-
-    @staticmethod
-    def _decode_plan_authority_row(row: sqlite3.Row) -> dict[str, Any]:
-        item = dict(row)
-        item.pop("plan_id", None)
-        item["representation"] = _load(item.pop("representation_json"), {})
-        return item
-
-    @classmethod
-    def _decode_readiness_authority(
-        cls, row: sqlite3.Row
-    ) -> tuple[dict[str, Any], str]:
-        item = dict(row)
-        item["readiness_snapshot_id"] = item.pop("snapshot_id")
-        item["issues"] = _load(item.pop("issues_json"), [])
-        digest = str(item.pop("snapshot_digest"))
-        if digest != cls._canonical_authority_digest(item):
-            raise RuntimeError("capability_binding_conflict")
-        item["snapshot_digest"] = digest
-        return item, digest
-
-    @classmethod
-    def _decode_eligibility_authority(
-        cls, row: sqlite3.Row
-    ) -> tuple[dict[str, Any], str]:
-        item = dict(row)
-        item["reason_codes"] = _load(item.pop("reason_codes_json"), [])
-        digest = str(item.pop("decision_digest"))
-        if digest != cls._canonical_authority_digest(item):
-            raise RuntimeError("capability_binding_conflict")
-        item["decision_digest"] = digest
-        return item, digest
-
-    @classmethod
     def _resolution_representation_evidence(
         cls,
         resolved: Mapping[str, Any],
@@ -2766,469 +2472,6 @@ class Store:
         # accepted at the storage authority boundary.
         if set(planned_copy) - set(observed_copy) - {"selected_container"}:
             raise RuntimeError("representation_drift")
-
-    def save_capability_readiness_snapshot(
-        self, snapshot: Mapping[str, Any]
-    ) -> dict[str, Any]:
-        """Persist one immutable, canonically digested readiness observation."""
-
-        if not isinstance(snapshot, Mapping):
-            raise ValueError("invalid_readiness_snapshot")
-        required = (
-            "readiness_snapshot_id",
-            "capability_id",
-            "descriptor_version",
-            "descriptor_digest",
-            "registry_version",
-            "registry_digest",
-            "platform_id",
-            "capability_scope",
-            "strategy",
-            "provider_id",
-            "provider_version",
-            "status",
-        )
-        item = {
-            field: self._bounded_authority_text(snapshot.get(field), field)
-            for field in required
-        }
-        for digest_field in ("descriptor_digest", "registry_digest"):
-            item[digest_field] = self._normalize_canonical_digest(
-                item[digest_field], digest_field
-            )
-        if item["capability_scope"] not in CAPABILITY_SCOPES:
-            raise ValueError("invalid_capability_scope")
-        if item["status"] not in READINESS_STATUSES:
-            raise ValueError("invalid_readiness_status")
-        for field in ("inspector_id", "inspector_version"):
-            value = snapshot.get(field)
-            item[field] = (
-                self._bounded_authority_text(value, field) if value is not None else None
-            )
-        issues = snapshot.get("issues") or []
-        if not isinstance(issues, list):
-            raise ValueError("invalid_readiness_issues")
-        try:
-            item["issues"] = json.loads(
-                json.dumps(
-                    issues,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                )
-            )
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise ValueError("invalid_readiness_issues") from exc
-        if len(json.dumps(item["issues"], ensure_ascii=False).encode("utf-8")) > 64 * 1024:
-            raise ValueError("readiness_issues_too_large")
-        item["observed_at"] = self._normalize_authority_timestamp(
-            snapshot.get("observed_at"), "observed_at"
-        )
-        item["expires_at"] = self._normalize_authority_timestamp(
-            snapshot.get("expires_at"), "expires_at"
-        )
-        if item["expires_at"] <= item["observed_at"]:
-            raise ValueError("invalid_readiness_expiry")
-        expected_digest = self._canonical_authority_digest(item)
-        supplied_digest = snapshot.get("snapshot_digest")
-        if supplied_digest is not None:
-            supplied_digest = self._normalize_canonical_digest(
-                supplied_digest, "snapshot_digest"
-            )
-            if supplied_digest != expected_digest:
-                raise ValueError("readiness_snapshot_digest_mismatch")
-        item["snapshot_digest"] = expected_digest
-
-        with self.transaction(immediate=True) as connection:
-            existing = connection.execute(
-                "SELECT * FROM capability_readiness_snapshots WHERE snapshot_id = ?",
-                (item["readiness_snapshot_id"],),
-            ).fetchone()
-            if existing is None:
-                connection.execute(
-                    """
-                    INSERT INTO capability_readiness_snapshots(
-                        snapshot_id, capability_id, descriptor_version,
-                        descriptor_digest, registry_version, registry_digest,
-                        platform_id, capability_scope, strategy, provider_id,
-                        provider_version, inspector_id, inspector_version, status,
-                        issues_json, observed_at, expires_at, snapshot_digest
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item["readiness_snapshot_id"], item["capability_id"],
-                        item["descriptor_version"], item["descriptor_digest"],
-                        item["registry_version"], item["registry_digest"],
-                        item["platform_id"], item["capability_scope"], item["strategy"],
-                        item["provider_id"], item["provider_version"],
-                        item["inspector_id"], item["inspector_version"], item["status"],
-                        _json(item["issues"]), item["observed_at"], item["expires_at"],
-                        item["snapshot_digest"],
-                    ),
-                )
-            else:
-                decoded = dict(existing)
-                decoded["readiness_snapshot_id"] = decoded.pop("snapshot_id")
-                decoded["issues"] = _load(decoded.pop("issues_json"), [])
-                if decoded != item:
-                    raise ValueError("readiness_snapshot_conflict")
-        return dict(item)
-
-    def get_capability_readiness_snapshot(
-        self, readiness_snapshot_id: str
-    ) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM capability_readiness_snapshots WHERE snapshot_id = ?",
-                (readiness_snapshot_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        result = dict(row)
-        result["readiness_snapshot_id"] = result.pop("snapshot_id")
-        result["issues"] = _load(result.pop("issues_json"), [])
-        return result
-
-    def save_eligibility_decision(
-        self, decision: Mapping[str, Any]
-    ) -> dict[str, Any]:
-        """Persist an immutable, canonically digested action decision."""
-
-        if not isinstance(decision, Mapping):
-            raise ValueError("invalid_eligibility_decision")
-        required = (
-            "eligibility_id",
-            "flow_id",
-            "resource_id",
-            "representation_id",
-            "action",
-            "status",
-            "policy_class",
-            "source_fingerprint",
-            "capability_id",
-            "descriptor_digest",
-            "readiness_snapshot_id",
-        )
-        item = {
-            field: self._bounded_authority_text(decision.get(field), field)
-            for field in required
-        }
-        for digest_field in ("source_fingerprint", "descriptor_digest"):
-            item[digest_field] = self._normalize_canonical_digest(
-                item[digest_field], digest_field
-            )
-        if item["action"] not in ELIGIBILITY_ACTIONS:
-            raise ValueError("invalid_eligibility_action")
-        if item["status"] not in ELIGIBILITY_STATUSES:
-            raise ValueError("invalid_eligibility_status")
-        resolution_id = decision.get("resolution_id")
-        item["resolution_id"] = (
-            self._bounded_authority_text(resolution_id, "resolution_id")
-            if resolution_id is not None
-            else None
-        )
-        reasons = decision.get("reason_codes") or []
-        if (
-            not isinstance(reasons, list)
-            or len(reasons) > 32
-            or any(
-                not isinstance(reason, str) or not reason or len(reason) > 128
-                for reason in reasons
-            )
-        ):
-            raise ValueError("invalid_eligibility_reason_codes")
-        item["reason_codes"] = list(dict.fromkeys(reasons))
-        item["evaluated_at"] = self._normalize_authority_timestamp(
-            decision.get("evaluated_at"), "evaluated_at"
-        )
-        item["expires_at"] = self._normalize_authority_timestamp(
-            decision.get("expires_at"), "expires_at"
-        )
-        if item["expires_at"] <= item["evaluated_at"]:
-            raise ValueError("invalid_eligibility_expiry")
-        expected_digest = self._canonical_authority_digest(item)
-        supplied_digest = decision.get("decision_digest")
-        if supplied_digest is not None:
-            supplied_digest = self._normalize_canonical_digest(
-                supplied_digest, "decision_digest"
-            )
-            if supplied_digest != expected_digest:
-                raise ValueError("eligibility_decision_digest_mismatch")
-        item["decision_digest"] = expected_digest
-
-        with self.transaction(immediate=True) as connection:
-            existing = connection.execute(
-                "SELECT * FROM eligibility_decisions WHERE eligibility_id = ?",
-                (item["eligibility_id"],),
-            ).fetchone()
-            if existing is None:
-                connection.execute(
-                    """
-                    INSERT INTO eligibility_decisions(
-                        eligibility_id, flow_id, resource_id, resolution_id,
-                        representation_id, action, status, policy_class,
-                        reason_codes_json, source_fingerprint, capability_id,
-                        descriptor_digest, readiness_snapshot_id, evaluated_at,
-                        expires_at, decision_digest
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item["eligibility_id"], item["flow_id"], item["resource_id"],
-                        item["resolution_id"], item["representation_id"], item["action"],
-                        item["status"], item["policy_class"], _json(item["reason_codes"]),
-                        item["source_fingerprint"], item["capability_id"],
-                        item["descriptor_digest"], item["readiness_snapshot_id"],
-                        item["evaluated_at"], item["expires_at"], item["decision_digest"],
-                    ),
-                )
-            else:
-                decoded = dict(existing)
-                decoded["reason_codes"] = _load(decoded.pop("reason_codes_json"), [])
-                if decoded != item:
-                    raise ValueError("eligibility_decision_conflict")
-        return dict(item)
-
-    def get_eligibility_decision(
-        self, eligibility_id: str
-    ) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM eligibility_decisions WHERE eligibility_id = ?",
-                (eligibility_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        result = dict(row)
-        result["reason_codes"] = _load(result.pop("reason_codes_json"), [])
-        return result
-
-    def create_plan(
-        self,
-        flow_id: str,
-        presentation_id: str,
-        presented_version: int,
-        selection_version: int,
-        selection_digest: str,
-        options: dict[str, Any],
-        confirmation_token: str,
-        confirmation_hash: str,
-        expires_at: str,
-        *,
-        idempotency_key: str,
-        request_hash: str,
-        capability_items: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        scope = f"resource_download_prepare:{flow_id}"
-        now = utc_now()
-        with self.transaction(immediate=True) as connection:
-            replay = self._replay_in_transaction(
-                connection, scope, idempotency_key, request_hash
-            )
-            if replay is not None:
-                return replay
-            flow = connection.execute(
-                "SELECT current_presentation_id, presented_version, selection_version FROM flows WHERE flow_id = ?",
-                (flow_id,),
-            ).fetchone()
-            selection = connection.execute(
-                "SELECT * FROM selections WHERE flow_id = ?", (flow_id,)
-            ).fetchone()
-            if flow is None:
-                raise KeyError("flow_not_found")
-            if selection is None or selection["status"] != "selected":
-                raise LookupError("resource_not_selected")
-            if int(selection["selection_version"]) != selection_version:
-                raise RuntimeError("selection_version_conflict")
-            if (
-                selection["presentation_id"] != presentation_id
-                or int(selection["presented_version"]) != int(presented_version)
-            ):
-                raise RuntimeError("presentation_version_conflict")
-            if str(selection["selection_digest"]) != selection_digest:
-                raise RuntimeError("selection_digest_conflict")
-            if (
-                int(flow["selection_version"]) != selection_version
-                or flow["current_presentation_id"] != presentation_id
-                or int(flow["presented_version"]) != int(presented_version)
-            ):
-                raise RuntimeError("selection_changed")
-            resource_ids = _load(selection["selected_ids_json"], [])
-            if not resource_ids:
-                raise LookupError("resource_not_selected")
-            placeholders = ",".join("?" for _ in resource_ids)
-            rows = connection.execute(
-                f"""
-                SELECT r.resource_id, r.platform, pi.display_position
-                FROM resources r
-                JOIN presentation_items pi ON pi.resource_id = r.resource_id
-                WHERE r.flow_id = ? AND pi.presentation_id = ?
-                    AND r.resource_id IN ({placeholders})
-                """,
-                (flow_id, presentation_id, *resource_ids),
-            ).fetchall()
-            by_id = {row["resource_id"]: dict(row) for row in rows}
-            if any(resource_id not in by_id for resource_id in resource_ids):
-                raise RuntimeError("resource_not_found")
-            normalized_capability_items = self._normalize_plan_capability_items(
-                capability_items,
-                resource_ids=resource_ids,
-            )
-            authority_digest = self._request_digest(normalized_capability_items)
-            plan_digest = self._request_digest(
-                {
-                    "flow_id": flow_id,
-                    "presentation_id": selection["presentation_id"],
-                    "presented_version": int(selection["presented_version"]),
-                    "selection_version": selection_version,
-                    "selection_digest": selection_digest,
-                    "resource_ids": resource_ids,
-                    "options": options,
-                    "authority_digest": authority_digest,
-                    "capability_items": normalized_capability_items,
-                }
-            )
-            plan_id = new_id("plan")
-            connection.execute(
-                """
-                INSERT INTO download_plans(
-                    plan_id, flow_id, presented_version, resource_ids_json,
-                    options_json, confirmation_token, confirmation_hash, expires_at,
-                    used, created_at, presentation_id, selection_version,
-                    selection_digest, plan_digest
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-                """,
-                (
-                    plan_id,
-                    flow_id,
-                    int(selection["presented_version"]),
-                    _json(resource_ids),
-                    _json(options),
-                    confirmation_token,
-                    confirmation_hash,
-                    expires_at,
-                    now,
-                    selection["presentation_id"],
-                    selection_version,
-                    selection_digest,
-                    plan_digest,
-                ),
-            )
-            for item in normalized_capability_items:
-                connection.execute(
-                    """
-                    INSERT INTO download_plan_items(
-                        plan_id, position, resource_id, resolution_id,
-                        representation_id, capability_scope, strategy,
-                        provider_id, provider_version, capability_id,
-                        descriptor_version, descriptor_digest, registry_version,
-                        registry_digest, readiness_snapshot_id, readiness_digest,
-                        eligibility_id, eligibility_digest, source_fingerprint,
-                        representation_json, binding_digest
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        plan_id,
-                        item["position"],
-                        item["resource_id"],
-                        item.get("resolution_id"),
-                        item["representation_id"],
-                        item["capability_scope"],
-                        item["strategy"],
-                        item["provider_id"],
-                        item["provider_version"],
-                        item["capability_id"],
-                        item["descriptor_version"],
-                        item["descriptor_digest"],
-                        item["registry_version"],
-                        item["registry_digest"],
-                        item["readiness_snapshot_id"],
-                        item["readiness_digest"],
-                        item["eligibility_id"],
-                        item["eligibility_digest"],
-                        item["source_fingerprint"],
-                        _json(item["representation"]),
-                        item["binding_digest"],
-                    ),
-                )
-            result = {
-                "flow_id": flow_id,
-                "stage": "prepared",
-                "plan_id": plan_id,
-                "presentation_id": selection["presentation_id"],
-                "presented_version": int(selection["presented_version"]),
-                "selection_version": selection_version,
-                "selection_digest": selection_digest,
-                "plan_digest": plan_digest,
-                "authority_digest": authority_digest,
-                "capability_binding_version": "capability-binding-v1",
-                "expires_at": expires_at,
-                "confirmation_required": True,
-                "confirmation_token": confirmation_token,
-                "items": [
-                    {
-                        "resource_id": item["resource_id"],
-                        "selected_position": int(
-                            by_id[item["resource_id"]]["display_position"]
-                        ),
-                        "platform": by_id[item["resource_id"]]["platform"],
-                        "representation_id": item["representation_id"],
-                        "planned_scope": item["capability_scope"],
-                        "planned_strategy": item["strategy"],
-                        "planned_provider": {
-                            "provider_id": item["provider_id"],
-                            "version": item["provider_version"],
-                            "scope": item["capability_scope"],
-                        },
-                        "capability": {
-                            "capability_id": item["capability_id"],
-                            "descriptor_version": item["descriptor_version"],
-                            "descriptor_digest": item["descriptor_digest"],
-                            "readiness_snapshot_id": item["readiness_snapshot_id"],
-                        },
-                        "eligibility": {
-                            "eligibility_id": item["eligibility_id"],
-                            "status": "eligible",
-                            "decision_digest": item["eligibility_digest"],
-                        },
-                        "binding_digest": item["binding_digest"],
-                        "planned_container": options["preferred_container"],
-                        "estimated_size_bytes": item["representation"].get(
-                            "estimated_size_bytes"
-                        ),
-                        "risks": [
-                            {
-                                "code": "PUBLIC_NETWORK_ACCESS",
-                                "level": "low",
-                                "message": "将按服务端绑定的来源能力访问公开来源并写入隔离任务目录",
-                            }
-                        ],
-                    }
-                    for item in normalized_capability_items
-                ],
-            }
-            connection.execute(
-                "UPDATE flows SET status = 'prepared', updated_at = ? WHERE flow_id = ?",
-                (now, flow_id),
-            )
-            self._audit_in_transaction(
-                connection,
-                flow_id,
-                "download.prepare",
-                plan_id,
-                {"selection_version": selection_version, "plan_digest": plan_digest},
-                now,
-            )
-            self._put_idempotency_in_transaction(
-                connection,
-                scope,
-                idempotency_key,
-                request_hash,
-                plan_id,
-                result,
-                now,
-            )
-        return result
 
     def get_result_set(self, result_set_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
@@ -3410,525 +2653,6 @@ class Store:
         result["resource_ids"] = _load(result.pop("selected_ids_json"), [])
         return result
 
-    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM download_plans WHERE plan_id = ?", (plan_id,)
-            ).fetchone()
-            item_rows = (
-                connection.execute(
-                    """
-                    SELECT * FROM download_plan_items
-                    WHERE plan_id = ? ORDER BY position, resource_id
-                    """,
-                    (plan_id,),
-                ).fetchall()
-                if row is not None
-                else []
-            )
-        if row is None:
-            return None
-        result = dict(row)
-        result["resource_ids"] = _load(result.pop("resource_ids_json"), [])
-        result["options"] = _load(result.pop("options_json"), {})
-        capability_items: list[dict[str, Any]] = []
-        for item_row in item_rows:
-            item = dict(item_row)
-            item.pop("plan_id", None)
-            item["representation"] = _load(item.pop("representation_json"), {})
-            capability_items.append(item)
-        result["capability_items"] = capability_items
-        result["capability_binding_version"] = (
-            "capability-binding-v1" if capability_items else None
-        )
-        result["authority_digest"] = (
-            self._request_digest(capability_items) if capability_items else None
-        )
-        return result
-
-    def reserve_job(
-        self,
-        plan_id: str,
-        confirmation_hash: str,
-        idempotency_key: str,
-        request_hash: str,
-        now: str,
-        *,
-        bindings: Mapping[str, Any],
-        execution_bindings: list[dict[str, Any]] | None = None,
-    ) -> tuple[dict[str, Any], bool]:
-        """Atomically create a Job from freshly revalidated authority.
-
-        Plan evidence proves what the user confirmed; ``execution_bindings``
-        prove what the server observed immediately before execution.  The two
-        chains are validated and retained independently.  No expired Plan
-        readiness/eligibility fact is ever treated as an execution credential.
-        """
-
-        scope = "download.start"
-        checked_now = self._normalize_authority_timestamp(now, "now")
-        with self.transaction(immediate=True) as connection:
-            previous = connection.execute(
-                """
-                SELECT result_id, request_hash
-                FROM idempotency_keys WHERE scope = ? AND key = ?
-                """,
-                (scope, idempotency_key),
-            ).fetchone()
-            if previous is not None:
-                if previous["request_hash"] != request_hash:
-                    raise ValueError("idempotency_conflict")
-                job = connection.execute(
-                    "SELECT * FROM jobs WHERE job_id = ?", (previous["result_id"],)
-                ).fetchone()
-                if job is None:
-                    raise RuntimeError("idempotency record points to a missing job")
-                if job["plan_id"] != plan_id:
-                    raise ValueError("idempotency_conflict")
-                rows = connection.execute(
-                    """
-                    SELECT * FROM job_execution_items
-                    WHERE job_id = ? ORDER BY position, resource_id
-                    """,
-                    (job["job_id"],),
-                ).fetchall()
-                if not rows:
-                    raise RuntimeError("execution_binding_missing")
-                # An already-created Job owns an immutable execution snapshot.
-                # A replay never consumes or compares a newly observed
-                # readiness/eligibility fact: the idempotency record and the
-                # persisted execution rows are the complete authority for the
-                # already-accepted request.  Re-probing belongs only to a new
-                # reservation with a new idempotency identity.
-                return self._decode_job(job), True
-
-            plan = connection.execute(
-                "SELECT * FROM download_plans WHERE plan_id = ?", (plan_id,)
-            ).fetchone()
-            if plan is None:
-                raise LookupError("plan_not_found")
-            if not isinstance(bindings, Mapping):
-                raise RuntimeError("plan_binding_mismatch")
-            try:
-                bound_presented_version = int(bindings.get("presented_version"))
-                bound_selection_version = int(bindings.get("selection_version"))
-            except (TypeError, ValueError) as exc:
-                raise RuntimeError("plan_binding_mismatch") from exc
-            if (
-                plan["presentation_id"] != bindings.get("presentation_id")
-                or int(plan["presented_version"]) != bound_presented_version
-                or int(plan["selection_version"]) != bound_selection_version
-                or plan["selection_digest"] != bindings.get("selection_digest")
-                or plan["plan_digest"] != bindings.get("plan_digest")
-            ):
-                raise RuntimeError("plan_binding_mismatch")
-            if plan["confirmation_hash"] != confirmation_hash:
-                raise PermissionError("confirmation_invalid")
-            if bool(plan["used"]):
-                raise RuntimeError("plan_used")
-            if (
-                self._normalize_authority_timestamp(
-                    plan["expires_at"], "plan_expires_at"
-                )
-                <= checked_now
-            ):
-                raise TimeoutError("plan_expired")
-
-            plan_ids = _load(plan["resource_ids_json"], [])
-            if (
-                not isinstance(plan_ids, list)
-                or not plan_ids
-                or any(not isinstance(item, str) or not item for item in plan_ids)
-            ):
-                raise RuntimeError("capability_binding_missing")
-            authority_rows = connection.execute(
-                """
-                SELECT * FROM download_plan_items
-                WHERE plan_id = ? ORDER BY position, resource_id
-                """,
-                (plan_id,),
-            ).fetchall()
-            if (
-                len(authority_rows) != len(plan_ids)
-                or [str(row["resource_id"]) for row in authority_rows] != plan_ids
-            ):
-                raise RuntimeError("capability_binding_missing")
-
-            placeholders = ",".join("?" for _ in plan_ids)
-            resource_rows = connection.execute(
-                f"""
-                SELECT resource_id, flow_id, platform
-                FROM resources
-                WHERE flow_id = ? AND resource_id IN ({placeholders})
-                """,
-                (plan["flow_id"], *plan_ids),
-            ).fetchall()
-            resources = {str(row["resource_id"]): row for row in resource_rows}
-            if set(resources) != set(plan_ids):
-                raise RuntimeError("capability_binding_missing")
-
-            authority_projection: list[dict[str, Any]] = []
-            historical_eligibility: dict[str, dict[str, Any]] = {}
-            for authority_row in authority_rows:
-                projection = self._decode_plan_authority_row(authority_row)
-                readiness_row = connection.execute(
-                    """
-                    SELECT * FROM capability_readiness_snapshots
-                    WHERE snapshot_id = ?
-                    """,
-                    (projection["readiness_snapshot_id"],),
-                ).fetchone()
-                eligibility_row = connection.execute(
-                    """
-                    SELECT * FROM eligibility_decisions
-                    WHERE eligibility_id = ?
-                    """,
-                    (projection["eligibility_id"],),
-                ).fetchone()
-                if readiness_row is None or eligibility_row is None:
-                    raise RuntimeError("capability_binding_missing")
-
-                readiness, readiness_digest = self._decode_readiness_authority(
-                    readiness_row
-                )
-                eligibility, eligibility_digest = self._decode_eligibility_authority(
-                    eligibility_row
-                )
-                expected_action = self._eligibility_action_for_strategy(
-                    str(projection["strategy"])
-                )
-                resource = resources[str(projection["resource_id"])]
-                if readiness["status"] != "ready" or eligibility["status"] != "eligible":
-                    raise RuntimeError("capability_binding_conflict")
-                if (
-                    projection["readiness_digest"] != readiness_digest
-                    or projection["eligibility_digest"] != eligibility_digest
-                    or projection["capability_id"] != readiness["capability_id"]
-                    or projection["capability_id"] != eligibility["capability_id"]
-                    or projection["descriptor_version"]
-                    != readiness["descriptor_version"]
-                    or projection["descriptor_digest"]
-                    != readiness["descriptor_digest"]
-                    or projection["descriptor_digest"]
-                    != eligibility["descriptor_digest"]
-                    or projection["registry_version"] != readiness["registry_version"]
-                    or projection["registry_digest"] != readiness["registry_digest"]
-                    or projection["provider_id"] != readiness["provider_id"]
-                    or projection["provider_version"] != readiness["provider_version"]
-                    or projection["capability_scope"] != readiness["capability_scope"]
-                    or projection["strategy"] != readiness["strategy"]
-                    or projection["readiness_snapshot_id"]
-                    != eligibility["readiness_snapshot_id"]
-                    or projection["resource_id"] != eligibility["resource_id"]
-                    or projection["resolution_id"] != eligibility["resolution_id"]
-                    or projection["representation_id"]
-                    != eligibility["representation_id"]
-                    or projection["source_fingerprint"]
-                    != eligibility["source_fingerprint"]
-                    or eligibility["flow_id"] != plan["flow_id"]
-                    or eligibility["action"] != expected_action
-                    or readiness["platform_id"] != resource["platform"]
-                ):
-                    raise RuntimeError("capability_binding_conflict")
-
-                binding_material = dict(projection)
-                stored_binding_digest = str(binding_material.pop("binding_digest"))
-                if stored_binding_digest != self._request_digest(binding_material):
-                    raise RuntimeError("capability_binding_conflict")
-                authority_projection.append(projection)
-                historical_eligibility[str(projection["resource_id"])] = eligibility
-
-            authority_digest = self._request_digest(authority_projection)
-            if bindings.get("authority_digest") != authority_digest:
-                raise RuntimeError("plan_binding_mismatch")
-            expected_plan_digest = self._request_digest(
-                {
-                    "flow_id": plan["flow_id"],
-                    "presentation_id": plan["presentation_id"],
-                    "presented_version": int(plan["presented_version"]),
-                    "selection_version": int(plan["selection_version"]),
-                    "selection_digest": plan["selection_digest"],
-                    "resource_ids": plan_ids,
-                    "options": _load(plan["options_json"], {}),
-                    "authority_digest": authority_digest,
-                    "capability_items": authority_projection,
-                }
-            )
-            if (
-                plan["plan_digest"] != expected_plan_digest
-                or bindings.get("plan_digest") != expected_plan_digest
-            ):
-                raise RuntimeError("plan_binding_mismatch")
-
-            normalized_execution = self._normalize_execution_bindings(
-                execution_bindings,
-                resource_ids=plan_ids,
-            )
-            execution_rows: list[dict[str, Any]] = []
-            stable_fields = (
-                "position",
-                "resource_id",
-                "resolution_id",
-                "representation_id",
-                "capability_scope",
-                "strategy",
-                "provider_id",
-                "provider_version",
-                "capability_id",
-                "descriptor_version",
-                "descriptor_digest",
-                "registry_version",
-                "registry_digest",
-                "source_fingerprint",
-                "representation",
-            )
-            for plan_item, execution in zip(
-                authority_projection, normalized_execution, strict=True
-            ):
-                if any(execution[field] != plan_item[field] for field in stable_fields):
-                    raise RuntimeError("execution_binding_conflict")
-
-                readiness_row = connection.execute(
-                    """
-                    SELECT * FROM capability_readiness_snapshots
-                    WHERE snapshot_id = ?
-                    """,
-                    (execution["readiness_snapshot_id"],),
-                ).fetchone()
-                eligibility_row = connection.execute(
-                    """
-                    SELECT * FROM eligibility_decisions
-                    WHERE eligibility_id = ?
-                    """,
-                    (execution["eligibility_id"],),
-                ).fetchone()
-                if readiness_row is None or eligibility_row is None:
-                    raise RuntimeError("execution_binding_missing")
-                readiness, readiness_digest = self._decode_readiness_authority(
-                    readiness_row
-                )
-                eligibility, eligibility_digest = self._decode_eligibility_authority(
-                    eligibility_row
-                )
-                readiness_observed = self._normalize_authority_timestamp(
-                    readiness["observed_at"], "readiness_observed_at"
-                )
-                readiness_expires = self._normalize_authority_timestamp(
-                    readiness["expires_at"], "readiness_expires_at"
-                )
-                if readiness["status"] != "ready":
-                    raise RuntimeError("readiness_not_ready")
-                if readiness_expires <= checked_now:
-                    raise RuntimeError("readiness_expired")
-                if readiness_observed > checked_now:
-                    raise RuntimeError("readiness_drift")
-
-                expected_action = self._eligibility_action_for_strategy(
-                    str(execution["strategy"])
-                )
-                eligibility_evaluated = self._normalize_authority_timestamp(
-                    eligibility["evaluated_at"], "eligibility_evaluated_at"
-                )
-                eligibility_expires = self._normalize_authority_timestamp(
-                    eligibility["expires_at"], "eligibility_expires_at"
-                )
-                if eligibility["status"] != "eligible":
-                    raise RuntimeError("eligibility_required")
-                if eligibility_expires <= checked_now:
-                    raise RuntimeError("eligibility_expired")
-                if eligibility_evaluated > checked_now:
-                    raise RuntimeError("eligibility_drift")
-
-                resource = resources[str(execution["resource_id"])]
-                if (
-                    execution["readiness_digest"] != readiness_digest
-                    or execution["eligibility_digest"] != eligibility_digest
-                    or execution["capability_id"] != readiness["capability_id"]
-                    or execution["capability_id"] != eligibility["capability_id"]
-                    or execution["descriptor_version"]
-                    != readiness["descriptor_version"]
-                    or execution["descriptor_digest"]
-                    != readiness["descriptor_digest"]
-                    or execution["descriptor_digest"]
-                    != eligibility["descriptor_digest"]
-                    or execution["registry_version"] != readiness["registry_version"]
-                    or execution["registry_digest"] != readiness["registry_digest"]
-                    or execution["provider_id"] != readiness["provider_id"]
-                    or execution["provider_version"] != readiness["provider_version"]
-                    or execution["capability_scope"] != readiness["capability_scope"]
-                    or execution["strategy"] != readiness["strategy"]
-                    or execution["readiness_snapshot_id"]
-                    != eligibility["readiness_snapshot_id"]
-                    or execution["resource_id"] != eligibility["resource_id"]
-                    or execution["resolution_id"] != eligibility["resolution_id"]
-                    or execution["representation_id"]
-                    != eligibility["representation_id"]
-                    or execution["source_fingerprint"]
-                    != eligibility["source_fingerprint"]
-                    or eligibility["flow_id"] != plan["flow_id"]
-                    or eligibility["action"] != expected_action
-                    or readiness["platform_id"] != resource["platform"]
-                ):
-                    raise RuntimeError("execution_binding_conflict")
-
-                original_eligibility = historical_eligibility[
-                    str(execution["resource_id"])
-                ]
-                if (
-                    eligibility["policy_class"]
-                    != original_eligibility["policy_class"]
-                    or eligibility["reason_codes"]
-                    != original_eligibility["reason_codes"]
-                ):
-                    raise RuntimeError("eligibility_drift")
-
-                resolution_id = execution.get("resolution_id")
-                if not isinstance(resolution_id, str) or not resolution_id:
-                    raise RuntimeError("resolution_stale")
-                resolution = connection.execute(
-                    """
-                    SELECT * FROM resource_resolutions
-                    WHERE resolution_id = ? AND flow_id = ? AND resource_id = ?
-                    """,
-                    (resolution_id, plan["flow_id"], execution["resource_id"]),
-                ).fetchone()
-                try:
-                    persisted_source_fingerprint = (
-                        self._canonicalize_source_fingerprint(
-                            resolution["source_fingerprint"],
-                            "resolution_source_fingerprint",
-                        )
-                        if resolution is not None
-                        else None
-                    )
-                except ValueError:
-                    persisted_source_fingerprint = None
-                if (
-                    resolution is None
-                    or resolution["resolution_status"]
-                    not in RESOLUTION_CACHEABLE_STATUSES
-                    or persisted_source_fingerprint != execution["source_fingerprint"]
-                ):
-                    raise RuntimeError("resolution_stale")
-                resolved = _load(resolution["resolved_json"], {})
-                if not isinstance(resolved, Mapping):
-                    raise RuntimeError("resolution_stale")
-                observed_representation = self._resolution_representation_evidence(
-                    resolved,
-                    resource_id=str(execution["resource_id"]),
-                    resolution_id=resolution_id,
-                    representation_id=str(execution["representation_id"]),
-                )
-                self._assert_representation_evidence_matches(
-                    execution["representation"], observed_representation
-                )
-
-                execution_rows.append(
-                    {
-                        **execution,
-                        "plan_binding_digest": plan_item["binding_digest"],
-                        "execution_binding_digest": execution["binding_digest"],
-                    }
-                )
-
-            selection = connection.execute(
-                "SELECT * FROM selections WHERE flow_id = ?", (plan["flow_id"],)
-            ).fetchone()
-            flow = connection.execute(
-                "SELECT * FROM flows WHERE flow_id = ?", (plan["flow_id"],)
-            ).fetchone()
-            if (
-                selection is None
-                or flow is None
-                or selection["status"] != "selected"
-                or selection["presentation_id"] != plan["presentation_id"]
-                or flow["current_presentation_id"] != plan["presentation_id"]
-                or int(selection["presented_version"])
-                != int(plan["presented_version"])
-                or int(flow["presented_version"]) != int(plan["presented_version"])
-                or int(selection["selection_version"])
-                != int(plan["selection_version"])
-                or int(flow["selection_version"]) != int(plan["selection_version"])
-                or selection["selection_digest"] != plan["selection_digest"]
-                or _load(selection["selected_ids_json"], []) != plan_ids
-            ):
-                raise RuntimeError("selection_changed")
-
-            job_id = new_id("job")
-            connection.execute(
-                """
-                INSERT INTO jobs(
-                    job_id, flow_id, plan_id, status, progress, created_at, updated_at
-                ) VALUES (?, ?, ?, 'queued', 0, ?, ?)
-                """,
-                (job_id, plan["flow_id"], plan_id, checked_now, checked_now),
-            )
-            for item in execution_rows:
-                connection.execute(
-                    """
-                    INSERT INTO job_execution_items(
-                        job_id, plan_id, position, resource_id, resolution_id,
-                        representation_id, capability_scope, strategy,
-                        provider_id, provider_version, capability_id,
-                        descriptor_version, descriptor_digest, registry_version,
-                        registry_digest, readiness_snapshot_id, readiness_digest,
-                        eligibility_id, eligibility_digest, source_fingerprint,
-                        representation_json, plan_binding_digest,
-                        execution_binding_digest, revalidated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                              ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        job_id,
-                        plan_id,
-                        item["position"],
-                        item["resource_id"],
-                        item["resolution_id"],
-                        item["representation_id"],
-                        item["capability_scope"],
-                        item["strategy"],
-                        item["provider_id"],
-                        item["provider_version"],
-                        item["capability_id"],
-                        item["descriptor_version"],
-                        item["descriptor_digest"],
-                        item["registry_version"],
-                        item["registry_digest"],
-                        item["readiness_snapshot_id"],
-                        item["readiness_digest"],
-                        item["eligibility_id"],
-                        item["eligibility_digest"],
-                        item["source_fingerprint"],
-                        _json(item["representation"]),
-                        item["plan_binding_digest"],
-                        item["execution_binding_digest"],
-                        checked_now,
-                    ),
-                )
-            cursor = connection.execute(
-                """
-                UPDATE download_plans SET used = 1
-                WHERE plan_id = ? AND used = 0
-                """,
-                (plan_id,),
-            )
-            if cursor.rowcount != 1:
-                raise RuntimeError("plan_used")
-            connection.execute(
-                "INSERT INTO idempotency_keys VALUES (?, ?, ?, ?, NULL, ?)",
-                (scope, idempotency_key, request_hash, job_id, checked_now),
-            )
-            connection.execute(
-                "UPDATE flows SET status = 'downloading', updated_at = ? WHERE flow_id = ?",
-                (checked_now, plan["flow_id"]),
-            )
-            row = connection.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-        if row is None:  # pragma: no cover - transaction invariant
-            raise RuntimeError("failed to reserve job")
-        return self._decode_job(row), False
-
     def _decode_job(self, row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
         result["asset_ids"] = _load(result.pop("asset_ids_json"), [])
@@ -3941,72 +2665,6 @@ class Store:
                 "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
             ).fetchone()
         return self._decode_job(row) if row is not None else None
-
-    @staticmethod
-    def _decode_job_execution_item(row: sqlite3.Row) -> dict[str, Any]:
-        item = dict(row)
-        resource = {
-            "resource_id": item["resource_id"],
-            "platform": item.pop("_resource_platform"),
-            "title": item.pop("_resource_title"),
-            "source_url": item.pop("_resource_source_url"),
-            "resource_type": item.pop("_resource_type"),
-            "summary": item.pop("_resource_summary"),
-            "metadata": _load(item.pop("_resource_metadata_json"), {}),
-            "identity": _load(item.pop("_resource_identity_json"), {}),
-        }
-        item["resource"] = resource
-        item["representation"] = _load(item.pop("representation_json"), {})
-        # ``binding_digest`` is a compatibility projection for the acquisition
-        # request boundary.  The normalized names remain authoritative and are
-        # always returned alongside it for Plan-vs-execution traceability.
-        item["binding_digest"] = item["execution_binding_digest"]
-        return item
-
-    def get_job_execution_items(self, job_id: str) -> list[dict[str, Any]]:
-        """Return the immutable executable authority owned by one Job.
-
-        The nested Resource snapshot supplies a provider's bounded input, but
-        all routing facts (strategy, scope, Provider and authority digests)
-        continue to come exclusively from the persisted execution row.  Legacy
-        Jobs remain readable through :meth:`get_job`, but cannot be executed.
-        """
-
-        with self._connect() as connection:
-            job = connection.execute(
-                "SELECT job_id FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            if job is None:
-                raise KeyError("job_not_found")
-            rows = connection.execute(
-                """
-                SELECT execution.*,
-                       resources.platform AS _resource_platform,
-                       resources.title AS _resource_title,
-                       resources.source_url AS _resource_source_url,
-                       resources.resource_type AS _resource_type,
-                       resources.summary AS _resource_summary,
-                       resources.metadata_json AS _resource_metadata_json,
-                       resources.identity_json AS _resource_identity_json
-                FROM job_execution_items AS execution
-                INNER JOIN resources
-                    ON resources.resource_id = execution.resource_id
-                WHERE execution.job_id = ?
-                ORDER BY execution.position, execution.resource_id
-                """,
-                (job_id,),
-            ).fetchall()
-        if not rows:
-            raise RuntimeError("execution_binding_missing")
-        return [self._decode_job_execution_item(row) for row in rows]
-
-    @staticmethod
-    def _decode_acquisition_outcome(row: sqlite3.Row) -> dict[str, Any]:
-        result = dict(row)
-        result["retriable"] = bool(result["retriable"])
-        result["asset_ids"] = _load(result.pop("asset_ids_json"), [])
-        result["metadata"] = _load(result.pop("metadata_json"), {})
-        return result
 
     @classmethod
     def _normalize_outcome_metadata(cls, value: Any) -> dict[str, Any]:
@@ -4028,438 +2686,6 @@ class Store:
         if len(encoded.encode("utf-8")) > 64 * 1024:
             raise ValueError("acquisition_outcome_metadata_too_large")
         return decoded
-
-    def start_acquisition_outcome(
-        self,
-        job_id: str,
-        resource_id: str,
-        *,
-        metadata: Mapping[str, Any] | None = None,
-        started_at: str | None = None,
-    ) -> dict[str, Any]:
-        """Create the immutable planned-vs-actual record for one job item.
-
-        Authority is read only from ``job_execution_items``.  Plan evidence is
-        retained for traceability, while the independently revalidated
-        execution digest proves the exact authority that started this Job.  A
-        caller cannot submit or strengthen Provider, strategy, scope or either
-        binding digest.
-        """
-
-        normalized_metadata = self._normalize_outcome_metadata(metadata)
-        observed_at = started_at or utc_now()
-        with self.transaction(immediate=True) as connection:
-            job = connection.execute(
-                "SELECT plan_id, status FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            if job is None:
-                raise KeyError("job_not_found")
-            authority = connection.execute(
-                """
-                SELECT plan_id, plan_binding_digest, execution_binding_digest,
-                       capability_scope, strategy, provider_id, provider_version
-                FROM job_execution_items
-                WHERE job_id = ? AND resource_id = ?
-                """,
-                (job_id, resource_id),
-            ).fetchone()
-            if authority is None:
-                # Migration 7 intentionally leaves every legacy Job without
-                # execution rows, even when a historical Plan or Outcome is
-                # still readable.  Never reconstruct authority from either.
-                raise RuntimeError("execution_binding_missing")
-
-            existing = connection.execute(
-                """
-                SELECT * FROM acquisition_outcomes
-                WHERE job_id = ? AND resource_id = ?
-                """,
-                (job_id, resource_id),
-            ).fetchone()
-            if existing is not None:
-                result = self._decode_acquisition_outcome(existing)
-                if result["metadata"] != normalized_metadata:
-                    raise ValueError("acquisition_outcome_conflict")
-                return result
-            job_status = str(job["status"])
-            if job_status in {"cancelling", "cancelled"}:
-                raise ValueError("job_cancelling")
-            if job_status != "running":
-                # Starting new work after the Job reached a terminal state
-                # (or before the runner has started) would manufacture a running
-                # fact that the Job cannot execute. Existing outcomes remain
-                # replayable above.
-                raise ValueError("acquisition_outcome_conflict")
-
-            outcome_id = new_id("outcome")
-            projection = {
-                "outcome_id": outcome_id,
-                "job_id": job_id,
-                "plan_id": str(authority["plan_id"]),
-                "resource_id": resource_id,
-                "plan_binding_digest": str(authority["plan_binding_digest"]),
-                "execution_binding_digest": str(authority["execution_binding_digest"]),
-                "planned_scope": str(authority["capability_scope"]),
-                "planned_strategy": str(authority["strategy"]),
-                "planned_provider_id": str(authority["provider_id"]),
-                "planned_provider_version": str(authority["provider_version"]),
-                "actual_scope": None,
-                "actual_strategy": None,
-                "actual_provider_id": None,
-                "actual_provider_version": None,
-                "status": "running",
-                "failure_code": None,
-                "failure_message": None,
-                "retriable": False,
-                "bundle_id": None,
-                "asset_ids": [],
-                "metadata": normalized_metadata,
-                "started_at": observed_at,
-                "completed_at": None,
-            }
-            projection["outcome_digest"] = self._request_digest(projection)
-            connection.execute(
-                """
-                INSERT INTO acquisition_outcomes(
-                    outcome_id, job_id, plan_id, resource_id,
-                    plan_binding_digest, execution_binding_digest,
-                    planned_scope, planned_strategy, planned_provider_id,
-                    planned_provider_version, actual_scope, actual_strategy,
-                    actual_provider_id, actual_provider_version, status,
-                    failure_code, failure_message, retriable, bundle_id,
-                    asset_ids_json, metadata_json, started_at, completed_at,
-                    outcome_digest
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL,
-                          'running', NULL, NULL, 0, NULL, '[]', ?, ?, NULL, ?)
-                """,
-                (
-                    outcome_id,
-                    job_id,
-                    projection["plan_id"],
-                    resource_id,
-                    projection["plan_binding_digest"],
-                    projection["execution_binding_digest"],
-                    projection["planned_scope"],
-                    projection["planned_strategy"],
-                    projection["planned_provider_id"],
-                    projection["planned_provider_version"],
-                    _json(normalized_metadata),
-                    observed_at,
-                    projection["outcome_digest"],
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM acquisition_outcomes WHERE outcome_id = ?",
-                (outcome_id,),
-            ).fetchone()
-        if row is None:  # pragma: no cover - transaction invariant
-            raise RuntimeError("failed_to_create_acquisition_outcome")
-        return self._decode_acquisition_outcome(row)
-
-    def complete_acquisition_outcome(
-        self,
-        job_id: str,
-        resource_id: str,
-        *,
-        status: str,
-        actual_scope: str | None,
-        actual_strategy: str | None,
-        actual_provider_id: str | None,
-        actual_provider_version: str | None,
-        bundle_id: str | None = None,
-        asset_ids: list[str] | None = None,
-        failure_code: str | None = None,
-        failure_message: str | None = None,
-        retriable: bool = False,
-        metadata: Mapping[str, Any] | None = None,
-        completed_at: str | None = None,
-    ) -> dict[str, Any]:
-        """Finish one outcome without permitting Provider or scope drift.
-
-        A terminal outcome is immutable.  Repeating the exact completion is
-        idempotent; attempting to overwrite it with a different fact is a
-        conflict.  Successful/partial outcomes may only reference Asset and
-        Bundle rows generated by this Store for the same job/resource.
-        """
-
-        normalized_status = str(status).strip().lower()
-        if normalized_status not in ACQUISITION_OUTCOME_STATUSES - {"running"}:
-            raise ValueError("invalid_acquisition_outcome_status")
-        if not isinstance(retriable, bool):
-            raise ValueError("invalid_acquisition_outcome_retriable")
-        normalized_metadata = self._normalize_outcome_metadata(metadata)
-        normalized_asset_ids = list(asset_ids or [])
-        if (
-            len(normalized_asset_ids) != len(set(normalized_asset_ids))
-            or any(not isinstance(asset_id, str) or not asset_id for asset_id in normalized_asset_ids)
-        ):
-            raise ValueError("invalid_acquisition_outcome_assets")
-        finished_at = completed_at or utc_now()
-
-        with self.transaction(immediate=True) as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM acquisition_outcomes
-                WHERE job_id = ? AND resource_id = ?
-                """,
-                (job_id, resource_id),
-            ).fetchone()
-            if row is None:
-                raise LookupError("acquisition_outcome_not_started")
-            current = self._decode_acquisition_outcome(row)
-            if current["status"] != "running" and completed_at is None:
-                # Idempotent terminal replay must reproduce the original fact
-                # exactly instead of inventing a new completion timestamp.
-                finished_at = str(current["completed_at"])
-
-            planned_scope = str(current["planned_scope"])
-            planned_strategy = str(current["planned_strategy"])
-            planned_provider_id = str(current["planned_provider_id"])
-            planned_provider_version = str(current["planned_provider_version"])
-            for value, field in (
-                (actual_scope, "actual_scope"),
-                (actual_strategy, "actual_strategy"),
-                (actual_provider_id, "actual_provider_id"),
-                (actual_provider_version, "actual_provider_version"),
-            ):
-                if value is not None:
-                    self._bounded_authority_text(value, field)
-
-            if actual_provider_id is not None and actual_provider_id != planned_provider_id:
-                raise RuntimeError("provider_binding_conflict")
-            if (
-                actual_provider_version is not None
-                and actual_provider_version != planned_provider_version
-            ):
-                raise RuntimeError("provider_binding_conflict")
-            if actual_strategy is not None and actual_strategy != planned_strategy:
-                raise RuntimeError("strategy_binding_conflict")
-            if actual_scope is not None:
-                if actual_scope not in CAPABILITY_SCOPES:
-                    raise ValueError("invalid_capability_scope")
-                if CAPABILITY_SCOPE_STRENGTH[actual_scope] > CAPABILITY_SCOPE_STRENGTH[planned_scope]:
-                    raise RuntimeError("capability_scope_upgrade")
-                if (
-                    normalized_status in {"succeeded", "partial"}
-                    and actual_scope != planned_scope
-                ):
-                    # A successful fact must prove the exact execution scope.
-                    # Reporting a weaker scope is not success under the bound
-                    # capability; it is an outcome mismatch, not a fallback.
-                    raise ValueError("acquisition_outcome_conflict")
-
-            if failure_code is not None:
-                failure_code = self._bounded_authority_text(
-                    failure_code, "failure_code", maximum=128
-                )
-            if failure_message is not None:
-                failure_message = self._bounded_authority_text(
-                    failure_message, "failure_message", maximum=1024
-                )
-            if normalized_status in {"failed", "cancelled"} and failure_code is None:
-                raise ValueError("acquisition_outcome_failure_missing")
-
-            completed = {
-                **current,
-                "actual_scope": actual_scope,
-                "actual_strategy": actual_strategy,
-                "actual_provider_id": actual_provider_id,
-                "actual_provider_version": actual_provider_version,
-                "status": normalized_status,
-                "failure_code": failure_code,
-                "failure_message": failure_message,
-                "retriable": retriable,
-                "bundle_id": bundle_id,
-                "asset_ids": normalized_asset_ids,
-                "metadata": normalized_metadata,
-                "completed_at": finished_at,
-            }
-            completed.pop("outcome_digest", None)
-            completed["outcome_digest"] = self._request_digest(completed)
-
-            if current["status"] != "running":
-                # A terminal Outcome is an immutable historical fact.  Its
-                # exact replay must not depend on the live Bundle graph because
-                # a later parent Job failure/cancellation may legitimately
-                # quarantine that graph without rewriting the Outcome.
-                if current != completed:
-                    raise ValueError("acquisition_outcome_conflict")
-                return current
-
-            job = connection.execute(
-                "SELECT status FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            if job is None:
-                raise KeyError("job_not_found")
-            job_status = str(job["status"])
-            if job_status in {"cancelling", "cancelled"}:
-                raise ValueError("job_cancelling")
-            if job_status != "running":
-                raise ValueError("acquisition_outcome_conflict")
-            if normalized_status == "cancelled":
-                # Only finalize_job_cancellation may publish cancellation,
-                # after request_job_cancellation persisted the authoritative
-                # ``cancelling`` fact for the whole Job graph.
-                raise ValueError("acquisition_outcome_conflict")
-
-            if normalized_status in {"succeeded", "partial"}:
-                if (
-                    actual_scope is None
-                    or actual_strategy is None
-                    or actual_provider_id is None
-                    or actual_provider_version is None
-                    or bundle_id is None
-                    or not normalized_asset_ids
-                ):
-                    raise ValueError("acquisition_outcome_evidence_missing")
-                bundle, ready_asset_ids, ready_primary_ids = self._bundle_asset_evidence(
-                    connection, bundle_id, job_id, resource_id
-                )
-                expected_bundle_status = (
-                    "succeeded" if normalized_status == "succeeded" else "partial"
-                )
-                expected_completion = (
-                    "complete" if normalized_status == "succeeded" else "partial"
-                )
-                if (
-                    str(bundle["status"]) != expected_bundle_status
-                    or str(bundle["completion"]) != expected_completion
-                ):
-                    raise ValueError("acquisition_outcome_bundle_mismatch")
-                if (
-                    len(ready_primary_ids) != 1
-                    or ready_asset_ids != normalized_asset_ids
-                ):
-                    raise ValueError("acquisition_outcome_asset_mismatch")
-            else:
-                if bundle_id is not None or normalized_asset_ids:
-                    raise ValueError("acquisition_outcome_assets_forbidden")
-
-            if normalized_status == "failed":
-                self._quarantine_resource_bundle_in_transaction(
-                    connection,
-                    job_id,
-                    resource_id,
-                    bundle_status="failed",
-                    updated_at=finished_at,
-                )
-
-            connection.execute(
-                """
-                UPDATE acquisition_outcomes
-                SET actual_scope = ?, actual_strategy = ?, actual_provider_id = ?,
-                    actual_provider_version = ?, status = ?, failure_code = ?,
-                    failure_message = ?, retriable = ?, bundle_id = ?,
-                    asset_ids_json = ?, metadata_json = ?, completed_at = ?,
-                    outcome_digest = ?
-                WHERE outcome_id = ? AND status = 'running'
-                """,
-                (
-                    actual_scope,
-                    actual_strategy,
-                    actual_provider_id,
-                    actual_provider_version,
-                    normalized_status,
-                    failure_code,
-                    failure_message,
-                    1 if retriable else 0,
-                    bundle_id,
-                    _json(normalized_asset_ids),
-                    _json(normalized_metadata),
-                    finished_at,
-                    completed["outcome_digest"],
-                    current["outcome_id"],
-                ),
-            )
-            updated = connection.execute(
-                "SELECT * FROM acquisition_outcomes WHERE outcome_id = ?",
-                (current["outcome_id"],),
-            ).fetchone()
-        if updated is None:  # pragma: no cover - transaction invariant
-            raise RuntimeError("failed_to_complete_acquisition_outcome")
-        return self._decode_acquisition_outcome(updated)
-
-    def _finalize_running_acquisition_outcomes_in_transaction(
-        self,
-        connection: sqlite3.Connection,
-        job_id: str,
-        *,
-        status: str,
-        failure_code: str,
-        failure_message: str | None,
-        retriable: bool,
-        completed_at: str,
-    ) -> list[dict[str, Any]]:
-        """Close all running outcomes for one Job on an existing transaction.
-
-        This helper is intentionally limited to failure/cancellation cleanup.
-        Successful outcomes require exact Provider facts plus persisted Bundle
-        and Asset evidence and must continue to use
-        :meth:`complete_acquisition_outcome`.
-        """
-
-        normalized_status = str(status).strip().lower()
-        if normalized_status not in {"failed", "cancelled"}:
-            raise ValueError("invalid_acquisition_outcome_cleanup_status")
-        if not isinstance(retriable, bool):
-            raise ValueError("invalid_acquisition_outcome_retriable")
-        normalized_failure_code = self._bounded_authority_text(
-            failure_code, "failure_code", maximum=128
-        )
-        normalized_failure_message = None
-        if failure_message is not None:
-            normalized_failure_message = self._bounded_authority_text(
-                failure_message, "failure_message", maximum=1024
-            )
-
-        rows = connection.execute(
-            """
-            SELECT * FROM acquisition_outcomes
-            WHERE job_id = ? AND status = 'running'
-            ORDER BY started_at, outcome_id
-            """,
-            (job_id,),
-        ).fetchall()
-        finalized: list[dict[str, Any]] = []
-        for row in rows:
-            current = self._decode_acquisition_outcome(row)
-            terminal = {
-                **current,
-                "status": normalized_status,
-                "failure_code": normalized_failure_code,
-                "failure_message": normalized_failure_message,
-                "retriable": retriable,
-                # Failed/cancelled outcomes do not claim usable persisted
-                # evidence.  Detailed failed Bundle rows remain queryable by
-                # their authoritative Job x Resource relation.
-                "bundle_id": None,
-                "asset_ids": [],
-                "completed_at": completed_at,
-            }
-            terminal.pop("outcome_digest", None)
-            terminal["outcome_digest"] = self._request_digest(terminal)
-            cursor = connection.execute(
-                """
-                UPDATE acquisition_outcomes
-                SET status = ?, failure_code = ?, failure_message = ?,
-                    retriable = ?, bundle_id = NULL, asset_ids_json = '[]',
-                    completed_at = ?, outcome_digest = ?
-                WHERE outcome_id = ? AND status = 'running'
-                """,
-                (
-                    normalized_status,
-                    normalized_failure_code,
-                    normalized_failure_message,
-                    1 if retriable else 0,
-                    completed_at,
-                    terminal["outcome_digest"],
-                    current["outcome_id"],
-                ),
-            )
-            if cursor.rowcount != 1:  # pragma: no cover - write-lock invariant
-                raise RuntimeError("failed_to_finalize_running_acquisition_outcome")
-            finalized.append(terminal)
-        return finalized
 
     def finalize_running_acquisition_outcomes(
         self,
@@ -4499,30 +2725,6 @@ class Store:
                 retriable=retriable,
                 completed_at=finished_at,
             )
-
-    def get_acquisition_outcome(
-        self, job_id: str, resource_id: str
-    ) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM acquisition_outcomes
-                WHERE job_id = ? AND resource_id = ?
-                """,
-                (job_id, resource_id),
-            ).fetchone()
-        return self._decode_acquisition_outcome(row) if row is not None else None
-
-    def get_acquisition_outcomes_for_job(self, job_id: str) -> list[dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM acquisition_outcomes
-                WHERE job_id = ? ORDER BY started_at, outcome_id
-                """,
-                (job_id,),
-            ).fetchall()
-        return [self._decode_acquisition_outcome(row) for row in rows]
 
     def start_job_execution(
         self,
@@ -4660,162 +2862,6 @@ class Store:
             ).fetchone()
         if updated is None:  # pragma: no cover - transaction invariant
             raise RuntimeError("failed_to_request_job_cancellation")
-        return self._decode_job(updated)
-
-    def finalize_job_success(
-        self,
-        job_id: str,
-        *,
-        completed_at: str | None = None,
-    ) -> dict[str, Any]:
-        """Publish success only for a complete, internally consistent graph.
-
-        Every reserved execution item must have one terminal Outcome.  Usable
-        Outcomes must claim the exact ordered ready Asset projection of their
-        Bundle, including one ready primary, while failed/cancelled Outcomes may
-        not leave usable evidence behind.  The Job Asset list is rebuilt from
-        those canonical claims instead of replaying an append-only history.
-        """
-
-        finished_at = completed_at or utc_now()
-        with self.transaction(immediate=True) as connection:
-            row = connection.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError("job_not_found")
-            current_status = str(row["status"])
-            if current_status == "succeeded":
-                return self._decode_job(row)
-            if current_status in {"cancelling", "cancelled"}:
-                raise ValueError("job_cancelling")
-            if current_status != "running":
-                raise ValueError("job_not_succeedable")
-
-            execution_rows = connection.execute(
-                """
-                SELECT resource_id FROM job_execution_items
-                WHERE job_id = ? ORDER BY position, resource_id
-                """,
-                (job_id,),
-            ).fetchall()
-            if not execution_rows:
-                raise ValueError("job_outcome_incomplete")
-            execution_resource_ids = [
-                str(item["resource_id"]) for item in execution_rows
-            ]
-            outcome_rows = connection.execute(
-                """
-                SELECT * FROM acquisition_outcomes
-                WHERE job_id = ? ORDER BY started_at, outcome_id
-                """,
-                (job_id,),
-            ).fetchall()
-            outcomes_by_resource = {
-                str(item["resource_id"]): self._decode_acquisition_outcome(item)
-                for item in outcome_rows
-            }
-            if (
-                len(outcomes_by_resource) != len(outcome_rows)
-                or set(outcomes_by_resource) != set(execution_resource_ids)
-                or any(
-                    outcome["status"] == "running"
-                    for outcome in outcomes_by_resource.values()
-                )
-            ):
-                raise ValueError("job_outcome_incomplete")
-
-            claimed_asset_ids: list[str] = []
-            ready_primary_count = 0
-            for resource_id in execution_resource_ids:
-                outcome = outcomes_by_resource[resource_id]
-                outcome_status = str(outcome["status"])
-                if outcome_status in {"succeeded", "partial"}:
-                    bundle_id = outcome.get("bundle_id")
-                    if not isinstance(bundle_id, str) or not bundle_id:
-                        raise ValueError("job_asset_graph_conflict")
-                    try:
-                        bundle, ready_asset_ids, ready_primary_ids = (
-                            self._bundle_asset_evidence(
-                                connection, bundle_id, job_id, resource_id
-                            )
-                        )
-                    except ValueError as exc:
-                        raise ValueError("job_asset_graph_conflict") from exc
-                    expected_bundle_status = (
-                        "succeeded" if outcome_status == "succeeded" else "partial"
-                    )
-                    expected_completion = (
-                        "complete" if outcome_status == "succeeded" else "partial"
-                    )
-                    if (
-                        str(bundle["status"]) != expected_bundle_status
-                        or str(bundle["completion"]) != expected_completion
-                        or len(ready_primary_ids) != 1
-                        or outcome.get("asset_ids") != ready_asset_ids
-                    ):
-                        raise ValueError("job_asset_graph_conflict")
-                    claimed_asset_ids.extend(ready_asset_ids)
-                    ready_primary_count += len(ready_primary_ids)
-                    continue
-
-                bundle = connection.execute(
-                    """
-                    SELECT bundle_id, status FROM asset_bundles
-                    WHERE job_id = ? AND resource_id = ?
-                    """,
-                    (job_id, resource_id),
-                ).fetchone()
-                if bundle is None:
-                    continue
-                try:
-                    _, ready_asset_ids, _ = self._bundle_asset_evidence(
-                        connection,
-                        str(bundle["bundle_id"]),
-                        job_id,
-                        resource_id,
-                    )
-                except ValueError as exc:
-                    raise ValueError("job_asset_graph_conflict") from exc
-                if ready_asset_ids or str(bundle["status"]) not in {
-                    "failed",
-                    "cancelled",
-                    "quarantined",
-                }:
-                    raise ValueError("job_asset_graph_conflict")
-
-            if ready_primary_count < 1:
-                raise ValueError("job_success_without_primary")
-            if len(claimed_asset_ids) != len(set(claimed_asset_ids)):
-                raise ValueError("job_asset_graph_conflict")
-            ready_asset_rows = connection.execute(
-                """
-                SELECT asset_id FROM assets
-                WHERE job_id = ? AND status = 'ready'
-                """,
-                (job_id,),
-            ).fetchall()
-            if {
-                str(item["asset_id"]) for item in ready_asset_rows
-            } != set(claimed_asset_ids):
-                raise ValueError("job_asset_graph_conflict")
-
-            cursor = connection.execute(
-                """
-                UPDATE jobs
-                SET status = 'succeeded', progress = 100,
-                    asset_ids_json = ?, error_json = NULL, updated_at = ?
-                WHERE job_id = ? AND status = 'running'
-                """,
-                (_json(claimed_asset_ids), finished_at, job_id),
-            )
-            if cursor.rowcount != 1:  # pragma: no cover - write-lock invariant
-                raise RuntimeError("failed_to_finalize_job_success")
-            updated = connection.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-        if updated is None:  # pragma: no cover - transaction invariant
-            raise RuntimeError("failed_to_finalize_job_success")
         return self._decode_job(updated)
 
     def finalize_job_failure(
@@ -5444,46 +3490,6 @@ class Store:
         if str(job["flow_id"]) != str(resource["flow_id"]):
             raise ValueError("job_resource_flow_mismatch")
         return str(job["status"])
-
-    @staticmethod
-    def _assert_bundle_mutation_authority(
-        connection: sqlite3.Connection, job_id: str, resource_id: str
-    ) -> None:
-        """Require the exact execution item and its still-running Outcome.
-
-        Existing identical Bundle projections remain read-only replays.  Every
-        graph mutation, however, must be attached to the immutable execution
-        authority reserved for this Job and to the currently running attempt.
-        Legacy Jobs therefore remain readable but cannot manufacture new Asset
-        evidence from a same-Flow Resource.
-        """
-
-        execution = connection.execute(
-            """
-            SELECT 1
-            FROM jobs AS job
-            JOIN job_execution_items AS item
-              ON item.job_id = job.job_id AND item.plan_id = job.plan_id
-            JOIN resources AS resource
-              ON resource.resource_id = item.resource_id
-             AND resource.flow_id = job.flow_id
-            WHERE job.job_id = ? AND item.resource_id = ?
-            """,
-            (job_id, resource_id),
-        ).fetchone()
-        if execution is None:
-            raise RuntimeError("execution_binding_missing")
-        outcome = connection.execute(
-            """
-            SELECT status FROM acquisition_outcomes
-            WHERE job_id = ? AND resource_id = ?
-            """,
-            (job_id, resource_id),
-        ).fetchone()
-        if outcome is None:
-            raise LookupError("acquisition_outcome_not_started")
-        if str(outcome["status"]) != "running":
-            raise ValueError("acquisition_outcome_not_running")
 
     @staticmethod
     def _bundle_asset_evidence(
@@ -6591,132 +4597,6 @@ class Store:
         result["tags"] = values["tags"]
         return result
 
-    def _assert_asset_archivable_in_transaction(
-        self, connection: sqlite3.Connection, asset_id: str
-    ) -> dict[str, Any]:
-        """Return one Asset only when its complete acquisition graph is usable.
-
-        A new Archive is a side effect and therefore requires the immutable
-        execution authority introduced by migration 7.  Legacy Outcome/Bundle
-        rows remain readable, but they cannot authorize a new reservation or
-        retry when their exact Job x Plan x Resource execution item is absent.
-        """
-
-        asset = connection.execute(
-            """
-            SELECT asset.*, job.status AS job_status,
-                   job.plan_id AS job_plan_id,
-                   job.asset_ids_json AS job_asset_ids_json,
-                   resource.platform, resource.resource_type, resource.title
-            FROM assets AS asset
-            JOIN jobs AS job ON job.job_id = asset.job_id
-            JOIN resources AS resource ON resource.resource_id = asset.resource_id
-            WHERE asset.asset_id = ?
-            """,
-            (asset_id,),
-        ).fetchone()
-        if asset is None:
-            raise KeyError(asset_id)
-        if str(asset["status"]) != "ready" or str(asset["job_status"]) != "succeeded":
-            raise ValueError("asset_not_archivable")
-        job_asset_ids = self._decode_bundle_json(asset["job_asset_ids_json"], [])
-        if (
-            not isinstance(job_asset_ids, list)
-            or asset_id not in [str(value) for value in job_asset_ids]
-        ):
-            raise ValueError("asset_not_archivable")
-
-        execution = connection.execute(
-            """
-            SELECT * FROM job_execution_items
-            WHERE job_id = ? AND plan_id = ? AND resource_id = ?
-            """,
-            (asset["job_id"], asset["job_plan_id"], asset["resource_id"]),
-        ).fetchone()
-        if execution is None:
-            raise ValueError("asset_not_archivable")
-
-        outcome_row = connection.execute(
-            """
-            SELECT * FROM acquisition_outcomes
-            WHERE job_id = ? AND plan_id = ? AND resource_id = ?
-            """,
-            (asset["job_id"], asset["job_plan_id"], asset["resource_id"]),
-        ).fetchone()
-        if outcome_row is None:
-            raise ValueError("asset_not_archivable")
-        outcome = self._decode_acquisition_outcome(outcome_row)
-        execution_digest = outcome.get("execution_binding_digest")
-        if (
-            not isinstance(execution_digest, str)
-            or re.fullmatch(r"[a-f0-9]{64}", execution_digest) is None
-            or execution_digest != str(execution["execution_binding_digest"])
-            or str(outcome["plan_binding_digest"])
-            != str(execution["plan_binding_digest"])
-        ):
-            raise ValueError("asset_not_archivable")
-        persisted_outcome_digest = outcome.get("outcome_digest")
-        outcome_preimage = dict(outcome)
-        outcome_preimage.pop("outcome_digest", None)
-        if persisted_outcome_digest != self._request_digest(outcome_preimage):
-            raise ValueError("asset_not_archivable")
-
-        outcome_status = str(outcome["status"])
-        bundle_id = outcome.get("bundle_id")
-        if (
-            outcome_status not in {"succeeded", "partial"}
-            or not isinstance(bundle_id, str)
-            or not bundle_id
-        ):
-            raise ValueError("asset_not_archivable")
-        relations = connection.execute(
-            """
-            SELECT bundle.bundle_id, bundle.status AS bundle_status,
-                   bundle.completion, item.status AS item_status
-            FROM asset_bundle_items AS item
-            JOIN asset_bundles AS bundle ON bundle.bundle_id = item.bundle_id
-            WHERE item.asset_id = ? AND bundle.bundle_id = ?
-              AND bundle.job_id = ? AND bundle.resource_id = ?
-            """,
-            (asset_id, bundle_id, asset["job_id"], asset["resource_id"]),
-        ).fetchall()
-        if len(relations) != 1:
-            raise ValueError("asset_not_archivable")
-        relation = relations[0]
-        if str(relation["item_status"]) != "ready":
-            raise ValueError("asset_not_archivable")
-        expected_bundle_status = (
-            "succeeded" if outcome_status == "succeeded" else "partial"
-        )
-        expected_completion = "complete" if outcome_status == "succeeded" else "partial"
-        if (
-            str(relation["bundle_status"]) != expected_bundle_status
-            or str(relation["completion"]) != expected_completion
-        ):
-            raise ValueError("asset_not_archivable")
-        try:
-            _, ready_asset_ids, ready_primary_ids = self._bundle_asset_evidence(
-                connection,
-                bundle_id,
-                str(asset["job_id"]),
-                str(asset["resource_id"]),
-            )
-        except ValueError as exc:
-            raise ValueError("asset_not_archivable") from exc
-        claimed_asset_ids = outcome.get("asset_ids")
-        if (
-            len(ready_primary_ids) != 1
-            or not isinstance(claimed_asset_ids, list)
-            or [str(value) for value in claimed_asset_ids] != ready_asset_ids
-            or asset_id not in ready_asset_ids
-        ):
-            raise ValueError("asset_not_archivable")
-        result = dict(asset)
-        result.pop("job_status", None)
-        result.pop("job_plan_id", None)
-        result.pop("job_asset_ids_json", None)
-        return result
-
     def assert_asset_archivable(self, asset_id: str) -> dict[str, Any]:
         """Revalidate the acquisition graph before any archive side effect."""
 
@@ -7337,3 +5217,1074 @@ class Store:
                 "INSERT INTO audit_events VALUES (?, ?, ?, ?, ?, ?)",
                 (new_id("evt"), flow_id, action, object_id, _json(details), utc_now()),
             )
+
+    # ------------------------------------------------------------------
+    # Simplified acquisition state (migration 8/9 tables)
+    # ------------------------------------------------------------------
+
+    def _migration_simple_acquisition(self, connection: sqlite3.Connection) -> None:
+        self._execute_statements(
+            connection,
+            """
+            CREATE TABLE IF NOT EXISTS acquisition_plan_items (
+                plan_id TEXT NOT NULL REFERENCES download_plans(plan_id) ON DELETE CASCADE,
+                position INTEGER NOT NULL CHECK(position >= 0),
+                resource_id TEXT NOT NULL REFERENCES resources(resource_id),
+                resolution_id TEXT,
+                representation_id TEXT NOT NULL,
+                planned_scope TEXT NOT NULL CHECK(planned_scope IN (
+                    'primary_resource', 'representation', 'landing_page', 'metadata'
+                )),
+                strategy TEXT NOT NULL CHECK(strategy IN (
+                    'direct_file', 'web_materialize', 'web_capture'
+                )),
+                provider_id TEXT NOT NULL,
+                provider_version TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL,
+                representation_json TEXT NOT NULL CHECK(
+                    json_valid(representation_json) AND json_type(representation_json) = 'object'
+                ),
+                PRIMARY KEY(plan_id, resource_id),
+                UNIQUE(plan_id, position)
+            );
+            CREATE INDEX IF NOT EXISTS idx_acquisition_plan_items_provider
+                ON acquisition_plan_items(provider_id, provider_version, strategy);
+
+            CREATE TABLE IF NOT EXISTS job_items (
+                job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+                plan_id TEXT NOT NULL REFERENCES download_plans(plan_id),
+                position INTEGER NOT NULL CHECK(position >= 0),
+                resource_id TEXT NOT NULL REFERENCES resources(resource_id),
+                resolution_id TEXT,
+                representation_id TEXT NOT NULL,
+                planned_scope TEXT NOT NULL CHECK(planned_scope IN (
+                    'primary_resource', 'representation', 'landing_page', 'metadata'
+                )),
+                strategy TEXT NOT NULL CHECK(strategy IN (
+                    'direct_file', 'web_materialize', 'web_capture'
+                )),
+                provider_id TEXT NOT NULL,
+                provider_version TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL,
+                representation_json TEXT NOT NULL CHECK(
+                    json_valid(representation_json) AND json_type(representation_json) = 'object'
+                ),
+                revalidated_at TEXT NOT NULL,
+                PRIMARY KEY(job_id, resource_id),
+                UNIQUE(job_id, position)
+            );
+            CREATE INDEX IF NOT EXISTS idx_job_items_plan
+                ON job_items(plan_id, position);
+            CREATE INDEX IF NOT EXISTS idx_job_items_provider
+                ON job_items(provider_id, provider_version, strategy);
+
+            CREATE TABLE IF NOT EXISTS execution_outcomes (
+                outcome_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+                plan_id TEXT NOT NULL REFERENCES download_plans(plan_id),
+                resource_id TEXT NOT NULL REFERENCES resources(resource_id),
+                planned_scope TEXT NOT NULL,
+                planned_strategy TEXT NOT NULL,
+                planned_provider_id TEXT NOT NULL,
+                planned_provider_version TEXT NOT NULL,
+                actual_scope TEXT,
+                actual_strategy TEXT,
+                actual_provider_id TEXT,
+                actual_provider_version TEXT,
+                status TEXT NOT NULL CHECK(status IN (
+                    'running', 'succeeded', 'partial', 'failed', 'cancelled'
+                )),
+                failure_code TEXT,
+                failure_message TEXT,
+                retriable INTEGER NOT NULL DEFAULT 0 CHECK(retriable IN (0, 1)),
+                bundle_id TEXT REFERENCES asset_bundles(bundle_id),
+                asset_ids_json TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE(job_id, resource_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_execution_outcomes_job
+                ON execution_outcomes(job_id, started_at, outcome_id);
+            """,
+        )
+
+        # Preserve recoverability for v7 Plans/Jobs without carrying their
+        # hashes forward as execution credentials.
+        old_plan_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='download_plan_items'"
+        ).fetchone()
+        if old_plan_table is not None:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO acquisition_plan_items(
+                    plan_id, position, resource_id, resolution_id,
+                    representation_id, planned_scope, strategy,
+                    provider_id, provider_version, source_fingerprint,
+                    representation_json
+                )
+                SELECT plan_id, position, resource_id, resolution_id,
+                       representation_id, capability_scope, strategy,
+                       provider_id, provider_version,
+                       CASE WHEN substr(source_fingerprint, 1, 7) = 'sha256:'
+                            THEN substr(source_fingerprint, 8)
+                            ELSE source_fingerprint END,
+                       representation_json
+                FROM download_plan_items
+                """
+            )
+        old_job_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='job_execution_items'"
+        ).fetchone()
+        if old_job_table is not None:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO job_items(
+                    job_id, plan_id, position, resource_id, resolution_id,
+                    representation_id, planned_scope, strategy,
+                    provider_id, provider_version, source_fingerprint,
+                    representation_json, revalidated_at
+                )
+                SELECT job_id, plan_id, position, resource_id, resolution_id,
+                       representation_id, capability_scope, strategy,
+                       provider_id, provider_version,
+                       CASE WHEN substr(source_fingerprint, 1, 7) = 'sha256:'
+                            THEN substr(source_fingerprint, 8)
+                            ELSE source_fingerprint END,
+                       representation_json, revalidated_at
+                FROM job_execution_items
+                """
+            )
+        old_outcome_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='acquisition_outcomes'"
+        ).fetchone()
+        if old_outcome_table is not None:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO execution_outcomes(
+                    outcome_id, job_id, plan_id, resource_id,
+                    planned_scope, planned_strategy, planned_provider_id,
+                    planned_provider_version, actual_scope, actual_strategy,
+                    actual_provider_id, actual_provider_version, status,
+                    failure_code, failure_message, retriable, bundle_id,
+                    asset_ids_json, metadata_json, started_at, completed_at
+                )
+                SELECT outcome_id, job_id, plan_id, resource_id,
+                       planned_scope, planned_strategy, planned_provider_id,
+                       planned_provider_version, actual_scope, actual_strategy,
+                       actual_provider_id, actual_provider_version, status,
+                       failure_code, failure_message, retriable, bundle_id,
+                       asset_ids_json, metadata_json, started_at, completed_at
+                FROM acquisition_outcomes
+                """
+            )
+
+    def _migration_drop_legacy_acquisition_authority(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Drop the v6/v7 acquisition proof tables after v8 backfill."""
+
+        self._execute_statements(
+            connection,
+            """
+            DROP TABLE IF EXISTS job_execution_items;
+            DROP TABLE IF EXISTS acquisition_outcomes;
+            DROP TABLE IF EXISTS download_plan_items;
+            DROP TABLE IF EXISTS eligibility_decisions;
+            DROP TABLE IF EXISTS capability_readiness_snapshots;
+            """,
+        )
+
+    @staticmethod
+    def _normalize_plan_items(
+        items: list[dict[str, Any]] | None,
+        *,
+        resource_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(items, list) or len(items) != len(resource_ids):
+            raise ValueError("plan_items_missing")
+        normalized: list[dict[str, Any]] = []
+        seen_resources: set[str] = set()
+        for expected_position, raw in enumerate(items):
+            if not isinstance(raw, Mapping):
+                raise ValueError("invalid_plan_item")
+            resource_id = str(raw.get("resource_id") or "")
+            if resource_id != resource_ids[expected_position] or resource_id in seen_resources:
+                raise ValueError("plan_item_resource_mismatch")
+            seen_resources.add(resource_id)
+            representation_id = str(raw.get("representation_id") or "")
+            planned_scope = str(raw.get("planned_scope") or "")
+            strategy = str(raw.get("strategy") or "")
+            provider_id = str(raw.get("provider_id") or "")
+            provider_version = str(raw.get("provider_version") or "")
+            representation = raw.get("representation")
+            if (
+                not representation_id
+                or planned_scope not in CAPABILITY_SCOPES
+                or strategy not in _STRATEGIES
+                or not provider_id
+                or not provider_version
+                or not isinstance(representation, Mapping)
+            ):
+                raise ValueError("invalid_plan_item")
+            try:
+                representation_copy = json.loads(
+                    json.dumps(
+                        representation,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("invalid_plan_item_representation") from exc
+            normalized.append(
+                {
+                    "position": expected_position,
+                    "resource_id": resource_id,
+                    "resolution_id": (
+                        str(raw["resolution_id"])
+                        if raw.get("resolution_id") is not None
+                        else None
+                    ),
+                    "representation_id": representation_id,
+                    "planned_scope": planned_scope,
+                    "strategy": strategy,
+                    "provider_id": provider_id,
+                    "provider_version": provider_version,
+                    "source_fingerprint": _bare_fingerprint(raw.get("source_fingerprint")),
+                    "representation": representation_copy,
+                }
+            )
+        return normalized
+
+    def create_plan(
+        self,
+        flow_id: str,
+        presentation_id: str,
+        presented_version: int,
+        selection_version: int,
+        selection_digest: str,
+        options: dict[str, Any],
+        confirmation_token: str,
+        confirmation_hash: str,
+        expires_at: str,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        plan_items: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        scope = f"resource_download_prepare:{flow_id}"
+        now = utc_now()
+        with self.transaction(immediate=True) as connection:
+            replay = self._replay_in_transaction(
+                connection, scope, idempotency_key, request_hash
+            )
+            if replay is not None:
+                return replay
+            flow = connection.execute(
+                "SELECT current_presentation_id, presented_version, selection_version FROM flows WHERE flow_id = ?",
+                (flow_id,),
+            ).fetchone()
+            selection = connection.execute(
+                "SELECT * FROM selections WHERE flow_id = ?", (flow_id,)
+            ).fetchone()
+            if flow is None:
+                raise KeyError("flow_not_found")
+            if selection is None or selection["status"] != "selected":
+                raise LookupError("resource_not_selected")
+            if int(selection["selection_version"]) != selection_version:
+                raise RuntimeError("selection_version_conflict")
+            if (
+                selection["presentation_id"] != presentation_id
+                or int(selection["presented_version"]) != int(presented_version)
+            ):
+                raise RuntimeError("presentation_version_conflict")
+            if str(selection["selection_digest"]) != selection_digest:
+                raise RuntimeError("selection_digest_conflict")
+            if (
+                int(flow["selection_version"]) != selection_version
+                or flow["current_presentation_id"] != presentation_id
+                or int(flow["presented_version"]) != int(presented_version)
+            ):
+                raise RuntimeError("selection_changed")
+            resource_ids = _load(selection["selected_ids_json"], [])
+            if not isinstance(resource_ids, list) or not resource_ids:
+                raise LookupError("resource_not_selected")
+            placeholders = ",".join("?" for _ in resource_ids)
+            rows = connection.execute(
+                f"""
+                SELECT r.resource_id, r.platform, pi.display_position
+                FROM resources r
+                JOIN presentation_items pi ON pi.resource_id = r.resource_id
+                WHERE r.flow_id = ? AND pi.presentation_id = ?
+                  AND r.resource_id IN ({placeholders})
+                """,
+                (flow_id, presentation_id, *resource_ids),
+            ).fetchall()
+            by_id = {str(row["resource_id"]): dict(row) for row in rows}
+            if any(resource_id not in by_id for resource_id in resource_ids):
+                raise RuntimeError("resource_not_found")
+            normalized_items = self._normalize_plan_items(
+                plan_items, resource_ids=[str(item) for item in resource_ids]
+            )
+            plan_digest = self._request_digest(
+                {
+                    "flow_id": flow_id,
+                    "presentation_id": presentation_id,
+                    "presented_version": int(presented_version),
+                    "selection_version": selection_version,
+                    "selection_digest": selection_digest,
+                    "resource_ids": resource_ids,
+                    "options": options,
+                    "items": normalized_items,
+                }
+            )
+            plan_id = new_id("plan")
+            connection.execute(
+                """
+                INSERT INTO download_plans(
+                    plan_id, flow_id, presented_version, resource_ids_json,
+                    options_json, confirmation_token, confirmation_hash, expires_at,
+                    used, created_at, presentation_id, selection_version,
+                    selection_digest, plan_digest
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                """,
+                (
+                    plan_id, flow_id, int(presented_version), _json(resource_ids),
+                    _json(options), confirmation_token, confirmation_hash, expires_at,
+                    now, presentation_id, selection_version, selection_digest, plan_digest,
+                ),
+            )
+            for item in normalized_items:
+                connection.execute(
+                    """
+                    INSERT INTO acquisition_plan_items(
+                        plan_id, position, resource_id, resolution_id,
+                        representation_id, planned_scope, strategy,
+                        provider_id, provider_version, source_fingerprint,
+                        representation_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        plan_id, item["position"], item["resource_id"], item["resolution_id"],
+                        item["representation_id"], item["planned_scope"], item["strategy"],
+                        item["provider_id"], item["provider_version"], item["source_fingerprint"],
+                        _json(item["representation"]),
+                    ),
+                )
+            result = {
+                "flow_id": flow_id,
+                "stage": "prepared",
+                "plan_id": plan_id,
+                "presentation_id": presentation_id,
+                "presented_version": int(presented_version),
+                "selection_version": selection_version,
+                "selection_digest": selection_digest,
+                "plan_digest": plan_digest,
+                "expires_at": expires_at,
+                "confirmation_required": True,
+                "confirmation_token": confirmation_token,
+                "items": [
+                    {
+                        "resource_id": item["resource_id"],
+                        "selected_position": int(by_id[item["resource_id"]]["display_position"]),
+                        "platform": by_id[item["resource_id"]]["platform"],
+                        "representation_id": item["representation_id"],
+                        "planned_scope": item["planned_scope"],
+                        "planned_strategy": item["strategy"],
+                        "planned_provider": {
+                            "provider_id": item["provider_id"],
+                            "version": item["provider_version"],
+                            "scope": item["planned_scope"],
+                        },
+                        "planned_container": item["representation"].get(
+                            "selected_container", options["preferred_container"]
+                        ),
+                        "estimated_size_bytes": item["representation"].get("estimated_size_bytes"),
+                        "risks": [
+                            {
+                                "code": "PUBLIC_NETWORK_ACCESS",
+                                "level": "low",
+                                "message": "将按已确认的资源表示访问来源并写入隔离任务目录",
+                            }
+                        ],
+                    }
+                    for item in normalized_items
+                ],
+            }
+            connection.execute(
+                "UPDATE flows SET status = 'prepared', updated_at = ? WHERE flow_id = ?",
+                (now, flow_id),
+            )
+            self._audit_in_transaction(
+                connection,
+                flow_id,
+                "download.prepare",
+                plan_id,
+                {"selection_version": selection_version, "plan_digest": plan_digest},
+                now,
+            )
+            self._put_idempotency_in_transaction(
+                connection, scope, idempotency_key, request_hash, plan_id, result, now
+            )
+            return result
+
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM download_plans WHERE plan_id = ?", (plan_id,)
+            ).fetchone()
+            items = connection.execute(
+                """
+                SELECT * FROM acquisition_plan_items
+                WHERE plan_id = ? ORDER BY position, resource_id
+                """,
+                (plan_id,),
+            ).fetchall() if row is not None else []
+        if row is None:
+            return None
+        result = dict(row)
+        result["resource_ids"] = _load(result.pop("resource_ids_json"), [])
+        result["options"] = _load(result.pop("options_json"), {})
+        plan_items = []
+        for item_row in items:
+            item = dict(item_row)
+            item.pop("plan_id", None)
+            item["representation"] = _load(item.pop("representation_json"), {})
+            plan_items.append(item)
+        result["plan_items"] = plan_items
+        return result
+
+    def lookup_download_start_replay(
+        self,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        flow_id: str,
+        plan_id: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            previous = connection.execute(
+                "SELECT result_id, request_hash FROM idempotency_keys WHERE scope='download.start' AND key=?",
+                (idempotency_key,),
+            ).fetchone()
+            if previous is None:
+                return None
+            if previous["request_hash"] != request_hash:
+                raise ValueError("idempotency_conflict")
+            job = connection.execute(
+                "SELECT * FROM jobs WHERE job_id = ?", (previous["result_id"],)
+            ).fetchone()
+            if job is None:
+                raise RuntimeError("idempotency record points to a missing job")
+            if str(job["flow_id"]) != flow_id or str(job["plan_id"]) != plan_id:
+                raise ValueError("idempotency_conflict")
+            item = connection.execute(
+                "SELECT 1 FROM job_items WHERE job_id = ? LIMIT 1",
+                (job["job_id"],),
+            ).fetchone()
+            if item is None:
+                raise RuntimeError("job_item_missing")
+            return self._decode_job(job)
+
+    def reserve_job(
+        self,
+        plan_id: str,
+        confirmation_hash: str,
+        idempotency_key: str,
+        request_hash: str,
+        now: str,
+        *,
+        bindings: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        checked_now = self._normalize_authority_timestamp(now, "now")
+        with self.transaction(immediate=True) as connection:
+            previous = connection.execute(
+                "SELECT result_id, request_hash FROM idempotency_keys WHERE scope='download.start' AND key=?",
+                (idempotency_key,),
+            ).fetchone()
+            if previous is not None:
+                if previous["request_hash"] != request_hash:
+                    raise ValueError("idempotency_conflict")
+                job = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id = ?", (previous["result_id"],)
+                ).fetchone()
+                if job is None or str(job["plan_id"]) != plan_id:
+                    raise ValueError("idempotency_conflict")
+                return self._decode_job(job), True
+
+            plan = connection.execute(
+                "SELECT * FROM download_plans WHERE plan_id = ?", (plan_id,)
+            ).fetchone()
+            if plan is None:
+                raise LookupError("plan_not_found")
+            if not isinstance(bindings, Mapping):
+                raise RuntimeError("plan_binding_mismatch")
+            try:
+                bound_presented = int(bindings.get("presented_version"))
+                bound_selection = int(bindings.get("selection_version"))
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("plan_binding_mismatch") from exc
+            if (
+                plan["presentation_id"] != bindings.get("presentation_id")
+                or int(plan["presented_version"]) != bound_presented
+                or int(plan["selection_version"]) != bound_selection
+                or plan["selection_digest"] != bindings.get("selection_digest")
+                or plan["plan_digest"] != bindings.get("plan_digest")
+            ):
+                raise RuntimeError("plan_binding_mismatch")
+            if plan["confirmation_hash"] != confirmation_hash:
+                raise PermissionError("confirmation_invalid")
+            if bool(plan["used"]):
+                raise RuntimeError("plan_used")
+            if self._normalize_authority_timestamp(plan["expires_at"], "plan_expires_at") <= checked_now:
+                raise TimeoutError("plan_expired")
+
+            plan_ids = _load(plan["resource_ids_json"], [])
+            if not isinstance(plan_ids, list) or not plan_ids:
+                raise RuntimeError("plan_item_missing")
+            item_rows = connection.execute(
+                """
+                SELECT * FROM acquisition_plan_items
+                WHERE plan_id = ? ORDER BY position, resource_id
+                """,
+                (plan_id,),
+            ).fetchall()
+            if (
+                len(item_rows) != len(plan_ids)
+                or [str(row["resource_id"]) for row in item_rows] != [str(x) for x in plan_ids]
+            ):
+                raise RuntimeError("plan_item_missing")
+            for item in item_rows:
+                resolution_id = item["resolution_id"]
+                if not isinstance(resolution_id, str) or not resolution_id:
+                    raise RuntimeError("resolution_stale")
+                resolution = connection.execute(
+                    """
+                    SELECT resolution_status, source_fingerprint
+                    FROM resource_resolutions
+                    WHERE resolution_id = ? AND flow_id = ? AND resource_id = ?
+                    """,
+                    (resolution_id, plan["flow_id"], item["resource_id"]),
+                ).fetchone()
+                if (
+                    resolution is None
+                    or str(resolution["resolution_status"]) not in RESOLUTION_CACHEABLE_STATUSES
+                    or _bare_fingerprint(resolution["source_fingerprint"])
+                    != _bare_fingerprint(item["source_fingerprint"])
+                ):
+                    raise RuntimeError("resolution_stale")
+
+            selection = connection.execute(
+                "SELECT * FROM selections WHERE flow_id = ?", (plan["flow_id"],)
+            ).fetchone()
+            flow = connection.execute(
+                "SELECT * FROM flows WHERE flow_id = ?", (plan["flow_id"],)
+            ).fetchone()
+            if (
+                selection is None
+                or flow is None
+                or selection["status"] != "selected"
+                or selection["presentation_id"] != plan["presentation_id"]
+                or flow["current_presentation_id"] != plan["presentation_id"]
+                or int(selection["presented_version"]) != int(plan["presented_version"])
+                or int(flow["presented_version"]) != int(plan["presented_version"])
+                or int(selection["selection_version"]) != int(plan["selection_version"])
+                or int(flow["selection_version"]) != int(plan["selection_version"])
+                or selection["selection_digest"] != plan["selection_digest"]
+                or _load(selection["selected_ids_json"], []) != plan_ids
+            ):
+                raise RuntimeError("selection_changed")
+
+            job_id = new_id("job")
+            connection.execute(
+                """
+                INSERT INTO jobs(job_id, flow_id, plan_id, status, progress, created_at, updated_at)
+                VALUES (?, ?, ?, 'queued', 0, ?, ?)
+                """,
+                (job_id, plan["flow_id"], plan_id, checked_now, checked_now),
+            )
+            for item in item_rows:
+                connection.execute(
+                    """
+                    INSERT INTO job_items(
+                        job_id, plan_id, position, resource_id, resolution_id,
+                        representation_id, planned_scope, strategy,
+                        provider_id, provider_version, source_fingerprint,
+                        representation_json, revalidated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        job_id, plan_id, item["position"], item["resource_id"],
+                        item["resolution_id"], item["representation_id"], item["planned_scope"],
+                        item["strategy"], item["provider_id"], item["provider_version"],
+                        item["source_fingerprint"], item["representation_json"], checked_now,
+                    ),
+                )
+            cursor = connection.execute(
+                "UPDATE download_plans SET used=1 WHERE plan_id=? AND used=0",
+                (plan_id,),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("plan_used")
+            connection.execute(
+                "INSERT INTO idempotency_keys VALUES (?, ?, ?, ?, NULL, ?)",
+                ("download.start", idempotency_key, request_hash, job_id, checked_now),
+            )
+            connection.execute(
+                "UPDATE flows SET status='downloading', updated_at=? WHERE flow_id=?",
+                (checked_now, plan["flow_id"]),
+            )
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("failed to reserve job")
+            return self._decode_job(row), False
+
+    @staticmethod
+    def _decode_job_item(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        resource = {
+            "resource_id": item["resource_id"],
+            "platform": item.pop("_resource_platform"),
+            "title": item.pop("_resource_title"),
+            "source_url": item.pop("_resource_source_url"),
+            "resource_type": item.pop("_resource_type"),
+            "summary": item.pop("_resource_summary"),
+            "metadata": _load(item.pop("_resource_metadata_json"), {}),
+            "identity": _load(item.pop("_resource_identity_json"), {}),
+        }
+        item["resource"] = resource
+        item["representation"] = _load(item.pop("representation_json"), {})
+        return item
+
+    def get_job_items(self, job_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            job = connection.execute(
+                "SELECT 1 FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if job is None:
+                raise KeyError("job_not_found")
+            rows = connection.execute(
+                """
+                SELECT item.*,
+                       resources.platform AS _resource_platform,
+                       resources.title AS _resource_title,
+                       resources.source_url AS _resource_source_url,
+                       resources.resource_type AS _resource_type,
+                       resources.summary AS _resource_summary,
+                       resources.metadata_json AS _resource_metadata_json,
+                       resources.identity_json AS _resource_identity_json
+                FROM job_items AS item
+                JOIN resources ON resources.resource_id = item.resource_id
+                WHERE item.job_id=? ORDER BY item.position, item.resource_id
+                """,
+                (job_id,),
+            ).fetchall()
+        if not rows:
+            raise RuntimeError("job_item_missing")
+        return [self._decode_job_item(row) for row in rows]
+
+    @staticmethod
+    def _decode_execution_outcome(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["retriable"] = bool(result["retriable"])
+        result["asset_ids"] = _load(result.pop("asset_ids_json"), [])
+        result["metadata"] = _load(result.pop("metadata_json"), {})
+        return result
+
+    def start_acquisition_outcome(
+        self,
+        job_id: str,
+        resource_id: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        started_at: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_metadata = self._normalize_outcome_metadata(metadata)
+        observed_at = started_at or utc_now()
+        with self.transaction(immediate=True) as connection:
+            job = connection.execute(
+                "SELECT plan_id, status FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if job is None:
+                raise KeyError("job_not_found")
+            item = connection.execute(
+                """
+                SELECT * FROM job_items WHERE job_id=? AND resource_id=?
+                """,
+                (job_id, resource_id),
+            ).fetchone()
+            if item is None:
+                raise RuntimeError("job_item_missing")
+            existing = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE job_id=? AND resource_id=?",
+                (job_id, resource_id),
+            ).fetchone()
+            if existing is not None:
+                result = self._decode_execution_outcome(existing)
+                if result["metadata"] != normalized_metadata:
+                    raise ValueError("acquisition_outcome_conflict")
+                return result
+            if str(job["status"]) in {"cancelling", "cancelled"}:
+                raise ValueError("job_cancelling")
+            if str(job["status"]) != "running":
+                raise ValueError("acquisition_outcome_conflict")
+            outcome_id = new_id("outcome")
+            connection.execute(
+                """
+                INSERT INTO execution_outcomes(
+                    outcome_id, job_id, plan_id, resource_id,
+                    planned_scope, planned_strategy, planned_provider_id,
+                    planned_provider_version, status, retriable,
+                    asset_ids_json, metadata_json, started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 0, '[]', ?, ?)
+                """,
+                (
+                    outcome_id, job_id, item["plan_id"], resource_id,
+                    item["planned_scope"], item["strategy"], item["provider_id"],
+                    item["provider_version"], _json(normalized_metadata), observed_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE outcome_id=?", (outcome_id,)
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("failed_to_create_acquisition_outcome")
+            return self._decode_execution_outcome(row)
+
+    def complete_acquisition_outcome(
+        self,
+        job_id: str,
+        resource_id: str,
+        *,
+        status: str,
+        actual_scope: str | None,
+        actual_strategy: str | None,
+        actual_provider_id: str | None,
+        actual_provider_version: str | None,
+        bundle_id: str | None = None,
+        asset_ids: list[str] | None = None,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+        retriable: bool = False,
+        metadata: Mapping[str, Any] | None = None,
+        completed_at: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_status = str(status).strip().lower()
+        if normalized_status not in ACQUISITION_OUTCOME_STATUSES - {"running"}:
+            raise ValueError("invalid_acquisition_outcome_status")
+        normalized_metadata = self._normalize_outcome_metadata(metadata)
+        normalized_assets = list(asset_ids or [])
+        if len(normalized_assets) != len(set(normalized_assets)):
+            raise ValueError("invalid_acquisition_outcome_assets")
+        finished_at = completed_at or utc_now()
+        with self.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE job_id=? AND resource_id=?",
+                (job_id, resource_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("acquisition_outcome_not_started")
+            current = self._decode_execution_outcome(row)
+            if current["status"] != "running":
+                return current
+            job = connection.execute(
+                "SELECT status FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if job is None:
+                raise KeyError("job_not_found")
+            if str(job["status"]) in {"cancelling", "cancelled"}:
+                raise ValueError("job_cancelling")
+            if str(job["status"]) != "running":
+                raise ValueError("acquisition_outcome_conflict")
+            planned = (
+                str(current["planned_scope"]), str(current["planned_strategy"]),
+                str(current["planned_provider_id"]), str(current["planned_provider_version"]),
+            )
+            actual = (
+                actual_scope, actual_strategy, actual_provider_id, actual_provider_version
+            )
+            if any(value is not None for value in actual) and actual != planned:
+                raise RuntimeError("provider_binding_conflict")
+            if normalized_status in {"succeeded", "partial"}:
+                if actual != planned or not bundle_id or not normalized_assets:
+                    raise ValueError("acquisition_outcome_evidence_missing")
+                bundle, ready_assets, ready_primary = self._bundle_asset_evidence(
+                    connection, bundle_id, job_id, resource_id
+                )
+                expected_status = "succeeded" if normalized_status == "succeeded" else "partial"
+                expected_completion = "complete" if normalized_status == "succeeded" else "partial"
+                if (
+                    str(bundle["status"]) != expected_status
+                    or str(bundle["completion"]) != expected_completion
+                    or len(ready_primary) != 1
+                    or ready_assets != normalized_assets
+                ):
+                    raise ValueError("acquisition_outcome_asset_mismatch")
+            else:
+                if bundle_id is not None or normalized_assets:
+                    raise ValueError("acquisition_outcome_assets_forbidden")
+                if failure_code is None:
+                    raise ValueError("acquisition_outcome_failure_missing")
+            if normalized_status == "failed":
+                self._quarantine_resource_bundle_in_transaction(
+                    connection, job_id, resource_id,
+                    bundle_status="failed", updated_at=finished_at,
+                )
+            connection.execute(
+                """
+                UPDATE execution_outcomes
+                SET actual_scope=?, actual_strategy=?, actual_provider_id=?,
+                    actual_provider_version=?, status=?, failure_code=?,
+                    failure_message=?, retriable=?, bundle_id=?, asset_ids_json=?,
+                    metadata_json=?, completed_at=?
+                WHERE outcome_id=? AND status='running'
+                """,
+                (
+                    actual_scope, actual_strategy, actual_provider_id, actual_provider_version,
+                    normalized_status, failure_code, failure_message,
+                    1 if retriable else 0, bundle_id, _json(normalized_assets),
+                    _json(normalized_metadata), finished_at, current["outcome_id"],
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE outcome_id=?",
+                (current["outcome_id"],),
+            ).fetchone()
+            if updated is None:
+                raise RuntimeError("failed_to_complete_acquisition_outcome")
+            return self._decode_execution_outcome(updated)
+
+    def _finalize_running_acquisition_outcomes_in_transaction(
+        self,
+        connection: sqlite3.Connection,
+        job_id: str,
+        *,
+        status: str,
+        failure_code: str,
+        failure_message: str | None,
+        retriable: bool,
+        completed_at: str,
+    ) -> list[dict[str, Any]]:
+        if status not in {"failed", "cancelled"}:
+            raise ValueError("invalid_acquisition_outcome_cleanup_status")
+        rows = connection.execute(
+            "SELECT * FROM execution_outcomes WHERE job_id=? AND status='running'",
+            (job_id,),
+        ).fetchall()
+        finalized = []
+        for row in rows:
+            connection.execute(
+                """
+                UPDATE execution_outcomes
+                SET status=?, failure_code=?, failure_message=?, retriable=?,
+                    bundle_id=NULL, asset_ids_json='[]', completed_at=?
+                WHERE outcome_id=? AND status='running'
+                """,
+                (
+                    status, failure_code, failure_message, 1 if retriable else 0,
+                    completed_at, row["outcome_id"],
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE outcome_id=?", (row["outcome_id"],)
+            ).fetchone()
+            if updated is not None:
+                finalized.append(self._decode_execution_outcome(updated))
+        return finalized
+
+    def get_acquisition_outcome(self, job_id: str, resource_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE job_id=? AND resource_id=?",
+                (job_id, resource_id),
+            ).fetchone()
+        return self._decode_execution_outcome(row) if row is not None else None
+
+    def get_acquisition_outcomes_for_job(self, job_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE job_id=? ORDER BY started_at, outcome_id",
+                (job_id,),
+            ).fetchall()
+        return [self._decode_execution_outcome(row) for row in rows]
+
+    @staticmethod
+    def _assert_bundle_mutation_authority(
+        connection: sqlite3.Connection, job_id: str, resource_id: str
+    ) -> None:
+        item = connection.execute(
+            """
+            SELECT 1 FROM job_items AS item
+            JOIN jobs AS job ON job.job_id=item.job_id AND job.plan_id=item.plan_id
+            JOIN resources AS resource ON resource.resource_id=item.resource_id
+             AND resource.flow_id=job.flow_id
+            WHERE item.job_id=? AND item.resource_id=?
+            """,
+            (job_id, resource_id),
+        ).fetchone()
+        if item is None:
+            raise RuntimeError("job_item_missing")
+        outcome = connection.execute(
+            "SELECT status FROM execution_outcomes WHERE job_id=? AND resource_id=?",
+            (job_id, resource_id),
+        ).fetchone()
+        if outcome is None:
+            raise LookupError("acquisition_outcome_not_started")
+        if str(outcome["status"]) != "running":
+            raise ValueError("acquisition_outcome_not_running")
+
+    def finalize_job_success(
+        self, job_id: str, *, completed_at: str | None = None
+    ) -> dict[str, Any]:
+        finished_at = completed_at or utc_now()
+        with self.transaction(immediate=True) as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError("job_not_found")
+            if str(row["status"]) == "succeeded":
+                return self._decode_job(row)
+            if str(row["status"]) in {"cancelling", "cancelled"}:
+                raise ValueError("job_cancelling")
+            if str(row["status"]) != "running":
+                raise ValueError("job_not_succeedable")
+            items = connection.execute(
+                "SELECT resource_id FROM job_items WHERE job_id=? ORDER BY position, resource_id",
+                (job_id,),
+            ).fetchall()
+            if not items:
+                raise ValueError("job_outcome_incomplete")
+            resource_ids = [str(item["resource_id"]) for item in items]
+            outcomes = connection.execute(
+                "SELECT * FROM execution_outcomes WHERE job_id=?",
+                (job_id,),
+            ).fetchall()
+            by_resource = {
+                str(outcome["resource_id"]): self._decode_execution_outcome(outcome)
+                for outcome in outcomes
+            }
+            if set(by_resource) != set(resource_ids) or any(
+                outcome["status"] == "running" for outcome in by_resource.values()
+            ):
+                raise ValueError("job_outcome_incomplete")
+            claimed: list[str] = []
+            primary_count = 0
+            for resource_id in resource_ids:
+                outcome = by_resource[resource_id]
+                if outcome["status"] not in {"succeeded", "partial"}:
+                    continue
+                bundle_id = outcome.get("bundle_id")
+                if not isinstance(bundle_id, str) or not bundle_id:
+                    raise ValueError("job_asset_graph_conflict")
+                bundle, ready_assets, ready_primary = self._bundle_asset_evidence(
+                    connection, bundle_id, job_id, resource_id
+                )
+                expected_status = "succeeded" if outcome["status"] == "succeeded" else "partial"
+                expected_completion = "complete" if outcome["status"] == "succeeded" else "partial"
+                if (
+                    str(bundle["status"]) != expected_status
+                    or str(bundle["completion"]) != expected_completion
+                    or len(ready_primary) != 1
+                    or outcome.get("asset_ids") != ready_assets
+                ):
+                    raise ValueError("job_asset_graph_conflict")
+                claimed.extend(ready_assets)
+                primary_count += 1
+            if primary_count < 1 or len(claimed) != len(set(claimed)):
+                raise ValueError("job_success_without_primary")
+            ready_rows = connection.execute(
+                "SELECT asset_id FROM assets WHERE job_id=? AND status='ready'", (job_id,)
+            ).fetchall()
+            if {str(item["asset_id"]) for item in ready_rows} != set(claimed):
+                raise ValueError("job_asset_graph_conflict")
+            cursor = connection.execute(
+                """
+                UPDATE jobs SET status='succeeded', progress=100,
+                    asset_ids_json=?, error_json=NULL, updated_at=?
+                WHERE job_id=? AND status='running'
+                """,
+                (_json(claimed), finished_at, job_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("failed_to_finalize_job_success")
+            updated = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if updated is None:
+                raise RuntimeError("failed_to_finalize_job_success")
+            return self._decode_job(updated)
+
+    def _assert_asset_archivable_in_transaction(
+        self, connection: sqlite3.Connection, asset_id: str
+    ) -> dict[str, Any]:
+        asset = connection.execute(
+            """
+            SELECT asset.*, job.status AS job_status, job.plan_id AS job_plan_id,
+                   job.asset_ids_json AS job_asset_ids_json,
+                   resource.platform, resource.resource_type, resource.title
+            FROM assets AS asset
+            JOIN jobs AS job ON job.job_id=asset.job_id
+            JOIN resources AS resource ON resource.resource_id=asset.resource_id
+            WHERE asset.asset_id=?
+            """,
+            (asset_id,),
+        ).fetchone()
+        if asset is None:
+            raise KeyError(asset_id)
+        if str(asset["status"]) != "ready" or str(asset["job_status"]) != "succeeded":
+            raise ValueError("asset_not_archivable")
+        job_assets = self._decode_bundle_json(asset["job_asset_ids_json"], [])
+        if not isinstance(job_assets, list) or asset_id not in [str(x) for x in job_assets]:
+            raise ValueError("asset_not_archivable")
+        item = connection.execute(
+            "SELECT 1 FROM job_items WHERE job_id=? AND plan_id=? AND resource_id=?",
+            (asset["job_id"], asset["job_plan_id"], asset["resource_id"]),
+        ).fetchone()
+        outcome_row = connection.execute(
+            "SELECT * FROM execution_outcomes WHERE job_id=? AND plan_id=? AND resource_id=?",
+            (asset["job_id"], asset["job_plan_id"], asset["resource_id"]),
+        ).fetchone()
+        if item is None or outcome_row is None:
+            raise ValueError("asset_not_archivable")
+        outcome = self._decode_execution_outcome(outcome_row)
+        if outcome["status"] not in {"succeeded", "partial"}:
+            raise ValueError("asset_not_archivable")
+        bundle_id = outcome.get("bundle_id")
+        if not isinstance(bundle_id, str) or not bundle_id:
+            raise ValueError("asset_not_archivable")
+        relations = connection.execute(
+            """
+            SELECT bundle.status AS bundle_status, bundle.completion,
+                   item.status AS item_status
+            FROM asset_bundle_items AS item
+            JOIN asset_bundles AS bundle ON bundle.bundle_id=item.bundle_id
+            WHERE item.asset_id=? AND bundle.bundle_id=?
+              AND bundle.job_id=? AND bundle.resource_id=?
+            """,
+            (asset_id, bundle_id, asset["job_id"], asset["resource_id"]),
+        ).fetchall()
+        if len(relations) != 1 or str(relations[0]["item_status"]) != "ready":
+            raise ValueError("asset_not_archivable")
+        expected_status = "succeeded" if outcome["status"] == "succeeded" else "partial"
+        expected_completion = "complete" if outcome["status"] == "succeeded" else "partial"
+        if (
+            str(relations[0]["bundle_status"]) != expected_status
+            or str(relations[0]["completion"]) != expected_completion
+        ):
+            raise ValueError("asset_not_archivable")
+        _, ready_assets, ready_primary = self._bundle_asset_evidence(
+            connection, bundle_id, str(asset["job_id"]), str(asset["resource_id"])
+        )
+        if (
+            len(ready_primary) != 1
+            or outcome.get("asset_ids") != ready_assets
+            or asset_id not in ready_assets
+        ):
+            raise ValueError("asset_not_archivable")
+        result = dict(asset)
+        result.pop("job_status", None)
+        result.pop("job_plan_id", None)
+        result.pop("job_asset_ids_json", None)
+        return result
