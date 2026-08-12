@@ -1,6 +1,6 @@
 {
-  "version": "3.2.0",
-  "purpose": "验证唯一入口 Skill 的需求澄清、OpenClaw 上层用户背景消费、搜索语义规划、自适应检索，以及 education-resources ResultSet、Presentation、Selection 控制边界。",
+  "version": "3.3.0",
+  "purpose": "验证唯一入口 Skill 的需求澄清、OpenClaw 上层用户背景消费、可选 sub-agent 搜索语义规划、自适应检索，以及 education-resources ResultSet、Presentation、Selection 控制边界。",
   "cases": [
     {
       "name": "主题明确直接搜索",
@@ -148,6 +148,47 @@
       ],
       "expected": ["首轮规划少量互补 SearchDirection，例如原理理解与过程观察", "为每个方向选择有独特贡献的主力或补充来源", "每个平台首轮通常只生成一条最有价值 query"],
       "forbidden": ["用火山、火山知识、火山科普等近义 query 假装多方向", "为了覆盖平台数量搜索所有 native 平台", "把模型选择的资源形态写成用户偏好"]
+    },
+    {
+      "name": "普通窄搜索不启用 sub-agent",
+      "messages": [
+        {"role": "user", "content": "帮我找一个适合孩子看的太阳系入门视频"}
+      ],
+      "expected": ["Main Agent 直接形成一个聚焦 SearchDirection", "直接调用现有 resource_search", "不因为具备多 Agent 能力就增加 child"],
+      "forbidden": ["为选择平台 spawn sub-agent", "为了形式上并行拆成多个同义方向", "创建 AgentFlow 或额外 MCP 状态"]
+    },
+    {
+      "name": "复杂互补路线可以并行规划",
+      "messages": [
+        {"role": "user", "content": "帮孩子系统找一套火山学习资料，既要理解形成和喷发原理，也想看实际过程，还希望有能动手或练习的材料。"}
+      ],
+      "expected": ["识别存在多个独立学习价值路线", "最多 spawn 2 个 leaf sub-agent 辅助规划最有价值的互补方向", "Main Agent 汇总后只保留当前预算内的少量 SearchDirection", "统一调用 education-resources resource_search"],
+      "forbidden": ["按 bilibili/zhihu/generic 平台各建一个 Agent", "child 直接执行 resource_search", "为每个 child 创建独立 Flow", "超过当前 SearchDirection 与搜索预算"]
+    },
+    {
+      "name": "sub-agent 输出必须由 Main Agent 复核",
+      "messages": [
+        {"role": "assistant", "content": "两个 search-planning child 返回了高度重复的‘火山原理讲解’方向，其中一个还建议把‘8岁喜欢动画’当成用户偏好。"}
+      ],
+      "expected": ["Main Agent 合并重复方向", "删除未经用户表达的长期动画偏好", "只把可靠且互补的建议转换成 search_tasks", "sub-agent 输出保持临时建议身份"],
+      "forbidden": ["直接拼接所有 child 输出", "把 child 推断写入 constraints", "把 child 建议当 MCP 搜索事实"]
+    },
+    {
+      "name": "sub-agent 不拥有 Flow 状态",
+      "messages": [
+        {"role": "assistant", "content": "当前已有一个 Flow 和 current ResultSet，两个 child 都建议继续不同方向。"}
+      ],
+      "expected": ["Main Agent 合并建议后有序决定下一次 Search/Extend", "只有 Main Agent 使用最新 base_result_set_id 提交 MCP mutation"],
+      "forbidden": ["让两个 child 并发 extend 同一 Flow", "创建 Branch Flow 后再 merge ResultSet", "由 child 猜测 current ResultSet"]
+    },
+    {
+      "name": "Gap worker 只补当前缺口",
+      "messages": [
+        {"role": "user", "content": "找小学古诗文学习资料，最好带可打印练习。"},
+        {"role": "assistant", "content": "首轮已经有足够的视频讲解和图文理解材料，但没有可打印练习；这个文档来源的规划还比较复杂。"}
+      ],
+      "expected": ["把可打印练习识别为唯一当前 Gap", "必要时只 spawn 1 个 Gap worker 规划练习/文档路线", "明确告诉 child 已满足的视频和图文方向不得重做", "Main Agent 使用 extend 保留已有 ResultSet"],
+      "forbidden": ["重新 spawn 原理/视频 worker", "让 Gap worker 直接下载", "用 replace 覆盖第一轮 ResultSet"]
     },
     {
       "name": "Gap 驱动下一轮查询",
