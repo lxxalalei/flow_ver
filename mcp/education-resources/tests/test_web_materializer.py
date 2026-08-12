@@ -148,7 +148,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         artifacts = tuple(result.bundle.artifacts)
         self.assertGreaterEqual(len(artifacts), 4)
         self.assertTrue(_get(artifacts[0], "primary"))
-        self.assertEqual(_get(artifacts[0], "role"), "sanitized_html")
+        self.assertEqual(_get(artifacts[0], "role"), "primary")
         self.assertEqual(_get(artifacts[0], "filename"), "index.html")
         self.assertFalse(_get(artifacts[1], "primary"))
         self.assertEqual(_get(artifacts[1], "role"), "bundle")
