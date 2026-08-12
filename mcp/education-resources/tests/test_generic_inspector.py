@@ -92,7 +92,7 @@ def inspector(transport: QueueTransport, **kwargs) -> GenericWebInspector:
 
 
 class GenericWebInspectorTests(unittest.TestCase):
-    def test_html_enrichment_uses_safe_metadata_and_fallbacks(self) -> None:
+    def test_jsonld_article_is_primary_and_uses_safe_metadata(self) -> None:
         body = """
         <!doctype html><html lang="zh-CN"><head>
           <title>太阳系入门</title>
@@ -119,12 +119,39 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("2024-06-01", resolved["metadata"]["published_date"])
         representation = resolved["representations"][0]
         self.assertEqual("webpage", representation["kind"])
-        self.assertEqual("landing_page", representation["scope"])
-        self.assertEqual("landing", representation["role"])
+        self.assertEqual("primary_resource", representation["scope"])
+        self.assertEqual("primary", representation["role"])
         self.assertTrue(representation["materializable"])
         self.assertEqual("inspection", representation["evidence"]["source"])
         self.assertEqual("bounded_get", mapped["inspection"]["method"])
         self.assertEqual("generic", mapped["inspection"]["inspector_id"])
+
+    def test_open_graph_article_is_primary(self) -> None:
+        body = b"""
+        <!doctype html><html><head>
+          <title>Article</title>
+          <meta property="og:type" content="article">
+        </head><body><p>content</p></body></html>
+        """
+        mapped = inspector(
+            QueueTransport(FakeResponse(headers={"Content-Type": "text/html"}, body=body))
+        ).inspect(resource()).to_mapping()
+        representation = mapped["resolved_resource"]["representations"][0]
+        self.assertEqual("primary_resource", representation["scope"])
+        self.assertEqual("primary", representation["role"])
+
+    def test_plain_html_without_explicit_semantics_stays_landing_page(self) -> None:
+        body = b"""
+        <!doctype html><html><head><title>Navigation</title></head>
+        <body><main><p>content</p></main></body></html>
+        """
+        mapped = inspector(
+            QueueTransport(FakeResponse(headers={"Content-Type": "text/html"}, body=body))
+        ).inspect(resource()).to_mapping()
+        representation = mapped["resolved_resource"]["representations"][0]
+        self.assertEqual("landing_page", representation["scope"])
+        self.assertEqual("landing", representation["role"])
+        self.assertTrue(representation["materializable"])
 
     def test_pdf_file_is_classified_by_mime_and_magic(self) -> None:
         body = b"%PDF-1.7\nexample\n%%EOF"
@@ -146,7 +173,6 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("primary", representation["role"])
         self.assertTrue(representation["materializable"])
         self.assertEqual("available", representation["technical_availability"])
-        self.assertEqual(len(body), representation["size_bytes"])
         self.assertEqual(len(body), representation["size_bytes"])
 
     def test_declared_file_mime_without_magic_is_not_primary(self) -> None:
