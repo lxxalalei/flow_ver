@@ -75,7 +75,7 @@ class AcquisitionRequest:
         if not isinstance(jobs_root, Path):
             raise TypeError("jobs_root must be a server-provided pathlib.Path")
         resolved_root = jobs_root.resolve(strict=False)
-        if not resolved_root.is_absolute() or ".." in resolved_root.parts:
+        if not jobs_root.is_absolute() or ".." in resolved_root.parts:
             raise ValueError("jobs_root must be an absolute server-controlled root")
 
         self.job_id = job_id
