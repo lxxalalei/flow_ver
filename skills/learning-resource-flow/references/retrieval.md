@@ -6,7 +6,8 @@
 
 ```text
 MCP Search -> immutable ResultSet + factual coverage
-MCP Inspect / Resolution / Readiness / Eligibility -> 独立事实
+MCP Inspect -> Resolution / Representation facts
+MCP Plan / Job / Outcome / Asset -> acquisition facts
 Skill reads facts + task context -> private SemanticReview
 Skill -> private Gap -> one StopDecision
 ```
