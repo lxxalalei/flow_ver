@@ -522,6 +522,9 @@ class GenericWebInspector:
             except TypeError:
                 return target(request)
 
+    def _validate_network_url(self, url: str) -> None:
+        validate_public_http_url(url, resolver=self.resolver)
+
     @staticmethod
     def _close(response: Any) -> None:
         close = getattr(response, "close", None)
@@ -765,7 +768,7 @@ class GenericWebInspector:
             return self._error_result(resource, "INVALID_ARGUMENT", "资源缺少有效来源", False)
 
         try:
-            validate_public_http_url(source_url, resolver=self.resolver)
+            self._validate_network_url(source_url)
         except PolicyViolation:
             return self._error_result(
                 resource,
@@ -801,7 +804,7 @@ class GenericWebInspector:
 
             final_url = _response_url(response, current_url)
             try:
-                validate_public_http_url(final_url, resolver=self.resolver)
+                self._validate_network_url(final_url)
             except PolicyViolation:
                 self._close(response)
                 return self._error_result(
@@ -832,7 +835,7 @@ class GenericWebInspector:
                     )
                 target_url = urljoin(current_url, location)
                 try:
-                    validate_public_http_url(target_url, resolver=self.resolver)
+                    self._validate_network_url(target_url)
                 except PolicyViolation:
                     return self._error_result(
                         resource,

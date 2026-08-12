@@ -18,7 +18,11 @@ if TYPE_CHECKING:
     from .config import Settings
 
 
-def default_inspection_router(settings: "Settings | None" = None) -> InspectionRouter:
+def default_inspection_router(
+    settings: "Settings | None" = None,
+    *,
+    session_store: object | None = None,
+) -> InspectionRouter:
     """Build the exact inspection router enabled by the capability registry.
 
     The registry is an executable invariant here: accidentally omitting an
@@ -42,7 +46,7 @@ def default_inspection_router(settings: "Settings | None" = None) -> InspectionR
         AnnasArchiveInspector(**inspector_options),
         XimalayaInspector(**inspector_options),
         ZhihuInspector(**inspector_options),
-        SmartEduInspector(**inspector_options),
+        SmartEduInspector(session_store=session_store, **inspector_options),
     )
     router = InspectionRouter(inspectors)
     registered = frozenset(router.registered_platforms)

@@ -65,7 +65,7 @@ class AcquisitionRequest:
         if not isinstance(representation_id, str) or not representation_id:
             raise ValueError("representation_id must be non-empty")
         if preferred_container not in {
-            "original", "pdf", "epub", "mp4", "mp3", "html", "text"
+            "original", "pdf", "epub", "mp4", "mp3", "m4a", "html", "text"
         }:
             raise ValueError("unsupported preferred container")
         event = cancel_event or threading.Event()

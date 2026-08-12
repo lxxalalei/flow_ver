@@ -1,7 +1,7 @@
 """SmartEdu (国家中小学智慧教育平台) resource downloader.
 
-Uses the public CDN detail API to resolve file URLs, then downloads
-PDFs directly and videos via ffmpeg (m3u8 → mp4).
+The active route rechecks the platform detail API, binds the confirmed direct
+primary format, and materializes verified PDF, MP4, MP3, or M4A files.
 
 Reference: tchMaterial-parser (happycola233) and smartedu-dl-go (hantang).
 """
@@ -12,20 +12,26 @@ import base64
 import hashlib
 import json
 import re
-import subprocess
 import threading
 from pathlib import Path
 from typing import Any, TypeAlias
-from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse, urlsplit, urlunparse, urlunsplit
 from urllib.error import HTTPError
 from urllib.request import Request
 
+from ..archive import media_signature_matches
 from ..config import Settings
 from ..downloader import DownloadBatchResult, DownloadItemFailure, DownloadResult
 
 from ..errors import DomainError
 from ..sessions import SessionStore
-from ..policy import PolicyError, ensure_within_root
+from ..policy import (
+    NetworkPolicy,
+    PolicyError,
+    Resolver,
+    ensure_within_root,
+    system_resolver,
+)
 from .http_client import urlopen_with_fallback
 
 
@@ -39,6 +45,36 @@ _DOCUMENT_FORMATS = frozenset({
 _SUBTITLE_FORMATS = frozenset({"srt", "vtt", "ass", "ssa", "lrc"})
 _IMAGE_FORMATS = frozenset({"jpg", "jpeg", "png", "webp", "gif"})
 _COURSE_TYPES = frozenset({"national_lesson", "quality_course", "thematic_course"})
+_ACTIVE_PRIMARY_FORMATS = frozenset({"pdf", "mp4", "mp3", "m4a"})
+_SMARTEDU_DETAIL_HOSTS = frozenset(
+    {
+        "s-file-1.ykt.cbern.com.cn",
+        "s-file-2.ykt.cbern.com.cn",
+        "s-file-3.ykt.cbern.com.cn",
+    }
+)
+_SMARTEDU_STORAGE_HOSTS = frozenset(
+    {
+        "r1-ndr.ykt.cbern.com.cn",
+        "r2-ndr.ykt.cbern.com.cn",
+        "r3-ndr.ykt.cbern.com.cn",
+        "r1-ndr-private.ykt.cbern.com.cn",
+        "r2-ndr-private.ykt.cbern.com.cn",
+        "r3-ndr-private.ykt.cbern.com.cn",
+    }
+)
+_SMARTEDU_ALLOWED_HOSTS = _SMARTEDU_DETAIL_HOSTS | _SMARTEDU_STORAGE_HOSTS
+_HTTP_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_SENSITIVE_QUERY_KEYS = frozenset(
+    {"access_token", "accesstoken", "auth", "authorization", "token"}
+)
+_SENSITIVE_HEADER_KEYS = frozenset(
+    {"access_token", "accesstoken", "authorization", "cookie", "x-nd-auth"}
+)
+_DETAIL_MAX_BYTES = 4 * 1024 * 1024
+_RELATION_MAX_BYTES = 4 * 1024 * 1024
+_PLAYLIST_MAX_BYTES = 2 * 1024 * 1024
+_KEY_JSON_MAX_BYTES = 64 * 1024
 _FATAL_CODES = frozenset({
     "AUTH_REQUIRED",
     "AUTH_FAILED",
@@ -61,6 +97,331 @@ UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
+
+
+def _response_status(response: Any) -> int:
+    raw = getattr(response, "status", None)
+    if raw is None:
+        raw = getattr(response, "code", None)
+    if raw is None:
+        return 200
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _response_url(response: Any, fallback: str) -> str:
+    getter = getattr(response, "geturl", None)
+    if callable(getter):
+        try:
+            value = getter()
+        except Exception:
+            value = None
+        if isinstance(value, str) and value:
+            return value
+    value = getattr(response, "url", None)
+    return value if isinstance(value, str) and value else fallback
+
+
+def _response_header(response: Any, name: str) -> str | None:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    try:
+        value = headers.get(name)
+    except Exception:
+        value = None
+    if value is None:
+        try:
+            for key, candidate in headers.items():
+                if str(key).casefold() == name.casefold():
+                    value = candidate
+                    break
+        except Exception:
+            value = None
+    return None if value is None else str(value)
+
+
+def _close_response(response: Any) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _same_resource_url(left: str, right: str) -> bool:
+    try:
+        first = urlsplit(left)
+        second = urlsplit(right)
+    except ValueError:
+        return left == right
+    return urlunsplit((first.scheme, first.netloc, first.path, first.query, "")) == urlunsplit(
+        (second.scheme, second.netloc, second.path, second.query, "")
+    )
+
+
+def _request_contains_credentials(request: Request) -> bool:
+    try:
+        query = parse_qs(urlsplit(request.full_url).query, keep_blank_values=True)
+    except ValueError:
+        query = {}
+    if any(str(key).casefold() in _SENSITIVE_QUERY_KEYS for key in query):
+        return True
+    for name, value in request.header_items():
+        normalized = str(name).casefold()
+        if normalized not in _SENSITIVE_HEADER_KEYS:
+            continue
+        if normalized == "x-nd-auth" and 'id="0"' in str(value):
+            continue
+        return True
+    return False
+
+
+def _raise_for_http_status(response: Any) -> None:
+    status = _response_status(response)
+    if 200 <= status < 300:
+        return
+    if status in {401, 403}:
+        raise DomainError("AUTH_REQUIRED", "下载需要认证", retryable=False)
+    if status in {404, 410}:
+        raise DomainError("RESOURCE_NOT_FOUND", "资源当前不可用", retryable=False)
+    if status in {408, 429}:
+        raise DomainError("RATE_LIMITED", "SmartEdu 暂时不可用", retryable=True)
+    if status >= 500:
+        raise DomainError("PLATFORM_UNAVAILABLE", "SmartEdu 暂时不可用", retryable=True)
+    raise DomainError("DOWNLOAD_FAILED", "SmartEdu 响应状态无效", retryable=False)
+
+
+def _read_bounded(response: Any, max_bytes: int, *, label: str) -> bytes:
+    try:
+        body = response.read(max_bytes + 1)
+    except TypeError:
+        body = response.read()
+    if not isinstance(body, (bytes, bytearray, memoryview)) or not body:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}内容为空",
+            retryable=False,
+        )
+    payload = bytes(body)
+    if len(payload) > max_bytes:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}内容超过解析上限",
+            retryable=False,
+        )
+    return payload
+
+
+def _read_json_object(response: Any, max_bytes: int, *, label: str) -> dict[str, Any]:
+    payload = _read_bounded(response, max_bytes, label=label)
+    try:
+        parsed = json.loads(payload.decode("utf-8", "replace"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}格式无效",
+            retryable=False,
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}格式无效",
+            retryable=False,
+        )
+    return parsed
+
+
+def _media_type_for_format(fmt: str) -> str:
+    return {
+        "pdf": "application/pdf",
+        "mp3": "audio/mpeg",
+        "m4a": "audio/mp4",
+        "mp4": "video/mp4",
+    }.get(fmt, "application/octet-stream")
+
+
+def _validate_downloaded_file(path: Path, media_type: str) -> None:
+    with path.open("rb") as handle:
+        header = handle.read(64)
+    if not media_signature_matches(media_type, path.name, header):
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            "下载内容与声明格式不一致",
+            retryable=False,
+        )
+
+
+def _smartedu_representation_id(
+    resource: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> str:
+    seed = "|".join(
+        (
+            "smartedu-primary-v1",
+            str(resource.get("resource_id") or ""),
+            str(resource.get("source_url") or ""),
+            str(candidate.get("item_key") or ""),
+            str(candidate.get("format") or "").casefold(),
+        )
+    )
+    return "repr_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
+class _SmartEduHttpClient:
+    """SmartEdu-only HTTP boundary with exact hosts and explicit redirects."""
+
+    def __init__(
+        self,
+        *,
+        resolver: Resolver = system_resolver,
+        transport: Any | None = None,
+        max_redirects: int = 5,
+        allowed_hosts: frozenset[str] = _SMARTEDU_ALLOWED_HOSTS,
+    ) -> None:
+        self.policy = NetworkPolicy(
+            allowed_hosts=allowed_hosts,
+            resolver=resolver or system_resolver,
+            max_redirects=max_redirects,
+        )
+        self.transport = transport
+        self.max_redirects = max_redirects
+
+    def _validate_url(self, url: str, *, redirect: bool) -> None:
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme.casefold() != "https":
+                raise PolicyError(
+                    "unsupported_scheme",
+                    "SmartEdu requests require HTTPS",
+                )
+            self.policy.validate_url(url)
+        except PolicyError as exc:
+            raise DomainError(
+                "REDIRECT_BLOCKED" if redirect else "NETWORK_BLOCKED",
+                "SmartEdu 重定向地址未通过网络策略"
+                if redirect
+                else "SmartEdu 请求地址未通过网络策略",
+                retryable=False,
+                details={"policy_code": exc.code},
+            ) from exc
+        except ValueError as exc:
+            raise DomainError(
+                "REDIRECT_BLOCKED" if redirect else "NETWORK_BLOCKED",
+                "SmartEdu 重定向地址未通过网络策略"
+                if redirect
+                else "SmartEdu 请求地址未通过网络策略",
+                retryable=False,
+            ) from exc
+
+    def validate_url(self, url: str) -> None:
+        self._validate_url(url, redirect=False)
+
+    def _request(self, request: Request, timeout: float) -> Any:
+        if self.transport is None:
+            return urlopen_with_fallback(
+                request,
+                timeout=timeout,
+                follow_redirects=False,
+            )
+        target = self.transport
+        method = getattr(target, "open", None)
+        if callable(method):
+            try:
+                return method(request, timeout=timeout)
+            except TypeError:
+                return method(request, timeout)
+        if not callable(target):
+            raise TypeError("SmartEdu transport is not callable")
+        try:
+            return target(request, timeout=timeout)
+        except TypeError:
+            try:
+                return target(request, timeout)
+            except TypeError:
+                return target(request)
+
+    def open(self, request: Request, *, timeout: float) -> Any:
+        current_url = request.full_url
+        self._validate_url(current_url, redirect=False)
+        headers = dict(request.header_items())
+        method = request.get_method()
+        data = request.data
+        carries_credentials = _request_contains_credentials(request)
+        redirects = 0
+
+        while True:
+            current_request = Request(
+                current_url,
+                data=data,
+                headers=headers,
+                method=method,
+            )
+            response: Any | None = None
+            try:
+                try:
+                    response = self._request(current_request, timeout)
+                except HTTPError as exc:
+                    response = exc
+                except DomainError:
+                    raise
+                except Exception as exc:
+                    raise DomainError(
+                        "PLATFORM_UNAVAILABLE",
+                        "SmartEdu 网络请求失败",
+                        retryable=True,
+                    ) from exc
+
+                final_url = _response_url(response, current_url)
+                status = _response_status(response)
+                if status in _HTTP_REDIRECT_STATUSES:
+                    location = _response_header(response, "Location")
+                    if not location or not location.strip():
+                        raise DomainError(
+                            "REDIRECT_BLOCKED",
+                            "SmartEdu 重定向缺少有效目标",
+                            retryable=False,
+                        )
+                    target_url = urljoin(current_url, location)
+                    self._validate_url(target_url, redirect=True)
+                    current_host = urlsplit(current_url).hostname
+                    target_host = urlsplit(target_url).hostname
+                    if carries_credentials and current_host != target_host:
+                        raise DomainError(
+                            "REDIRECT_BLOCKED",
+                            "SmartEdu 凭据不得跨域重定向",
+                            retryable=False,
+                        )
+                    if redirects >= self.max_redirects:
+                        raise DomainError(
+                            "REDIRECT_BLOCKED",
+                            "SmartEdu 重定向次数超过上限",
+                            retryable=False,
+                            details={"max_redirects": self.max_redirects},
+                        )
+                    redirects += 1
+                    current_url = target_url
+                    continue
+
+                self._validate_url(
+                    final_url,
+                    redirect=not _same_resource_url(final_url, current_url),
+                )
+                if not _same_resource_url(final_url, current_url):
+                    raise DomainError(
+                        "REDIRECT_BLOCKED",
+                        "SmartEdu 传输层不得自动跟随重定向",
+                        retryable=False,
+                    )
+                return response
+            finally:
+                if response is not None and (
+                    _response_status(response) in _HTTP_REDIRECT_STATUSES
+                    or not _same_resource_url(_response_url(response, current_url), current_url)
+                ):
+                    _close_response(response)
 
 
 def _resolve_content(url: str) -> tuple[str, str]:
@@ -527,19 +888,35 @@ def _role_for_candidate(
 
 
 def _primary_candidate(
-    files: list[dict[str, Any]], content_type: str
+    files: list[dict[str, Any]],
+    content_type: str,
+    *,
+    supported_formats: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
-    if not files:
+    candidates = (
+        [
+            candidate
+            for candidate in files
+            if str(candidate.get("format") or "").casefold() in supported_formats
+        ]
+        if supported_formats is not None
+        else list(files)
+    )
+    if not candidates:
         return None
     if content_type in _COURSE_TYPES:
-        videos = [candidate for candidate in files if _is_video(candidate) and not _is_cover(candidate)]
+        videos = [
+            candidate
+            for candidate in candidates
+            if _is_video(candidate) and not _is_cover(candidate)
+        ]
         if videos:
             return max(videos, key=_video_quality)
-        content = [candidate for candidate in files if _is_content_candidate(candidate)]
+        content = [candidate for candidate in candidates if _is_content_candidate(candidate)]
         if content:
             return min(content, key=lambda item: int(item.get("source_order") or 0))
-        return min(files, key=lambda item: int(item.get("source_order") or 0))
-    return _pick_best_file(files, content_type, allow_video=True)
+        return min(candidates, key=lambda item: int(item.get("source_order") or 0))
+    return _pick_best_file(candidates, content_type, allow_video=True)
 
 
 def _safe_error_code(value: Any, default: str = "DOWNLOAD_FAILED") -> str:
@@ -738,14 +1115,16 @@ def _smartedu_headers(token: str = "") -> dict[str, str]:
 def _stream_download(
     url: str, dest: Path, cancel_event: threading.Event,
     token: str = "",
+    *,
+    http_client: _SmartEduHttpClient | None = None,
 ) -> int:
-    """Download a direct file (PDF, MP3, etc.).
+    """Download one direct SmartEdu file through the validated HTTP boundary."""
 
-    Tries x-nd-auth header first, then ?accessToken= query param as fallback.
-    """
+    client = http_client or _SmartEduHttpClient()
     request = Request(url, headers=_smartedu_headers(token))
     written = 0
-    with urlopen_with_fallback(request, timeout=120) as response:
+    with client.open(request, timeout=120) as response:
+        _raise_for_http_status(response)
         with dest.open("wb") as f:
             while True:
                 if cancel_event.is_set():
@@ -758,7 +1137,12 @@ def _stream_download(
     return written
 
 
-def _get_decryption_key(key_url: str, token: str) -> bytes:
+def _get_decryption_key(
+    key_url: str,
+    token: str,
+    *,
+    http_client: _SmartEduHttpClient | None = None,
+) -> bytes:
     """Obtain the AES decryption key for video segments.
 
     Implements the SmartEdu key derivation algorithm (ported from
@@ -768,6 +1152,7 @@ def _get_decryption_key(key_url: str, token: str) -> bytes:
       3. GET {keyURL}?nonce={nonce}&sign={sign} → base64 encrypted key
       4. AES-ECB decrypt with sign as key → raw decryption key
     """
+    client = http_client or _SmartEduHttpClient()
     headers = _smartedu_headers(token)
 
     # Extract keyID from URL (last path segment).
@@ -776,8 +1161,11 @@ def _get_decryption_key(key_url: str, token: str) -> bytes:
     # 1. Get nonce.
     signs_url = f"{key_url}/signs"
     req = Request(signs_url, headers=headers)
-    with urlopen_with_fallback(req, timeout=15) as resp:
-        signs_data = json.loads(resp.read().decode("utf-8", "replace"))
+    with client.open(req, timeout=15) as resp:
+        _raise_for_http_status(resp)
+        signs_data = _read_json_object(
+            resp, _KEY_JSON_MAX_BYTES, label="密钥签名响应"
+        )
     nonce = signs_data.get("nonce")
     if not nonce:
         raise DomainError("DOWNLOAD_FAILED", "密钥服务未返回 nonce")
@@ -788,8 +1176,11 @@ def _get_decryption_key(key_url: str, token: str) -> bytes:
     # 3. Get encrypted key.
     key_req_url = f"{key_url}?nonce={nonce}&sign={sign}"
     req2 = Request(key_req_url, headers=headers)
-    with urlopen_with_fallback(req2, timeout=15) as resp2:
-        key_data = json.loads(resp2.read().decode("utf-8", "replace"))
+    with client.open(req2, timeout=15) as resp2:
+        _raise_for_http_status(resp2)
+        key_data = _read_json_object(
+            resp2, _KEY_JSON_MAX_BYTES, label="密钥响应"
+        )
     encrypted_key_b64 = key_data.get("key")
     if not encrypted_key_b64:
         raise DomainError("DOWNLOAD_FAILED", "密钥服务未返回 key")
@@ -817,13 +1208,15 @@ def _decrypt_segment(data: bytes, key: bytes, iv: bytes) -> bytes:
 def _download_m3u8(
     url: str, dest: Path, cancel_event: threading.Event,
     token: str = "",
+    *,
+    http_client: _SmartEduHttpClient | None = None,
 ) -> int:
     """Download HLS video: parse m3u8, download segments, decrypt, merge.
 
     No ffmpeg needed — implements SmartEdu's custom key derivation and
     AES-CBC segment decryption in pure Python (requires pycryptodome).
     """
-    from urllib.parse import urljoin
+    client = http_client or _SmartEduHttpClient()
 
     # 1. Download m3u8.
     full_url = f"{url}?accessToken={token}" if token and "?" not in url else url
@@ -831,11 +1224,15 @@ def _download_m3u8(
         "User-Agent": UA,
         "Referer": "https://basic.smartedu.cn/",
     })
-    with urlopen_with_fallback(request, timeout=20) as resp:
-        m3u8_text = resp.read().decode("utf-8", "replace")
+    with client.open(request, timeout=20) as resp:
+        _raise_for_http_status(resp)
+        final_playlist_url = _response_url(resp, full_url)
+        m3u8_text = _read_bounded(
+            resp, _PLAYLIST_MAX_BYTES, label="播放列表"
+        ).decode("utf-8", "replace")
 
     # 2. Parse m3u8: extract key info and segment URLs.
-    base = url.rsplit("/", 1)[0] + "/"
+    base = final_playlist_url
     key_url = ""
     iv = b"\x00" * 16  # Default IV (IV=0 in m3u8)
     segments: list[str] = []
@@ -845,7 +1242,7 @@ def _download_m3u8(
         if line.startswith("#EXT-X-KEY:"):
             uri_match = re.search(r'URI="([^"]+)"', line)
             if uri_match:
-                key_url = uri_match.group(1)
+                key_url = urljoin(base, uri_match.group(1))
             iv_match = re.search(r"IV=0x([0-9a-fA-F]+)", line)
             if iv_match:
                 iv_hex = iv_match.group(1)
@@ -860,7 +1257,7 @@ def _download_m3u8(
     # 3. Get decryption key (if encrypted).
     key = None
     if key_url:
-        key = _get_decryption_key(key_url, token)
+        key = _get_decryption_key(key_url, token, http_client=client)
 
     # 4. Download + decrypt + merge segments.
     seg_headers = _smartedu_headers(token)
@@ -872,7 +1269,8 @@ def _download_m3u8(
                     raise DomainError("JOB_CANCELLED", "下载已取消")
 
                 req = Request(seg_url, headers=seg_headers)
-                with urlopen_with_fallback(req, timeout=60) as resp:
+                with client.open(req, timeout=60) as resp:
+                    _raise_for_http_status(resp)
                     seg_data = resp.read()
 
                 if key:
@@ -895,13 +1293,31 @@ def _download_m3u8(
 class SmartEduDownloader:
     """Download resources from SmartEdu via the public CDN detail API.
 
-    Handles textbooks (PDF), course videos (m3u8→mp4), documents, and audio.
-    Access token is optional — most resources are publicly downloadable.
+    Active route supports PDF, direct MP4, MP3, and M4A concrete primaries.
+    HLS remains internal-only until a Windows-compatible remux path produces
+    a verified MP4 container.
     """
 
-    def __init__(self, session_store: SessionStore, settings: Settings) -> None:
+    def __init__(
+        self,
+        session_store: SessionStore,
+        settings: Settings,
+        *,
+        resolver: Resolver = system_resolver,
+        transport: Any | None = None,
+    ) -> None:
         self.session_store = session_store
         self.settings = settings
+        self.detail_client = _SmartEduHttpClient(
+            resolver=resolver,
+            transport=transport,
+            allowed_hosts=_SMARTEDU_DETAIL_HOSTS,
+        )
+        self.storage_client = _SmartEduHttpClient(
+            resolver=resolver,
+            transport=transport,
+            allowed_hosts=_SMARTEDU_STORAGE_HOSTS,
+        )
 
     def download(
         self,
@@ -916,6 +1332,16 @@ class SmartEduDownloader:
         source_url = str(resource.get("source_url") or "")
         title = _bounded_text(resource.get("title") or "smartedu_resource", 120)
         content_id, content_type = _resolve_content(source_url)
+        planned = resource.pop("_planned_representation", None)
+        planned_container = ""
+        if isinstance(planned, dict):
+            planned_container = str(planned.get("container") or "").casefold()
+        if planned_container not in _ACTIVE_PRIMARY_FORMATS:
+            raise DomainError(
+                "CONTENT_VALIDATION_FAILED",
+                "SmartEdu 下载缺少受支持的已确认格式",
+                retryable=False,
+            )
 
         session_data = self.session_store.get_session_data("smartedu")
         token = ""
@@ -931,8 +1357,9 @@ class SmartEduDownloader:
         api_url = _detail_api_url(content_id, content_type, source_url)
         request = Request(api_url, headers=_smartedu_headers(token))
         try:
-            with urlopen_with_fallback(request, timeout=20) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
+            with self.detail_client.open(request, timeout=20) as resp:
+                _raise_for_http_status(resp)
+                data = _read_json_object(resp, _DETAIL_MAX_BYTES, label="资源详情")
         except Exception as exc:
             raise _safe_fatal_error(exc) from exc
         if cancel_event.is_set():
@@ -951,8 +1378,16 @@ class SmartEduDownloader:
             audio_api = f"{CDN_SPECIAL}/resources/{content_id}/relation_audios.json"
             try:
                 audio_req = Request(audio_api, headers=_smartedu_headers(token))
-                with urlopen_with_fallback(audio_req, timeout=10) as audio_resp:
-                    audios = json.loads(audio_resp.read().decode("utf-8", "replace"))
+                with self.detail_client.open(audio_req, timeout=10) as audio_resp:
+                    _raise_for_http_status(audio_resp)
+                    audio_payload = _read_bounded(
+                        audio_resp,
+                        _RELATION_MAX_BYTES,
+                        label="伴随音频详情",
+                    )
+                    audios = json.loads(
+                        audio_payload.decode("utf-8", "replace")
+                    )
                 if cancel_event.is_set():
                     raise DomainError("JOB_CANCELLED", "下载已取消")
                 if isinstance(audios, dict):
@@ -993,15 +1428,41 @@ class SmartEduDownloader:
                 return _make_batch_result([], lookup_failures)
             raise DomainError("DOWNLOAD_FAILED", "该资源无可下载文件", retryable=False)
 
+        active_files = [
+            candidate
+            for candidate in files
+            if str(candidate.get("format") or "").casefold()
+            in _ACTIVE_PRIMARY_FORMATS
+        ]
+        current_primary = _primary_candidate(
+            active_files,
+            content_type,
+            supported_formats=_ACTIVE_PRIMARY_FORMATS,
+        )
+        if current_primary is None or str(
+            current_primary.get("format") or ""
+        ).casefold() != planned_container or _smartedu_representation_id(
+            resource, current_primary
+        ) != str(planned.get("representation_id") or ""):
+            raise DomainError(
+                "CONTENT_VALIDATION_FAILED",
+                "SmartEdu 资源主文件已经变化，请重新检查并准备下载",
+                retryable=False,
+            )
+
         if content_type in _COURSE_TYPES:
-            selected = _select_course_files(files)
+            selected = _select_course_files(active_files)
         else:
             primary_source = [
                 candidate
-                for candidate in files
+                for candidate in active_files
                 if str(candidate.get("relation_key") or "") != "relation_audios"
             ]
-            primary = _pick_best_file(primary_source or files, content_type, allow_video=True)
+            primary = _primary_candidate(
+                primary_source or active_files,
+                content_type,
+                supported_formats=_ACTIVE_PRIMARY_FORMATS,
+            )
             selected = [primary] if primary is not None else []
             # An explicitly declared cover remains useful as an attachment.
             selected.extend(
@@ -1012,7 +1473,7 @@ class SmartEduDownloader:
             if content_type == "assets_document":
                 selected.extend(
                     candidate
-                    for candidate in files
+                    for candidate in active_files
                     if str(candidate.get("relation_key") or "") == "relation_audios"
                     and candidate is not primary
                 )
@@ -1025,7 +1486,11 @@ class SmartEduDownloader:
                 return _make_batch_result([], lookup_failures)
             raise DomainError("DOWNLOAD_FAILED", "未找到可下载文件", retryable=False)
 
-        primary = _primary_candidate(selected, content_type)
+        primary = _primary_candidate(
+            selected,
+            content_type,
+            supported_formats=_ACTIVE_PRIMARY_FORMATS,
+        )
         if primary is None:
             raise DomainError("DOWNLOAD_FAILED", "未找到可用主资源", retryable=False)
         primary_key = str(primary.get("item_key") or "")
@@ -1056,28 +1521,18 @@ class SmartEduDownloader:
                 ensure_within_root(destination, self.settings.jobs_dir)
                 destination.unlink(missing_ok=True)
                 fmt = str(candidate.get("format") or "").casefold()
-                if fmt == "m3u8":
-                    _download_m3u8(str(candidate["url"]), destination, cancel_event, token)
-                    media_type = "video/mp4"
-                else:
-                    _stream_download(
-                        str(candidate["url"]), destination, cancel_event, token
-                    )
-                    media_type = {
-                        "pdf": "application/pdf",
-                        "mp3": "audio/mpeg",
-                        "m4a": "audio/mp4",
-                        "mp4": "video/mp4",
-                        "webm": "video/webm",
-                        "epub": "application/epub+zip",
-                        "srt": "application/x-subrip",
-                        "vtt": "text/vtt",
-                        "jpg": "image/jpeg",
-                        "png": "image/png",
-                    }.get(fmt, "application/octet-stream")
+                _stream_download(
+                    str(candidate["url"]),
+                    destination,
+                    cancel_event,
+                    token,
+                    http_client=self.storage_client,
+                )
+                media_type = _media_type_for_format(fmt)
                 byte_size = destination.stat().st_size
                 if byte_size <= 0:
                     raise DomainError("CONTENT_VALIDATION_FAILED", "下载内容为空")
+                _validate_downloaded_file(destination, media_type)
                 digest = hashlib.sha256()
                 with destination.open("rb") as handle:
                     for chunk in iter(lambda: handle.read(64 * 1024), b""):

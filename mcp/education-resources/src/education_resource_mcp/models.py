@@ -144,7 +144,7 @@ class SearchFilters(StrictModel):
 
 class DownloadOptions(StrictModel):
     preferred_container: Literal[
-        "original", "pdf", "epub", "mp4", "mp3", "html", "text"
+        "original", "pdf", "epub", "mp4", "mp3", "m4a", "html", "text"
     ] = "html"
     allow_safe_fallback: bool = True
 

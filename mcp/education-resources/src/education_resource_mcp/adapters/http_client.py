@@ -12,7 +12,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Keep redirect responses visible to application-owned policy loops."""
+
+    def redirect_request(  # type: ignore[no-untyped-def]
+        self, req, fp, code, msg, headers, newurl
+    ):
+        return None
 
 
 class CurlResponse:
@@ -24,9 +33,14 @@ class CurlResponse:
         self.reason = reason
         self.headers = headers
         self._body = body
+        self._offset = 0
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, amount: int = -1) -> bytes:
+        if amount is None or amount < 0:
+            amount = len(self._body) - self._offset
+        value = self._body[self._offset : self._offset + amount]
+        self._offset += len(value)
+        return value
 
     def __enter__(self) -> "CurlResponse":
         return self
@@ -35,15 +49,25 @@ class CurlResponse:
         return None
 
 
-def urlopen_with_fallback(request: Request | str, timeout: float = 20, **kwargs: Any) -> Any:
+def urlopen_with_fallback(
+    request: Request | str,
+    timeout: float = 20,
+    *,
+    follow_redirects: bool = True,
+    **kwargs: Any,
+) -> Any:
     """Open URL with urllib, falling back to Windows curl for local CA issues."""
 
     try:
-        return urlopen(request, timeout=timeout, **kwargs)
+        if follow_redirects:
+            return urlopen(request, timeout=timeout, **kwargs)
+        if kwargs:
+            raise TypeError("no-redirect requests do not accept urlopen keyword options")
+        return build_opener(_NoRedirectHandler()).open(request, timeout=timeout)
     except URLError as exc:
         if not _should_try_curl_fallback(exc):
             raise
-        return _curl_open(request, timeout)
+        return _curl_open(request, timeout, follow_redirects=follow_redirects)
 
 
 def probe_with_headers(
@@ -102,7 +126,12 @@ def _should_try_curl_fallback(exc: URLError) -> bool:
     )
 
 
-def _curl_open(request: Request | str, timeout: float) -> CurlResponse:
+def _curl_open(
+    request: Request | str,
+    timeout: float,
+    *,
+    follow_redirects: bool = True,
+) -> CurlResponse:
     url = request.full_url if isinstance(request, Request) else str(request)
     method = request.get_method() if isinstance(request, Request) else "GET"
     data = request.data if isinstance(request, Request) else None
@@ -118,16 +147,21 @@ def _curl_open(request: Request | str, timeout: float) -> CurlResponse:
             "--ssl-no-revoke",
             "--silent",
             "--show-error",
-            "--location",
-            "--max-time",
-            str(max(1, int(timeout))),
-            "--dump-header",
-            str(header_file),
-            "--output",
-            str(body_file),
-            "--request",
-            method,
         ]
+        if follow_redirects:
+            command.append("--location")
+        command.extend(
+            [
+                "--max-time",
+                str(max(1, int(timeout))),
+                "--dump-header",
+                str(header_file),
+                "--output",
+                str(body_file),
+                "--request",
+                method,
+            ]
+        )
         for name, value in headers:
             command.extend(["--header", f"{name}: {value}"])
         if data is not None:
