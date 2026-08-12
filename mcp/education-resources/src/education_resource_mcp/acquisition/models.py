@@ -26,7 +26,7 @@ from ..downloader import DownloadItemFailure
 StrategyKind: TypeAlias = Literal[
     "direct_file", "web_materialize", "web_capture"
 ]
-CapabilityScope: TypeAlias = Literal[
+AcquisitionScope: TypeAlias = Literal[
     "primary_resource", "representation", "landing_page", "metadata"
 ]
 CompletionKind: TypeAlias = Literal["complete", "partial"]
@@ -107,7 +107,7 @@ _REPRESENTATION_ID_PATTERN = re.compile(r"^repr_[A-Za-z0-9_-]{16,64}$")
 _DESCRIPTOR_ID_PATTERN = re.compile(r"^cap_[A-Za-z0-9][A-Za-z0-9_.-]{7,123}$")
 _READINESS_SNAPSHOT_ID_PATTERN = re.compile(r"^ready_[A-Za-z0-9][A-Za-z0-9_.-]{7,122}$")
 _ELIGIBILITY_ID_PATTERN = re.compile(r"^elig_[A-Za-z0-9][A-Za-z0-9_.-]{7,123}$")
-CAPABILITY_SCOPES: frozenset[str] = frozenset(
+ACQUISITION_SCOPES: frozenset[str] = frozenset(
     {"primary_resource", "representation", "landing_page", "metadata"}
 )
 _FAILURE_SENSITIVE_KEYS = frozenset(
@@ -391,7 +391,7 @@ class AcquisitionRequest:
     strategy: AcquisitionStrategy | StrategyKind | str
     provider_id: str
     provider_version: str
-    planned_scope: CapabilityScope | str
+    planned_scope: AcquisitionScope | str
     representation_id: str
     preferred_container: PreferredContainer = "html"
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
@@ -423,7 +423,7 @@ class AcquisitionRequest:
             raise ValueError(f"unsupported preferred container: {self.preferred_container}")
         _validate_provider_id(self.provider_id, label="provider_id")
         _validate_component_version(self.provider_version, label="provider_version")
-        if not isinstance(self.planned_scope, str) or self.planned_scope not in CAPABILITY_SCOPES:
+        if not isinstance(self.planned_scope, str) or self.planned_scope not in ACQUISITION_SCOPES:
             raise ValueError("planned_scope must be a declared capability scope")
         _validate_pattern(
             self.representation_id,
@@ -713,8 +713,8 @@ class AcquisitionResult:
     planned_provider_version: str | None = None
     provider_id: str | None = None
     provider_version: str | None = None
-    planned_scope: CapabilityScope | None = None
-    actual_scope: CapabilityScope | None = None
+    planned_scope: AcquisitionScope | None = None
+    actual_scope: AcquisitionScope | None = None
     representation_id: str | None = None
     binding_digest: str | None = None
     source_fingerprint: str | None = None
@@ -795,7 +795,7 @@ class AcquisitionResult:
             ("planned_scope", self.planned_scope),
             ("actual_scope", self.actual_scope),
         ):
-            if value is not None and value not in CAPABILITY_SCOPES:
+            if value is not None and value not in ACQUISITION_SCOPES:
                 raise ValueError(f"{field_name} must be a declared capability scope")
         if self.actual_scope is not None and self.planned_scope is None:
             raise ValueError("actual_scope requires planned_scope")
@@ -839,8 +839,8 @@ class AcquisitionResult:
         planned_provider_version: str | None = None,
         provider_id: str | None = None,
         provider_version: str | None = None,
-        planned_scope: CapabilityScope | None = None,
-        actual_scope: CapabilityScope | None = None,
+        planned_scope: AcquisitionScope | None = None,
+        actual_scope: AcquisitionScope | None = None,
         representation_id: str | None = None,
         binding_digest: str | None = None,
         source_fingerprint: str | None = None,
@@ -879,8 +879,8 @@ class AcquisitionResult:
         planned_provider_version: str | None = None,
         provider_id: str | None = None,
         provider_version: str | None = None,
-        planned_scope: CapabilityScope | None = None,
-        actual_scope: CapabilityScope | None = None,
+        planned_scope: AcquisitionScope | None = None,
+        actual_scope: AcquisitionScope | None = None,
         representation_id: str | None = None,
         binding_digest: str | None = None,
         source_fingerprint: str | None = None,
@@ -947,7 +947,7 @@ class AcquisitionResult:
 
 __all__ = [
     "ACQUISITION_STRATEGIES",
-    "CAPABILITY_SCOPES",
+    "ACQUISITION_SCOPES",
     "ARTIFACT_ROLES",
     "ASSET_ROLES",
     "FORMAL_ARTIFACT_ROLES",
@@ -963,7 +963,7 @@ __all__ = [
     "ArtifactBundle",
     "ArtifactRole",
     "DownloadItemFailure",
-    "CapabilityScope",
+    "AcquisitionScope",
     "CompletionKind",
     "InternalArtifactRole",
     "PersistentArtifactRole",

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
+import logging
 from pathlib import Path
 import re
 import secrets
@@ -52,6 +53,8 @@ from .taxonomy import (
     normalize_legacy_domain,
 )
 
+
+LOGGER = logging.getLogger(__name__)
 
 TERMINAL_JOB_STATES = {"succeeded", "failed", "cancelled"}
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{16,128}$")
@@ -113,12 +116,10 @@ class ResourceService:
         search_provider: SearchProvider | None = None,
         download_provider: DownloadProvider | None = None,
         acquisition_router: AcquisitionRouter | None = None,
-        capability_registry_snapshot: Any | None = None,
         job_runner: JobRunner | None = None,
         archive_file_manager: ArchiveFileManager | None = None,
         inspection_router: InspectionRouter | None = None,
     ) -> None:
-        del capability_registry_snapshot
         self.settings = settings or Settings.from_env()
         self.settings.ensure_directories()
         self.store = store or Store(self.settings.database_path)
@@ -160,8 +161,8 @@ class ResourceService:
                         scopes=("primary_resource",),
                     )
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # optional provider plugin boundary
+                LOGGER.warning("Provider smartedu-resource unavailable during initialization (%s)", type(exc).__name__)
             try:
                 from .adapters.douyin_download import DouyinDownloader
 
@@ -174,8 +175,8 @@ class ResourceService:
                         scopes=("primary_resource",),
                     )
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # optional provider plugin boundary
+                LOGGER.warning("Provider douyin-video unavailable during initialization (%s)", type(exc).__name__)
             try:
                 from .adapters.ximalaya_download import XimalayaDownloader
 
@@ -188,8 +189,8 @@ class ResourceService:
                         scopes=("primary_resource",),
                     )
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # optional provider plugin boundary
+                LOGGER.warning("Provider ximalaya-audio unavailable during initialization (%s)", type(exc).__name__)
             try:
                 from .adapters.bilibili_download import BilibiliDownloader
 
@@ -202,8 +203,8 @@ class ResourceService:
                         scopes=("primary_resource",),
                     )
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # optional provider plugin boundary
+                LOGGER.warning("Provider bilibili-video unavailable during initialization (%s)", type(exc).__name__)
             self.acquisition_router = AcquisitionRouter(registrations)
         elif isinstance(acquisition_router, AcquisitionRouter):
             self.acquisition_router = acquisition_router

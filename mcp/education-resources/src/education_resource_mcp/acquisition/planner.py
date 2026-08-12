@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..inspection import representation_evidence_is_fresh, source_fingerprint
-from .models import AcquisitionStrategy, CAPABILITY_SCOPES
+from .models import AcquisitionStrategy, ACQUISITION_SCOPES
 from .router import AcquisitionRouter
 
 
@@ -220,7 +220,7 @@ def _representation_role(representation: Mapping[str, Any]) -> str:
 
 def _representation_scope(representation: Mapping[str, Any]) -> str:
     explicit = representation.get("scope")
-    if isinstance(explicit, str) and explicit in CAPABILITY_SCOPES:
+    if isinstance(explicit, str) and explicit in ACQUISITION_SCOPES:
         return explicit
     role = _representation_role(representation)
     if role == "primary":

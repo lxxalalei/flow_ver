@@ -1,10 +1,10 @@
 # 0037 — 获取状态链简化
 
-- 状态：in_progress
+- 状态：completed
 - 创建日期：2026-08-11
-- 完成日期：未完成
+- 完成日期：2026-08-12
 - 分支：`codex/growth-resource-taxonomy-rework`
-- 接替关系：0036 已 superseded 并移入 archive；平台恢复目标后续继续，但不得恢复旧 Capability Authority 链
+- 接替关系：0036 已 superseded；0037 工程简化已完成并归档，真实 OpenClaw/平台验收移交 0028
 
 ## Goal
 
@@ -74,15 +74,15 @@ Capability Descriptor、Readiness Snapshot、Eligibility Decision 不再作为�
 
 ```text
 server.py
-  -> simple_service.ResourceService
+  -> service.ResourceService
      -> AcquisitionPlanner / ProviderSpec
-     -> simple_storage.Store (migration 9)
+     -> storage.Store (migration 9)
      -> simplified AcquisitionRequest
      -> exact AcquisitionRouter
      -> Provider
 ```
 
-`simple_service` / `simple_storage` 仍复用旧 Service/Store 中成熟的 Search、Inspect、通用 Job 生命周期、Asset/Bundle 和 Archive 辅助能力，但 **Active acquisition 的 Prepare / Start / Runner / JobStatus / PlanItem / JobItem / Outcome 已不再依赖旧 authority 状态链**。
+`service` / `storage` 仍复用旧 Service/Store 中成熟的 Search、Inspect、通用 Job 生命周期、Asset/Bundle 和 Archive 辅助能力，但 **Active acquisition 的 Prepare / Start / Runner / JobStatus / PlanItem / JobItem / Outcome 已不再依赖旧 authority 状态链**。
 
 旧 `capability.py` 的大型实现已删除，仅保留 fail-fast shim 防止旧获取入口被误用。当前轻量 `AcquisitionRequest` 是独立 DTO，不继承旧 Request，也没有 capability/readiness/eligibility/digest slot。
 
@@ -206,15 +206,7 @@ GitHub Actions run `31517757764` 已通过，且只有全部检查成功后才�
 
 ## Remaining work
 
-第二阶段兼容清理已经完成。0037 目前只剩真实用户链验收：
-
-1. 在实际 OpenClaw 环境重新部署当前 MCP/Skill；
-2. 用 generic 正文网页完成真实：
-   `Search -> Inspect -> Present -> Select -> Prepare -> 用户确认 -> Start -> Job -> Archive -> Recover`；
-3. 核对正文网页确实走 `primary_resource + web_materialize`，而非 landing page；
-4. 成功后关闭 0037，回到 0028 的真实平台 E2E / Provider 恢复。
-
-不在 0037 中继续为了清理名称而重写成熟 Search/Inspect/Asset/Archive 基座；只有真实调用仍能触发旧 authority 行为时才继续删除对应代码。
+0037 的工程范围已完成并归档。真实 OpenClaw / 平台用户验收不再作为 0037 的完成条件，统一由 0028 记录。
 
 ## Milestone checkpoint
 
@@ -228,7 +220,7 @@ Fallback added?: no
 Data truncation added?: no
 Unrelated files changed?: no
 Actual user flow affected?: yes, acquisition execution boundary simplified
-Actual user flow validated?: offline MCP yes; real OpenClaw pending
+Actual user flow validated?: offline MCP yes; real OpenClaw transferred to 0028
 Scope drift detected?: no
 ```
 
@@ -246,14 +238,8 @@ Scope drift detected?: no
 [x] old CapabilityCoordinator implementation removed
 [x] inherited runner/request compatibility removed
 [x] old acquisition authority tables/current schemas physically cleaned up
-[ ] real Agent/user-flow revalidated
 ```
 
 ## Completion condition
 
-0037 在以下最后条件满足后改为 `completed`：
-
-- 至少一个真实 generic 用户回合在当前部署完成：
-  `Search -> Inspect -> Present -> Select -> Confirm -> Acquire -> Archive -> Recover`；
-- 该回合的正文网页语义为 `primary_resource`，并由 exact web materializer 执行；
-- 真实验证没有暴露仍可触发的旧 authority 路径。
+已完成：Active acquisition 不再依赖旧 Capability Authority 状态链，migration 9 与 current contract cleanup 已落地，离线 MCP 业务闭环通过。真实 OpenClaw / 平台验收由 0028 继续。

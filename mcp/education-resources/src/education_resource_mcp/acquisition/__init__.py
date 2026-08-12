@@ -2,10 +2,10 @@
 
 from .models import (
     ACQUISITION_STRATEGIES,
-    CAPABILITY_SCOPES,
+    ACQUISITION_SCOPES,
     ARTIFACT_ROLES,
     ASSET_ROLES,
-    CapabilityScope,
+    AcquisitionScope,
     CompletionKind,
     FORMAL_ARTIFACT_ROLES,
     INTERNAL_ARTIFACT_ROLES,
@@ -35,10 +35,10 @@ from .simple import AcquisitionRequest, AcquisitionRouter
 
 __all__ = [
     "ACQUISITION_STRATEGIES",
-    "CAPABILITY_SCOPES",
+    "ACQUISITION_SCOPES",
     "ARTIFACT_ROLES",
     "ASSET_ROLES",
-    "CapabilityScope",
+    "AcquisitionScope",
     "CompletionKind",
     "FORMAL_ARTIFACT_ROLES",
     "INTERNAL_ARTIFACT_ROLES",

@@ -57,7 +57,7 @@ Search
 
 - SmartEdu 已在 0038 完成 active exact route，作为接入模式参考，但新平台不得复用其私有 HTTP/Representation 绑定字段。
 - Active Planner：`mcp/education-resources/src/education_resource_mcp/acquisition/planner.py`。
-- Active Provider registry：`mcp/education-resources/src/education_resource_mcp/simple_service.py`。
+- Active Provider registry：`mcp/education-resources/src/education_resource_mcp/service.py`。
 - Inspector registry：`mcp/education-resources/src/education_resource_mcp/inspection_registry.py`。
 - 平台实现：
   - Douyin：`adapters/douyin.py`、`adapters/douyin_download.py`；当前无 active Inspector。
@@ -72,7 +72,7 @@ Likely to change per platform slice:
 - 对应 Search/Inspector/Downloader Adapter；
 - `inspection_registry.py` 与 platform registry（仅新增真实 Inspector 时）；
 - `acquisition/planner.py`；
-- `simple_service.py`；
+- `service.py`；
 - 直接相关 Schema（仅实际新增 container 时）；
 - 每个平台独立的 acquisition tests；
 - `contracts/platforms/README.md`、`CURRENT_ARCHITECTURE.md`。

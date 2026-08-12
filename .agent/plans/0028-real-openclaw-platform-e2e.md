@@ -89,5 +89,5 @@ Sensitive values removed: yes/no
 
 ## Current result
 
-SmartEdu 工程实现已同步安装到 Windows education-resources 包，但用户尚未执行真实平台测试。
-Douyin、Ximalaya 和 Bilibili 的 active route 仍由 0039 继续实现。本计划不把任何离线验证解释为真实平台通过。
+SmartEdu、Douyin、Ximalaya、Bilibili 的 active exact route 均已完成工程接入；用户尚未执行真实平台验收。
+0039 当前只根据用户真实测试反馈修复平台问题。本计划不把任何离线验证解释为真实平台通过。

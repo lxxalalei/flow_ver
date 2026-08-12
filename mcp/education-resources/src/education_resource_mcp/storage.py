@@ -35,7 +35,7 @@ ASSET_BUNDLE_ROLES = frozenset(
 )
 RESOLUTION_STATUSES = frozenset({"resolved", "partial", "unresolved"})
 RESOLUTION_CACHEABLE_STATUSES = frozenset({"resolved", "partial"})
-CAPABILITY_SCOPES = frozenset(
+ACQUISITION_SCOPES = frozenset(
     {"primary_resource", "representation", "landing_page", "metadata"}
 )
 ACQUISITION_OUTCOME_STATUSES = frozenset(
@@ -105,9 +105,6 @@ def _bare_fingerprint(value: Any) -> str:
     if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
         raise ValueError("invalid_source_fingerprint")
     return text
-    if value is None:
-        return default
-    return json.loads(value)
 
 
 def _copy_resolution_json(value: Any) -> Any:
@@ -5420,7 +5417,7 @@ class Store:
             representation = raw.get("representation")
             if (
                 not representation_id
-                or planned_scope not in CAPABILITY_SCOPES
+                or planned_scope not in ACQUISITION_SCOPES
                 or strategy not in _STRATEGIES
                 or not provider_id
                 or not provider_version

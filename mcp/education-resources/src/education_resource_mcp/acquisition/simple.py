@@ -14,7 +14,7 @@ import copy
 import threading
 from typing import Any
 
-from .models import AcquisitionResult, AcquisitionStrategy, CAPABILITY_SCOPES
+from .models import AcquisitionResult, AcquisitionStrategy, ACQUISITION_SCOPES
 from .router import AcquisitionRouter as _LegacyAcquisitionRouter
 from .router import ProviderRegistration
 
@@ -61,7 +61,7 @@ class AcquisitionRequest:
             raise ValueError("provider_id must be non-empty")
         if not isinstance(provider_version, str) or not provider_version:
             raise ValueError("provider_version must be non-empty")
-        if planned_scope not in CAPABILITY_SCOPES:
+        if planned_scope not in ACQUISITION_SCOPES:
             raise ValueError("planned_scope must be a declared acquisition scope")
         if not isinstance(representation_id, str) or not representation_id:
             raise ValueError("representation_id must be non-empty")
@@ -171,7 +171,7 @@ class AcquisitionRouter(_LegacyAcquisitionRouter):
         return self._bind_result(request, registration, result)
 
     @staticmethod
-    def _authority_kwargs(
+    def _route_kwargs(
         request: AcquisitionRequest,
         registration: ProviderRegistration | None = None,
     ) -> dict[str, Any]:

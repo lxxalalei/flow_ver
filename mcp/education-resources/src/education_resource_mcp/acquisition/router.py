@@ -21,7 +21,7 @@ from ..downloader import DownloadBatchResult, DownloadItemFailure, DownloadResul
 from ..errors import DomainError
 from ..policy import PolicyViolation, ensure_within_root
 from .models import (
-    CAPABILITY_SCOPES,
+    ACQUISITION_SCOPES,
     MAX_ARTIFACTS,
     AcquisitionItemFailure,
     AcquisitionRequest,
@@ -99,9 +99,9 @@ _REDACTED_DETAIL_PARTS = {
     "filepath",
     "destination",
 }
-# Provider-owned metadata cannot claim router authority facts.  The result
+# Provider-owned metadata cannot claim router route facts.  The result
 # exposes authoritative values in dedicated top-level fields instead.
-_AUTHORITY_METADATA_KEYS = frozenset(
+_ROUTE_METADATA_KEYS = frozenset(
     {
         "provider",
         "provider_id",
@@ -122,7 +122,7 @@ _AUTHORITY_METADATA_KEYS = frozenset(
 class ProviderRegistration:
     """An explicitly deployable exact provider binding.
 
-    A registration declares every acquisition strategy and capability scope it
+    A registration declares every acquisition strategy and acquisition scope it
     can execute.  The router will only select an entry by its exact immutable
     ``(provider_id, provider_version)`` key; it never derives a provider from
     ``resource.platform`` or substitutes another registration after failure.
@@ -156,13 +156,13 @@ class ProviderRegistration:
         if not strategies:
             raise ValueError("registration must declare at least one strategy")
         if isinstance(self.scopes, (str, bytes)):
-            raise TypeError("registration scopes must be an iterable of capability scopes")
+            raise TypeError("registration scopes must be an iterable of acquisition scopes")
         try:
             scopes = frozenset(self.scopes)
         except TypeError as exc:
             raise TypeError("registration scopes must be iterable") from exc
-        if not scopes or any(not isinstance(scope, str) or scope not in CAPABILITY_SCOPES for scope in scopes):
-            raise ValueError("registration scopes must contain declared capability scopes")
+        if not scopes or any(not isinstance(scope, str) or scope not in ACQUISITION_SCOPES for scope in scopes):
+            raise ValueError("registration scopes must contain declared acquisition scopes")
         object.__setattr__(self, "strategies", strategies)
         object.__setattr__(self, "scopes", scopes)
 
@@ -182,7 +182,7 @@ class ProviderRegistration:
 
 
 class AcquisitionRouter:
-    """Route one authority-bound request to its exact registered provider."""
+    """Route one route-bound request to its exact registered provider."""
 
     def __init__(
         self,
@@ -364,7 +364,7 @@ class AcquisitionRouter:
         return registration, None
 
     @staticmethod
-    def _authority_kwargs(
+    def _route_kwargs(
         request: AcquisitionRequest,
         registration: ProviderRegistration | None = None,
     ) -> dict[str, Any]:
@@ -395,7 +395,7 @@ class AcquisitionRouter:
             message,
             retryable=retryable,
             details=details,
-            **self._authority_kwargs(request),
+            **self._route_kwargs(request),
         )
 
     def _bind_result(
@@ -416,7 +416,7 @@ class AcquisitionRouter:
                     "returned_strategy": result.strategy.kind,
                 },
             )
-        metadata = self._without_authority_metadata(result.metadata)
+        metadata = self._without_route_metadata(result.metadata)
         return AcquisitionResult(
             request.strategy,
             bundle=result.bundle,
@@ -425,17 +425,17 @@ class AcquisitionRouter:
             metadata=metadata,
             item_failures=result.item_failures,
             completion=result.completion,
-            **self._authority_kwargs(request, registration),
+            **self._route_kwargs(request, registration),
         )
 
     @staticmethod
-    def _without_authority_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    def _without_route_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(metadata, Mapping):  # defensive provider boundary
             raise TypeError("provider result metadata must be a mapping")
         return {
             str(key): value
             for key, value in metadata.items()
-            if str(key).strip().lower() not in _AUTHORITY_METADATA_KEYS
+            if str(key).strip().lower() not in _ROUTE_METADATA_KEYS
         }
 
     def _call_download_provider(
