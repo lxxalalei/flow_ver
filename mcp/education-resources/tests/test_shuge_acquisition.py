@@ -11,6 +11,11 @@ from education_resource_mcp.acquisition.planner import AcquisitionPlanner
 from education_resource_mcp.inspection import build_representation_authority
 
 
+class _DirectProviderStub:
+    def download(self, resource, job_id, strategy, cancel_event):  # pragma: no cover
+        raise AssertionError("planner route test must not execute the provider")
+
+
 class ShugeAcquisitionRouteTests(unittest.TestCase):
     def test_primary_pdf_routes_to_generic_direct(self) -> None:
         router = AcquisitionRouter(
@@ -18,7 +23,7 @@ class ShugeAcquisitionRouteTests(unittest.TestCase):
                 ProviderRegistration(
                     provider_id="generic-direct",
                     provider_version="1.0.0",
-                    provider=object(),
+                    provider=_DirectProviderStub(),
                     strategies=(AcquisitionStrategy.DIRECT_FILE,),
                     scopes=("primary_resource",),
                 )
