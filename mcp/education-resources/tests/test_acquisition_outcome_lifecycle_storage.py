@@ -13,7 +13,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.storage import Store
+from education_resource_mcp.storage import Store, utc_now
 
 
 NOW = "2026-08-09T01:00:00+00:00"
@@ -42,6 +42,33 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._temporary_directory.cleanup()
+
+    def _get_outcome(self, job_id: str, resource_id: str) -> dict | None:
+        for outcome in self.store.get_acquisition_outcomes_for_job(job_id):
+            if outcome["resource_id"] == resource_id:
+                return outcome
+        return None
+
+    def _finalize_running_outcomes(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        failure_code: str,
+        failure_message: str | None = None,
+        retriable: bool = False,
+        completed_at: str | None = None,
+    ) -> list[dict]:
+        with self.store.transaction(immediate=True) as connection:
+            return self.store._finalize_running_acquisition_outcomes_in_transaction(
+                connection,
+                job_id,
+                status=status,
+                failure_code=failure_code,
+                failure_message=failure_message,
+                retriable=retriable,
+                completed_at=completed_at or utc_now(),
+            )
 
     def _insert_job(
         self,
@@ -239,7 +266,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         if (
             job is not None
             and job["status"] == "running"
-            and self.store.get_acquisition_outcome(
+            and self._get_outcome(
                 fixture["job_id"], fixture["resource_id"]
             )
             is None
@@ -276,7 +303,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         bundle = self._persist_ready_bundle(fixture)
 
-        finalized = self.store.finalize_running_acquisition_outcomes(
+        finalized = self._finalize_running_outcomes(
             fixture["job_id"],
             status="failed",
             failure_code="INTERNAL_ERROR",
@@ -286,7 +313,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
 
         self.assertEqual(1, len(finalized))
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None
@@ -299,7 +326,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertIsNone(outcome["bundle_id"])
         self.assertEqual([], outcome["asset_ids"])
 
-        unchanged = self.store.get_acquisition_outcome(
+        unchanged = self._get_outcome(
             fixture["job_id"], terminal_resource
         )
         assert unchanged is not None
@@ -315,7 +342,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         outcome_id = outcome["outcome_id"]
         self.assertEqual(
             [],
-            self.store.finalize_running_acquisition_outcomes(
+            self._finalize_running_outcomes(
                 fixture["job_id"],
                 status="failed",
                 failure_code="INTERNAL_ERROR",
@@ -326,42 +353,18 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         self.assertEqual(
             outcome_id,
-            self.store.get_acquisition_outcome(
+            self._get_outcome(
                 fixture["job_id"], fixture["resource_id"]
             )["outcome_id"],
         )
         with self.assertRaisesRegex(
             ValueError, "invalid_acquisition_outcome_cleanup_status"
         ):
-            self.store.finalize_running_acquisition_outcomes(
+            self._finalize_running_outcomes(
                 fixture["job_id"],
                 status="succeeded",
                 failure_code="INTERNAL_ERROR",
             )
-
-    def test_partial_outcome_helper_cannot_publish_cancellation(self) -> None:
-        fixture = self._insert_job("partial_cancel_rejected")
-        running = self._insert_outcome(fixture)
-
-        with self.assertRaisesRegex(
-            ValueError, "invalid_acquisition_outcome_cleanup_status"
-        ):
-            self.store.finalize_running_acquisition_outcomes(
-                fixture["job_id"],
-                status="cancelled",
-                failure_code="JOB_CANCELLED",
-                failure_message="must require a persisted Job cancellation",
-                completed_at=COMPLETED_AT,
-            )
-
-        self.assertEqual("running", self.store.get_job(fixture["job_id"])["status"])
-        unchanged = self.store.get_acquisition_outcome(
-            fixture["job_id"], fixture["resource_id"]
-        )
-        assert unchanged is not None
-        self.assertEqual("running", unchanged["status"])
-        self.assertEqual(running["outcome_id"], unchanged["outcome_id"])
-
     def test_restart_recovery_terminalizes_outcomes_before_job(self) -> None:
         interrupted = self._insert_job("restart")
         self._insert_outcome(interrupted)
@@ -369,11 +372,15 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         queued = self._insert_job("queued", status="queued")
         complete = self._insert_job("complete", status="running")
         complete_bundle = self._persist_ready_bundle(complete, filename="complete.mp4")
-        self.store.update_job(complete["job_id"], status="succeeded", progress=100)
+        with self.store.transaction() as connection:
+            connection.execute(
+                "UPDATE jobs SET status = 'succeeded', progress = 100 WHERE job_id = ?",
+                (complete["job_id"],),
+            )
 
         self.assertEqual(2, self.store.mark_incomplete_jobs_failed())
 
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             interrupted["job_id"], interrupted["resource_id"]
         )
         assert outcome is not None
@@ -410,7 +417,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         outcome_id = outcome["outcome_id"]
         completed_at = outcome["completed_at"]
         self.assertEqual(0, self.store.mark_incomplete_jobs_failed())
-        replayed = self.store.get_acquisition_outcome(
+        replayed = self._get_outcome(
             interrupted["job_id"], interrupted["resource_id"]
         )
         assert replayed is not None
@@ -436,7 +443,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.store.mark_incomplete_jobs_failed()
 
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None
@@ -482,7 +489,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("cancelled", cancelled["status"])
         self.assertEqual(37, cancelled["progress"])
         self.assertIsNone(cancelled["error"])
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None
@@ -510,7 +517,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual(job_updated_at, replayed["updated_at"])
         self.assertEqual(
             outcome_id,
-            self.store.get_acquisition_outcome(
+            self._get_outcome(
                 fixture["job_id"], fixture["resource_id"]
             )["outcome_id"],
         )
@@ -548,14 +555,6 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         assert unchanged is not None
         self.assertEqual("cancelling", unchanged["status"])
         self.assertEqual(23, unchanged["progress"])
-
-        # Even the low-level partial update helper must not replay a stale
-        # status while updating a different column.
-        self.store.update_job(running["job_id"], progress=31)
-        low_level = self.store.get_job(running["job_id"])
-        assert low_level is not None
-        self.assertEqual("cancelling", low_level["status"])
-        self.assertEqual(31, low_level["progress"])
 
         late_success = self._insert_job("cancel_before_success", status="running")
         self._persist_ready_bundle(late_success, filename="late-success.mp4")
@@ -608,7 +607,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual("cancelled", job["status"])
         self.assertEqual(37, job["progress"])
         self.assertIsNone(job["error"])
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None
@@ -624,7 +623,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         outcome_id = outcome["outcome_id"]
         completed_at = outcome["completed_at"]
         self.assertEqual(0, self.store.mark_incomplete_jobs_failed())
-        replayed = self.store.get_acquisition_outcome(
+        replayed = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert replayed is not None
@@ -673,7 +672,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
             self.store.mark_incomplete_jobs_failed()
 
         self.assertEqual(original_job, self.store.get_job(fixture["job_id"]))
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None
@@ -725,7 +724,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         )
         self.assertEqual(COMPLETED_AT, failed["updated_at"])
 
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None
@@ -738,7 +737,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual(COMPLETED_AT, outcome["completed_at"])
         self.assertEqual(running["metadata"], outcome["metadata"])
 
-        unchanged = self.store.get_acquisition_outcome(
+        unchanged = self._get_outcome(
             fixture["job_id"], terminal_resource
         )
         assert unchanged is not None
@@ -770,7 +769,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
         self.assertEqual(job_updated_at, replayed["updated_at"])
         self.assertEqual(
             outcome_id,
-            self.store.get_acquisition_outcome(
+            self._get_outcome(
                 fixture["job_id"], fixture["resource_id"]
             )["outcome_id"],
         )
@@ -819,7 +818,7 @@ class AcquisitionOutcomeLifecycleStorageTests(unittest.TestCase):
                 completed_at=COMPLETED_AT,
             )
 
-        outcome = self.store.get_acquisition_outcome(
+        outcome = self._get_outcome(
             fixture["job_id"], fixture["resource_id"]
         )
         assert outcome is not None

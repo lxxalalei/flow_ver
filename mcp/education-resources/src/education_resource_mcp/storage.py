@@ -2552,46 +2552,6 @@ class Store:
         if len(encoded.encode("utf-8")) > 64 * 1024:
             raise ValueError("acquisition_outcome_metadata_too_large")
         return decoded
-
-    def finalize_running_acquisition_outcomes(
-        self,
-        job_id: str,
-        *,
-        status: str,
-        failure_code: str,
-        failure_message: str | None = None,
-        retriable: bool = False,
-        completed_at: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Transactionally fail every still-running Job outcome.
-
-        Cancellation is intentionally unavailable at this partial lifecycle
-        boundary: only :meth:`finalize_job_cancellation` may publish cancelled
-        Outcomes after ``request_job_cancellation`` persisted the authoritative
-        Job-level ``cancelling`` fact.  This method remains a failure/recovery
-        helper and does not alter Job, Asset or Bundle state.
-        """
-
-        normalized_status = str(status).strip().lower()
-        if normalized_status != "failed":
-            raise ValueError("invalid_acquisition_outcome_cleanup_status")
-        finished_at = completed_at or utc_now()
-        with self.transaction(immediate=True) as connection:
-            job = connection.execute(
-                "SELECT job_id FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            if job is None:
-                raise KeyError("job_not_found")
-            return self._finalize_running_acquisition_outcomes_in_transaction(
-                connection,
-                job_id,
-                status=normalized_status,
-                failure_code=failure_code,
-                failure_message=failure_message,
-                retriable=retriable,
-                completed_at=finished_at,
-            )
-
     def start_job_execution(
         self,
         job_id: str,
@@ -2879,48 +2839,6 @@ class Store:
         if updated is None:  # pragma: no cover - transaction invariant
             raise RuntimeError("failed_to_finalize_job_cancellation")
         return self._decode_job(updated)
-
-    def update_job(
-        self,
-        job_id: str,
-        *,
-        status: str | None = None,
-        progress: int | None = None,
-        asset_ids: list[str] | None = None,
-        error: dict[str, Any] | None = None,
-    ) -> None:
-        """Apply explicitly supplied fields without stale read/write replay.
-
-        Lifecycle code must use the dedicated compare-and-set methods above.
-        This lower-level helper remains for migrations/tests and intentionally
-        leaves every omitted column untouched.
-        """
-
-        assignments: list[str] = []
-        values: list[Any] = []
-        if status is not None:
-            assignments.append("status = ?")
-            values.append(status)
-        if progress is not None:
-            assignments.append("progress = ?")
-            values.append(progress)
-        if asset_ids is not None:
-            assignments.append("asset_ids_json = ?")
-            values.append(_json(asset_ids))
-        if error is not None:
-            assignments.append("error_json = ?")
-            values.append(_json(error))
-        assignments.append("updated_at = ?")
-        values.append(utc_now())
-        values.append(job_id)
-        with self.transaction() as connection:
-            cursor = connection.execute(
-                f"UPDATE jobs SET {', '.join(assignments)} WHERE job_id = ?",
-                values,
-            )
-            if cursor.rowcount != 1:
-                raise KeyError(job_id)
-
     @staticmethod
     def _bundle_json(value: Any, field: str, *, default: Any = None) -> Any:
         if value is None:
@@ -5878,15 +5796,6 @@ class Store:
             if updated is not None:
                 finalized.append(self._decode_execution_outcome(updated))
         return finalized
-
-    def get_acquisition_outcome(self, job_id: str, resource_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM execution_outcomes WHERE job_id=? AND resource_id=?",
-                (job_id, resource_id),
-            ).fetchone()
-        return self._decode_execution_outcome(row) if row is not None else None
-
     def get_acquisition_outcomes_for_job(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
