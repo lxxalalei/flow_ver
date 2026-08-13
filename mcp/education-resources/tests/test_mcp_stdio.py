@@ -18,6 +18,7 @@ CONTRACTS_ROOT = SERVICE_ROOT / "contracts"
 EXPECTED_TOOLS = {
     "resource_flow_start",
     "resource_flow_status",
+    "resource_flow_list",
     "resource_search",
     "resource_browse_creator",
     "resource_inspect",
@@ -70,7 +71,7 @@ class McpStdioTests(unittest.TestCase):
                         self.assertEqual(initialized.server_info.version, "0.2.0")
                         tools = await session.list_tools()
                         self.assertEqual({tool.name for tool in tools.tools}, EXPECTED_TOOLS)
-                        self.assertEqual(len(tools.tools), 13)
+                        self.assertEqual(len(tools.tools), 14)
                         for tool in tools.tools:
                             expected = contract_input_schema(tool.name)
                             with self.subTest(tool=tool.name):
@@ -230,8 +231,6 @@ class McpStdioTests(unittest.TestCase):
                                 "contract_version": "1.0.0",
                                 "flow_id": flow["flow_id"],
                                 "plan_id": plan["plan_id"],
-                                **binding,
-                                "plan_digest": plan["plan_digest"],
                                 "confirmation_token": plan["confirmation_token"],
                                 "idempotency_key": "stdio-start-key-001",
                             },

@@ -227,12 +227,7 @@ class V2ControlPlaneTests(unittest.TestCase):
                 plan["plan_id"],
                 plan["confirmation_token"],
                 "start-key-000001",
-                presentation_id=plan["presentation_id"],
-                presented_version=plan["presented_version"],
-                selection_version=plan["selection_version"],
-                selection_digest=plan["selection_digest"],
-                plan_digest=plan["plan_digest"],
-            )
+                            )
         self.assertEqual(old_plan.exception.code, "SELECTION_VERSION_CONFLICT")
 
     def test_a_b_a_selection_versions_are_monotonic_and_old_plan_never_revives(self) -> None:
@@ -271,12 +266,7 @@ class V2ControlPlaneTests(unittest.TestCase):
                 old_plan["plan_id"],
                 old_plan["confirmation_token"],
                 "start-key-000002",
-                presentation_id=old_plan["presentation_id"],
-                presented_version=old_plan["presented_version"],
-                selection_version=old_plan["selection_version"],
-                selection_digest=old_plan["selection_digest"],
-                plan_digest=old_plan["plan_digest"],
-            )
+                            )
         self.assertEqual(old_plan_error.exception.code, "SELECTION_VERSION_CONFLICT")
 
     def test_selection_idempotency_replay_and_conflict(self) -> None:

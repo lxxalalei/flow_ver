@@ -47,7 +47,9 @@ migration 8 允许从旧 `download_plan_items`、`job_execution_items`、`acquis
 
 ## 客户端兼容
 
-`resource_download_start` 已不再接受 `authority_digest`。缓存旧 `1.5` Schema 的客户端必须在 `initialize` / `tools/list` 后刷新当前目录，否则可能因为多传已删除字段而被严格 Schema 拒绝。
+`resource_download_start` 输入已简化为 `flow_id` / `plan_id` / `confirmation_token` / `idempotency_key`（外加 `contract_version`）。presentation/selection/digest 绑定值由服务端从已存储的 Plan 读取；客户端不得再传 `presentation_id`、`presented_version`、`selection_version`、`selection_digest`、`plan_digest`、`authority_digest`。缓存旧 Schema 的客户端必须在 `initialize` / `tools/list` 后刷新当前目录，否则可能因为多传已删除字段而被严格 Schema 拒绝。
+
+`resource_search` 与 `resource_browse_creator` 的 `task_version` 不再必填：模型上下文丢失时不需要再追踪/恢复版本号，服务端使用当前存储版本。
 
 这是显式契约升级，不提供“多传旧字段也悄悄忽略”的公共 Tool 兼容层。内部 Python Provider seam 为了 staged cutover 暂时接受并丢弃旧 authority 参数，但该行为不是公共协议，不得被客户端依赖。
 

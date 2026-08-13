@@ -32,10 +32,6 @@ from education_resource_mcp.inspection import (
     InspectionRouter,
     build_default_inspection,
 )
-from education_resource_mcp.retrieval.registry import (
-    build_registry_snapshot,
-    canonical_descriptor_digest,
-)
 from education_resource_mcp.search import StaticSearchProvider
 from education_resource_mcp.service import ResourceService
 
@@ -190,72 +186,6 @@ class AssetBundleServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    @staticmethod
-    def _capability_snapshot():
-        descriptor = {
-            "descriptor_id": "cap_asset_bundle_course_primary_mp4_v1",
-            "descriptor_version": "1.1.0",
-            "descriptor_digest": "",
-            "registry_version": "1.1.0",
-            "platform_id": "generic",
-            "resource_types": ["course"],
-            "scope": "primary_resource",
-            "representation": {
-                "kind": "video",
-                "role": "primary",
-                "containers": ["mp4"],
-                "mime_types": ["video/mp4"],
-                "materializable": True,
-            },
-            "strategy": "direct_file",
-            "provider": {
-                "provider_id": "generic-direct",
-                "version": "1.0.0",
-                "scope": "primary_resource",
-            },
-            "inspector": {
-                "inspector_id": "asset-bundle-primary-fixture",
-                "version": "1.0.0",
-            },
-            "prerequisites": {
-                "required_fields": [],
-                "auth_mode": "none",
-                "network_policy": "public_http",
-                "max_retries": 0,
-                "requires_session": False,
-            },
-            "policy_class": "asset_bundle_fixture_public_direct",
-            "fallback": {
-                "allowed": False,
-                "max_scope": "primary_resource",
-                "allowed_scopes": [],
-                "on_errors": [],
-                "scope_preserving": True,
-            },
-            "source": {
-                "kind": "deployment",
-                "name": "asset-bundle-service-fixture",
-                "published_at": "2026-08-09T00:00:00Z",
-            },
-            "compatibility": {
-                "read_min": "1.0.0",
-                "write_version": "1.1.0",
-                "breaking_major": 1,
-            },
-            "deprecated": False,
-        }
-        descriptor["descriptor_digest"] = (
-            "sha256:" + canonical_descriptor_digest(descriptor)
-        )
-        return build_registry_snapshot(
-            {
-                "$schema": "../schemas/capability-descriptors.schema.json",
-                "catalog_version": "1.1.0",
-                "registry_version": "1.1.0",
-                "descriptors": [descriptor],
-            }
-        )
-
     def _service(self, variants: list[str]) -> ResourceService:
         provider = _BundleProvider(self.settings)
         resources = [
@@ -284,7 +214,6 @@ class AssetBundleServiceTests(unittest.TestCase):
                     )
                 ]
             ),
-            capability_registry_snapshot=self._capability_snapshot(),
             inspection_router=InspectionRouter([_BundlePrimaryInspector()]),
         )
 
@@ -332,12 +261,7 @@ class AssetBundleServiceTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "start-bundle-service-00001",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
-        )
+                    )
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
             status = service.job_status(flow["flow_id"], started["job_id"])

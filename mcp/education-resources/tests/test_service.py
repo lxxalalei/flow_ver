@@ -265,33 +265,18 @@ class ResourceServiceTests(unittest.TestCase):
                 plan["plan_id"],
                 "wrong-token",
                 "start-key-00000001",
-                presentation_id=plan["presentation_id"],
-                presented_version=plan["presented_version"],
-                selection_version=plan["selection_version"],
-                selection_digest=plan["selection_digest"],
-                plan_digest=plan["plan_digest"],
             )
         started = self.service.download_start(
             flow["flow_id"],
             plan["plan_id"],
             plan["confirmation_token"],
             "start-key-00000002",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
         )
         replayed_start = self.service.download_start(
             flow["flow_id"],
             plan["plan_id"],
             plan["confirmation_token"],
             "start-key-00000002",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
         )
         self.assertEqual(replayed_start["job_id"], started["job_id"])
         status = self._wait_terminal(flow["flow_id"], started["job_id"])
@@ -357,13 +342,6 @@ class ResourceServiceTests(unittest.TestCase):
 
     def test_download_start_runtime_failures_have_stable_public_codes(self) -> None:
         flow, plan = self._prepare_first_candidate()
-        bindings = {
-            "presentation_id": plan["presentation_id"],
-            "presented_version": plan["presented_version"],
-            "selection_version": plan["selection_version"],
-            "selection_digest": plan["selection_digest"],
-            "plan_digest": plan["plan_digest"],
-        }
         reserve_mappings = {
             "plan_binding_mismatch": "PLAN_BINDING_CONFLICT",
             "plan_used": "PLAN_ALREADY_USED",
@@ -386,7 +364,6 @@ class ResourceServiceTests(unittest.TestCase):
                             plan["plan_id"],
                             plan["confirmation_token"],
                             f"start-runtime-map-{index:04d}",
-                            **bindings,
                         )
                 self.assertEqual(public_code, captured.exception.code)
 
@@ -401,7 +378,6 @@ class ResourceServiceTests(unittest.TestCase):
                     plan["plan_id"],
                     plan["confirmation_token"],
                     "start-replay-corrupt-0001",
-                    **bindings,
                 )
         self.assertEqual("FLOW_STATE_CONFLICT", captured.exception.code)
 
@@ -482,11 +458,6 @@ class ResourceServiceTests(unittest.TestCase):
                 plan["plan_id"],
                 plan["confirmation_token"],
                 "start-expired-evidence-0001",
-                presentation_id=plan["presentation_id"],
-                presented_version=plan["presented_version"],
-                selection_version=plan["selection_version"],
-                selection_digest=plan["selection_digest"],
-                plan_digest=plan["plan_digest"],
             )
         self.assertEqual("RESOLUTION_STALE", captured.exception.code)
         self.assertIsNone(self.service.store.get_latest_job_for_flow(flow["flow_id"]))
@@ -511,11 +482,6 @@ class ResourceServiceTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "start-key-00000004",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
         )
         self.assertTrue(self.fixture_fetcher.started.wait(1))
         cancelled = self.service.job_cancel(

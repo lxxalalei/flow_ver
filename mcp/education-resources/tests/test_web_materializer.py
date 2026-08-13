@@ -184,7 +184,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         primary_html = (self.root / "job-a" / "index.html").read_text()
         self.assertIn("data:image/png;base64,", primary_html)
         self.assertNotIn("assets/image-", primary_html)
-        self.assertIn("img-src 'self' data:", primary_html)
+        self.assertIn("img-src &#x27;self&#x27; data:", primary_html)
         with zipfile.ZipFile(io.BytesIO(first_zip)) as archive:
             names = archive.namelist()
             self.assertEqual(names, sorted(names))

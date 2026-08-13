@@ -16,6 +16,7 @@ CONTRACT = {"contract_version": "1.0.0"}
 EXPECTED_TOOLS = {
     "resource_flow_start",
     "resource_flow_status",
+    "resource_flow_list",
     "resource_search",
     "resource_browse_creator",
     "resource_inspect",
@@ -151,23 +152,20 @@ def prepare_and_start(
         "resource_flow_status",
         {"flow_id": flow["flow_id"]},
     )
-    if recovered.get("current_plan", {}).get("authority_digest") != plan["authority_digest"]:
-        raise AssertionError("resource_flow_status did not preserve plan authority_digest")
+    if recovered.get("current_plan", {}).get("plan_id") != plan["plan_id"]:
+        raise AssertionError("resource_flow_status did not preserve the prepared plan")
     started = call_ok(
         client,
         "resource_download_start",
         {
             "flow_id": flow["flow_id"],
             "plan_id": plan["plan_id"],
-            **binding,
-            "plan_digest": plan["plan_digest"],
-            "authority_digest": plan["authority_digest"],
             "confirmation_token": plan["confirmation_token"],
             "idempotency_key": f"{key_prefix}-start-key-0001",
         },
     )
-    if started.get("authority_digest") != plan["authority_digest"]:
-        raise AssertionError("resource_download_start did not preserve plan authority_digest")
+    if started.get("plan_digest") != plan["plan_digest"]:
+        raise AssertionError("resource_download_start did not use the prepared plan digest")
     return started
 
 

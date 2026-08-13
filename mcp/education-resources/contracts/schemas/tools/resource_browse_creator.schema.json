@@ -17,7 +17,6 @@
       "required": [
         "contract_version",
         "flow_id",
-        "task_version",
         "idempotency_key",
         "platform",
         "creator_id"

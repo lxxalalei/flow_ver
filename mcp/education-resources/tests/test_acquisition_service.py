@@ -203,12 +203,7 @@ class AcquisitionServiceTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "start-acquisition-service-00001",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
-        )
+                    )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             status = self.service.job_status(flow["flow_id"], started["job_id"])

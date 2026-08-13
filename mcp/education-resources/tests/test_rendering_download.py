@@ -380,11 +380,6 @@ class ServiceRoutingTests(unittest.TestCase):
         started = service.download_start(
             flow["flow_id"], plan["plan_id"], plan["confirmation_token"],
             "start-routing-000001",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
         )
         job_id = started["job_id"]
         deadline = time.monotonic() + 3

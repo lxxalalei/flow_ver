@@ -225,9 +225,9 @@ class ContractCatalogConsistencyTests(unittest.TestCase):
 
         self.assertEqual(EXPECTED_CATALOG_VERSION, catalog["catalog_version"])
         self.assertEqual(EXPECTED_CONTRACT_VERSION, catalog["contract_version"])
-        self.assertEqual(13, len(names))
+        self.assertEqual(14, len(names))
         self.assertEqual(EXPECTED_TOOL_NAMES, tuple(names))
-        self.assertEqual(13, len(set(names)))
+        self.assertEqual(14, len(set(names)))
         self.assertIn("resource_browse_creator", names)
         self.assertIn("resource_inspect", names)
 
@@ -317,7 +317,7 @@ class ContractCatalogConsistencyTests(unittest.TestCase):
             ):
                 registered_names.append(node.name)
 
-        self.assertEqual(13, len(registered_names))
+        self.assertEqual(14, len(registered_names))
         self.assertEqual(set(EXPECTED_TOOL_NAMES), set(registered_names))
         self.assertIn("resource_browse_creator", registered_names)
 
@@ -366,7 +366,7 @@ class ContractCatalogConsistencyTests(unittest.TestCase):
                         await session.initialize()
                         listed = await session.list_tools()
                         listed_names = [tool.name for tool in listed.tools]
-                        self.assertEqual(13, len(listed_names))
+                        self.assertEqual(14, len(listed_names))
                         self.assertEqual(set(catalog_tools), set(listed_names))
 
                         for tool in listed.tools:
@@ -730,8 +730,6 @@ class ContractOutputTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "contract-start-success-001",
-            **binding,
-            plan_digest=plan["plan_digest"],
         )
         status = self._wait(flow["flow_id"], started["job_id"])
         self.assertEqual("succeeded", status["status"])
@@ -793,8 +791,6 @@ class ContractOutputTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             "contract-start-cancel-0001",
-            **binding,
-            plan_digest=plan["plan_digest"],
         )
         self.assertTrue(
             self.fixture_fetcher.started.wait(1),

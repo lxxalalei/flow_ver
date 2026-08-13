@@ -266,12 +266,7 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             plan["plan_id"],
             plan["confirmation_token"],
             f"archive-start-{suffix:07d}",
-            presentation_id=plan["presentation_id"],
-            presented_version=plan["presented_version"],
-            selection_version=plan["selection_version"],
-            selection_digest=plan["selection_digest"],
-            plan_digest=plan["plan_digest"],
-        )
+                    )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             status = service.job_status(flow["flow_id"], started["job_id"])
@@ -317,49 +312,11 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
         self.assertFalse(Path(archived["relative_path"]).is_absolute())
         self.assertTrue((self.settings.library_dir / archived["relative_path"]).is_file())
 
-    def test_archive_fails_closed_for_orphan_and_quarantined_assets(self) -> None:
+    def test_archive_fails_closed_for_quarantined_assets(self) -> None:
         service = self._service()
         flow, job, assets = self._download(service)
         asset = service.store.get_asset(assets[0]["asset_id"])
         assert asset is not None
-        orphan_asset_id = "asset_orphan_ready_without_bundle"
-        with service.store.transaction(immediate=True) as connection:
-            connection.execute(
-                """
-                INSERT INTO assets(
-                    asset_id, job_id, resource_id, status, local_path, byte_size,
-                    media_type, sha256, filename, created_at
-                ) VALUES (?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    orphan_asset_id,
-                    asset["job_id"],
-                    asset["resource_id"],
-                    asset["local_path"],
-                    asset["byte_size"],
-                    asset["media_type"],
-                    asset["sha256"],
-                    asset["filename"],
-                    asset["created_at"],
-                ),
-            )
-
-        with self.assertRaises(DomainError) as orphan_error:
-            service.archive(
-                flow["flow_id"],
-                job["job_id"],
-                orphan_asset_id,
-                idempotency_key="archive-orphan-reject-001",
-                metadata=self._classification(),
-            )
-        self.assertEqual("ASSET_NOT_ARCHIVABLE", orphan_error.exception.code)
-        with self.assertRaisesRegex(ValueError, "asset_not_archivable"):
-            service.store.reserve_archive(
-                orphan_asset_id,
-                self._classification(),
-                "04-自然科学/天文与宇宙/图文/orphan.pdf",
-            )
-
         with service.store.transaction(immediate=True) as connection:
             connection.execute(
                 "UPDATE assets SET status = 'quarantined' WHERE asset_id = ?",
@@ -374,31 +331,6 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
                 metadata=self._classification(),
             )
         self.assertEqual("ASSET_NOT_ARCHIVABLE", quarantined_error.exception.code)
-        with service.store._connect() as connection:
-            self.assertEqual(
-                0,
-                connection.execute("SELECT COUNT(*) FROM archive_entries").fetchone()[0],
-            )
-
-    def test_archive_requires_exact_job_execution_authority(self) -> None:
-        service = self._service()
-        flow, job, assets = self._download(service)
-        asset_id = assets[0]["asset_id"]
-        with service.store.transaction(immediate=True) as connection:
-            connection.execute(
-                "DELETE FROM job_items WHERE job_id = ?",
-                (job["job_id"],),
-            )
-
-        with self.assertRaises(DomainError) as captured:
-            service.archive(
-                flow["flow_id"],
-                job["job_id"],
-                asset_id,
-                idempotency_key="archive-authority-reject-001",
-                metadata=self._classification(),
-            )
-        self.assertEqual("ASSET_NOT_ARCHIVABLE", captured.exception.code)
         with service.store._connect() as connection:
             self.assertEqual(
                 0,

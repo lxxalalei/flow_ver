@@ -341,7 +341,6 @@
       "required": [
         "contract_version",
         "flow_id",
-        "task_version",
         "idempotency_key",
         "search_tasks"
       ],

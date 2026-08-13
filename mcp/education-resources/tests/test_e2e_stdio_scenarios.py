@@ -104,9 +104,6 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         **CONTRACT,
                         "flow_id": flow["flow_id"],
                         "plan_id": plan["plan_id"],
-                        **binding,
-                        "plan_digest": plan["plan_digest"],
-                        "authority_digest": plan["authority_digest"],
                         "confirmation_token": plan["confirmation_token"],
                         "idempotency_key": "invalidate-e2e-start-key-001",
                     },
@@ -151,8 +148,8 @@ class StdioScenarioE2ETests(unittest.TestCase):
                     },
                 )
                 self.assertFalse(rejected["ok"])
-                self.assertEqual("ELIGIBILITY_REQUIRED", rejected["error"]["code"])
-                self.assertTrue(rejected["error"]["retriable"])
+                self.assertEqual("POLICY_DENIED", rejected["error"]["code"])
+                self.assertFalse(rejected["error"]["retriable"])
                 status = call_ok(
                     client,
                     "resource_flow_status",
@@ -331,19 +328,12 @@ class StdioScenarioE2ETests(unittest.TestCase):
                         **CONTRACT,
                         "flow_id": flow["flow_id"],
                         "plan_id": plan["plan_id"],
-                        **binding,
-                        "selection_digest": "0" * 64,
-                        "plan_digest": plan["plan_digest"],
-                        "authority_digest": plan["authority_digest"],
-                        "confirmation_token": plan["confirmation_token"],
+                        "confirmation_token": "wrong-token",
                         "idempotency_key": "multi-e2e-wrong-start-1",
                     },
                 )
                 self.assertFalse(wrong["ok"])
-                self.assertIn(
-                    wrong["error"]["code"],
-                    {"PLAN_BINDING_CONFLICT", "SELECTION_DIGEST_CONFLICT"},
-                )
+                self.assertEqual("CONFIRMATION_INVALID", wrong["error"]["code"])
                 before_start = call_ok(
                     client,
                     "resource_flow_status",
@@ -357,14 +347,11 @@ class StdioScenarioE2ETests(unittest.TestCase):
                     {
                         "flow_id": flow["flow_id"],
                         "plan_id": plan["plan_id"],
-                        **binding,
-                        "plan_digest": plan["plan_digest"],
-                        "authority_digest": plan["authority_digest"],
                         "confirmation_token": plan["confirmation_token"],
                         "idempotency_key": "multi-e2e-start-key-001",
                     },
                 )
-                self.assertEqual(started["authority_digest"], plan["authority_digest"])
+                self.assertEqual(started["plan_digest"], plan["plan_digest"])
                 job = wait_job(client, flow["flow_id"], started["job_id"])
                 self.assertEqual("succeeded", job["status"])
                 self.assertEqual("partial", job["completion"])
@@ -474,20 +461,17 @@ class StdioScenarioE2ETests(unittest.TestCase):
                     {
                         "flow_id": flow["flow_id"],
                         "plan_id": plan["plan_id"],
-                        **binding,
-                        "plan_digest": plan["plan_digest"],
-                        "authority_digest": plan["authority_digest"],
                         "confirmation_token": plan["confirmation_token"],
                         "idempotency_key": "web-e2e-start-key-0001",
                     },
                 )
-                self.assertEqual(started["authority_digest"], plan["authority_digest"])
+                self.assertEqual(started["plan_digest"], plan["plan_digest"])
                 job = wait_job(client, flow["flow_id"], started["job_id"])
                 self.assertEqual("succeeded", job["status"])
                 self.assertEqual("complete", job["completion"])
                 self.assertEqual(1, len(job["assets"]))
                 asset = job["assets"][0]
-                self.assertEqual("application/zip", asset["media_type"])
+                self.assertEqual("text/html", asset["media_type"])
                 self.assertEqual("primary", asset["role"])
                 self.assertEqual(1, asset["order"])
                 archived = call_ok(

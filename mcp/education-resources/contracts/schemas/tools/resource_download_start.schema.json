@@ -11,19 +11,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "contract_version", "flow_id", "plan_id", "presentation_id",
-        "presented_version", "selection_version", "selection_digest",
-        "plan_digest", "confirmation_token", "idempotency_key"
+        "contract_version", "flow_id", "plan_id",
+        "confirmation_token", "idempotency_key"
       ],
       "properties": {
         "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
         "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
         "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
-        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
-        "presented_version": {"type": "integer", "minimum": 1},
-        "selection_version": {"type": "integer", "minimum": 1},
-        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
-        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
         "confirmation_token": {"$ref": "../common.schema.json#/$defs/confirmation_token"},
         "idempotency_key": {"$ref": "../common.schema.json#/$defs/idempotency_key"}
       }
