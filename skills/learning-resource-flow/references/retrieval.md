@@ -56,8 +56,6 @@ MCP factual `coverage` 只说明服务端实际观察到的候选、来源、去
 
 - 每方向通常 1 个主力来源，必要时加 1–2 个真正互补来源；
 - 每个平台每轮通常 1 个聚焦 query；只有两个检索范围确实不重叠且总容量留有空间时最多 2 个，更高优先级 query 放前；
-- 常规窄主题或比较任务首轮 `replace` 显式设置 `resource_search limit=8`；
-- `limit` 是新 ResultSet 的总容量，不是本轮新增配额；`extend` 通常按 `next_limit=min(20, base_count+8)` 增长，常见序列为 `8 -> 16 -> 20`；
 - 常规任务最多 3 轮，明确要求全面横向比较时最多 4 轮。
 
 这些是规划预算，不是需要模型伪造的实际计数。
@@ -84,9 +82,31 @@ Legacy 中“一个平台一开始生成多条 query”的做法不恢复。当�
 
 ResultSet 始终不可变；跨轮复制、去重和新快照由 MCP 完成，Skill 不手工合并候选。
 
-`extend` 前从当前 Tool 结果或 `resource_flow_status.current_result_set.candidates` 取得 `base_count`。下一次 `limit` 必须大于 `base_count`，否则 base-first 总容量会占满新快照，本轮即使实际搜到新候选也不会进入 candidates。常规总容量上限为 20；已经达到 20 时停止 extend，并根据现有事实 Present、Clarify 或 StopWithGap。不得把 `platform_runs` 的 candidate count 当成候选已进入 ResultSet；只有新快照 `candidates` 中实际存在的项才能审查、Inspect 或展示。
+`extend` 前从当前 Tool 结果或 `resource_flow_status.current_result_set.candidates` 取得 `base_count`。不得把 `platform_runs` 的 candidate count 当成候选已进入 ResultSet；只有新快照 `candidates` 中实际存在的项才能审查、Inspect 或展示。
 
 `has_more=true` 只说明服务端还有未返回候选，不表示当前任务存在语义 Gap，也不构成自动翻页/继续搜索的理由。只有当前私有 Gap 仍存在，并且继续同一路线确实可能关闭它时，才继续取更多结果或 Replan。
+
+## 结果匹配检查
+
+搜到结果后、做 SemanticReview 之前，先回答一个关键问题：**这些结果真的回答了用户的问题吗？**
+
+不是"有没有搜到东西"，而是"这些结果对用户有用吗"。搜到 20 条关键词命中的视频不等于满足了用户的实际需求。
+
+典型不匹配场景：
+
+- 用户想给学龄前孩子找启蒙，结果全是面向小学生的系统课程；
+- 用户想找可打印的练习，结果全是讲解视频；
+- 用户想找某个版本教材，结果是不通用版本；
+- 结果标题命中但深度、形式或适用对象完全不匹配；
+- 结果是泛主题词典/聚合页，而非实质性学习内容。
+
+发现不匹配时**不要直接 Present**：
+
+- 不匹配的原因是需求不明确（如年龄、用途未知）→ Clarify；
+- 不匹配的原因是搜索方向偏差 → Replan 换方向或换来源；
+- 不匹配且无法通过搜索改善 → StopWithGap 如实说明。
+
+宁可追问或换方向，不要展示一堆不相关的结果让用户自己挑。
 
 每次 Replan 必须能回答两个问题：
 

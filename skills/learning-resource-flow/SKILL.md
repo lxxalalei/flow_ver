@@ -84,7 +84,7 @@ OpenClaw 的 `sessions_spawn` / `sessions_yield` / `subagents` 是唯一例外�
 
 ```text
 Understand
-  -> Clarify?                         # 仅缺失事实会改变结果时
+  -> Clarify?                         # 问清楚再搜，提问成本远低于搜索
   -> resource_flow_start / flow_status
   -> Plan SearchDirection
        └─ optional leaf sub-agents    # 只规划，Main Agent 汇总
@@ -92,6 +92,7 @@ Understand
   -> Evaluate MCP facts
   -> private SemanticReview
   -> Inspect?                         # 只检查会改变决策的高潜候选
+  -> 结果是否真正匹配用户需求？       # 不只是"有没有结果"，而是"这些结果对用户有用吗"
   -> private Gap + one StopDecision
        ├─ Replan -> optional Gap worker -> resource_search mode=extend -> Evaluate
        ├─ Clarify -> ask one minimal question
