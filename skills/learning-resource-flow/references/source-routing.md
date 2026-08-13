@@ -80,6 +80,7 @@ query 应先体现“这个平台在当前方向里要找什么”，再写成�
 - `runoob`：只在编程/计算机技术主题下提供结构化中文教程和实例价值。
 - `weibo` / `wechat`：适合机构发布、专题文章、活动/资料线索等生态内容，通常是发现补充，不替代原始权威来源。
 - `annas-archive`：只在图书/电子书/长文发现确有价值时考虑；必须继续遵守版权、访问与实际 acquisition 边界。
+- `shuge`：适合古籍、公版影印本的直链发现。搜索支持直接传入书格详情页链接（`shuge.org/view/<slug>`）或短链（`s.shuge.org/<code>`），适配器会提取书名并在公开存储（shuge.hanjihebi.com）定位 `/d/` 直链；书格网站自身的网盘分发通道不在本适配器范围。
 - `generic`：跨站发现官方机构、专业网页、长尾文章、具体文件、活动方案和未接入站点内容，是专门 Adapter 的补充路线，不是 acquisition fallback。
 
 平台画像只帮助回答“为什么值得搜这里”。不要从画像直接推导当前登录状态、可下载性、资源本体存在或 Provider 可用。
@@ -94,7 +95,7 @@ Registry 存在不能单独证明“现在能下载这个资源”。当前是�
 
 不要在本文件维护完整平台能力表、固定登录状态表或 acquisition route 快照。真实用户 Flow 中也不得通过 `read` / `exec` / MCP protocol resources 去打开仓库或运行时 Registry / ProviderSpec；候选和当前状态只看 13 个业务 `resource_*` Tool 的返回。若对 native platform ID 没有明确依据，不猜测、不扫描本地文件，改用当前目标本来就允许的 `generic` discovery route，或 StopWithGap。
 
-当前 0028 runtime 冻结的 native platform ID 命名空间是：`generic`、`bilibili`、`douyin`、`zhihu`、`smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、`annas-archive`、`weibo`、`wechat`。这只是封闭 ID 集，不是当前可获取能力表；未列出的站点只能作为 `generic` query 中的来源线索，不能临时发明 native platform ID。
+当前 0028 runtime 冻结的 native platform ID 命名空间是：`generic`、`bilibili`、`douyin`、`zhihu`、`smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、`annas-archive`、`weibo`、`wechat`、`shuge`。这只是封闭 ID 集，不是当前可获取能力表；未列出的站点只能作为 `generic` query 中的来源线索，不能临时发明 native platform ID。
 
 ## Search 与 Creator Browse
 

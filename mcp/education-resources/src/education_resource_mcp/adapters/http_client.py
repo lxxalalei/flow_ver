@@ -54,9 +54,16 @@ def urlopen_with_fallback(
     timeout: float = 20,
     *,
     follow_redirects: bool = True,
+    curl_on_status: frozenset[int] | None = None,
     **kwargs: Any,
 ) -> Any:
-    """Open URL with urllib, falling back to Windows curl for local CA issues."""
+    """Open URL with urllib, falling back to Windows curl for local CA issues.
+
+    ``curl_on_status`` optionally lists HTTP status codes (e.g. ``403``) for
+    which a Windows curl retry is attempted when the primary urllib request
+    is rejected, e.g. by Cloudflare bot fingerprinting.  A failed curl retry
+    surfaces the original HTTP error behaviour (HTTPError is re-raised).
+    """
 
     try:
         if follow_redirects:
@@ -65,6 +72,13 @@ def urlopen_with_fallback(
             raise TypeError("no-redirect requests do not accept urlopen keyword options")
         return build_opener(_NoRedirectHandler()).open(request, timeout=timeout)
     except URLError as exc:
+        if (
+            isinstance(exc, HTTPError)
+            and curl_on_status is not None
+            and exc.code in curl_on_status
+            and _curl_available()
+        ):
+            return _curl_open(request, timeout, follow_redirects=follow_redirects)
         if not _should_try_curl_fallback(exc):
             raise
         return _curl_open(request, timeout, follow_redirects=follow_redirects)
@@ -111,10 +125,16 @@ def probe_with_cookies(
     return probe_with_headers(url, headers, timeout)
 
 
+def _curl_available() -> bool:
+    if os.name != "nt":
+        return False
+    return shutil.which("curl.exe") is not None
+
+
 def _should_try_curl_fallback(exc: URLError) -> bool:
     if os.environ.get("LRS_HTTP_DISABLE_CURL_FALLBACK"):
         return False
-    if os.name != "nt" or shutil.which("curl.exe") is None:
+    if not _curl_available():
         return False
     reason = getattr(exc, "reason", exc)
     message = str(reason).lower()
