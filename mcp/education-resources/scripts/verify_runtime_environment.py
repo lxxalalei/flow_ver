@@ -86,7 +86,11 @@ def main() -> int:
                 f"installed {DISTRIBUTION_NAME} version is {distribution.version}, "
                 f"but pyproject declares {expected_version}"
             )
-        installed_requirements = sorted(distribution.requires or [])
+        installed_requirements = sorted(
+            requirement
+            for requirement in (distribution.requires or [])
+            if "extra ==" not in requirement
+        )
         if installed_requirements != expected_requirements:
             errors.append(
                 "installed package metadata dependencies differ from pyproject: "
