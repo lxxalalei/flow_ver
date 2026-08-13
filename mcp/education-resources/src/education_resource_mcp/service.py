@@ -341,11 +341,8 @@ class ResourceService:
             raise DomainError("INVALID_ARGUMENT", "replace 不得提供 base_result_set_id")
         if normalised_mode == "extend" and normalised_base is None:
             raise DomainError("INVALID_ARGUMENT", "extend 必须提供 base_result_set_id")
-        if not 1 <= limit <= self.settings.max_search_results:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                f"limit 必须在 1 到 {self.settings.max_search_results} 之间",
-            )
+        if not limit >= 1:
+            raise DomainError("INVALID_ARGUMENT", "limit 必须大于 0")
         # Validate and normalise search_tasks.
         if not search_tasks or not isinstance(search_tasks, list):
             raise DomainError("INVALID_ARGUMENT", "search_tasks 不能为空")
@@ -416,9 +413,8 @@ class ResourceService:
         metrics = self._retrieval_provenance(base_candidates, incoming_candidates)
         merged_candidates = deduplicate_candidates(
             [*base_candidates, *incoming_candidates],
-            limit=limit,
         )
-        retained_base_count = len(deduplicate_candidates(base_candidates, limit=limit))
+        retained_base_count = len(deduplicate_candidates(base_candidates))
         metrics["new_displayable_count"] = max(
             0,
             len(merged_candidates) - retained_base_count,
@@ -514,11 +510,8 @@ class ResourceService:
         )
         if effective_task_version != current_task_version:
             raise DomainError("TASK_VERSION_CONFLICT", "任务版本已经变化")
-        if not 1 <= limit <= self.settings.max_search_results:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                f"limit 必须在 1 到 {self.settings.max_search_results} 之间",
-            )
+        if not limit >= 1:
+            raise DomainError("INVALID_ARGUMENT", "limit 必须大于 0")
         creator_id = str(creator_id or "").strip()
         platform = str(platform or "").strip()
         if not creator_id or not platform:
@@ -2656,7 +2649,7 @@ class ResourceService:
             raw_resources,
             default_platform=default_platform,
         )
-        deduplicated = deduplicate_candidates(internal_candidates, limit=limit)
+        deduplicated = deduplicate_candidates(internal_candidates)
         return self._materialise_retrieval_candidates(deduplicated)
 
     def _normalise_retrieval_candidates(

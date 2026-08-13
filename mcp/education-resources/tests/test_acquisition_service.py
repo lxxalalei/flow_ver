@@ -109,7 +109,6 @@ def _settings(data_dir: Path) -> Settings:
         database_path=data_dir / "database.sqlite",
         jobs_dir=data_dir / "jobs",
         library_dir=data_dir / "library",
-        max_search_results=20,
         max_workers=2,
         plan_ttl_seconds=60,
     )

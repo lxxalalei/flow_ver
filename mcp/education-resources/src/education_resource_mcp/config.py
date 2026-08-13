@@ -34,8 +34,7 @@ class Settings:
     library_dir: Path
     search_timeout_seconds: int = 20
     download_timeout_seconds: int = 30
-    max_search_results: int = 20
-    max_workers: int = 2
+    max_workers: int = 8
     plan_ttl_seconds: int = 15 * 60
     searxng_base_url: str = ""
     session_manager_data_dir: Path | None = None
@@ -65,10 +64,7 @@ class Settings:
             download_timeout_seconds=_positive_int(
                 "EDUCATION_RESOURCE_MCP_DOWNLOAD_TIMEOUT", 30
             ),
-            max_search_results=_positive_int(
-                "EDUCATION_RESOURCE_MCP_MAX_RESULTS", 20
-            ),
-            max_workers=_positive_int("EDUCATION_RESOURCE_MCP_MAX_WORKERS", 2),
+            max_workers=_positive_int("EDUCATION_RESOURCE_MCP_MAX_WORKERS", 8),
             plan_ttl_seconds=_positive_int(
                 "EDUCATION_RESOURCE_MCP_PLAN_TTL", 15 * 60
             ),

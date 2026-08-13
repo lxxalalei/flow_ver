@@ -122,7 +122,7 @@ class BrowseCreatorContractTests(unittest.TestCase):
             )
             service = object.__new__(ResourceService)
             service.store = store
-            service.settings = SimpleNamespace(max_search_results=50)
+            service.settings = SimpleNamespace()
             service.search_provider = _CreatorProvider(with_failure=True)
 
             result = service.browse_creator(
@@ -181,7 +181,7 @@ class BrowseCreatorContractTests(unittest.TestCase):
             )
             service = object.__new__(ResourceService)
             service.store = store
-            service.settings = SimpleNamespace(max_search_results=50)
+            service.settings = SimpleNamespace()
             service.search_provider = _CreatorProvider(with_failure=False)
 
             result = service.browse_creator(

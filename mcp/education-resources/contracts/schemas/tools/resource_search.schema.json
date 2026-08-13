@@ -128,7 +128,7 @@
           "$ref": "#/$defs/bounded_count"
         },
         "new_displayable_count": {
-          "description": "New unique candidates from this search round that remain in the persisted ResultSet after applying the immutable snapshot's total-capacity limit.",
+          "description": "New unique candidates from this search round that remain in the persisted ResultSet after deduplication.",
           "$ref": "#/$defs/bounded_count"
         }
       }
@@ -261,7 +261,7 @@
         "candidate_count": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 50
+          "maximum": 200
         },
         "failure_count": {
           "type": "integer",
@@ -371,10 +371,10 @@
           "$ref": "#/$defs/SearchFilters"
         },
         "limit": {
-          "description": "Total candidate capacity of the new immutable ResultSet. In extend mode this capacity includes candidates copied from the base ResultSet; it is not an incremental quota.",
+          "description": "Maximum results each platform adapter returns per query. Does not truncate the merged ResultSet; all platform results are merged and deduplicated without a global cap.",
           "type": "integer",
           "minimum": 1,
-          "maximum": 50,
+          "maximum": 200,
           "default": 20
         },
         "mode": {
@@ -471,7 +471,6 @@
         },
         "candidates": {
           "type": "array",
-          "maxItems": 50,
           "items": {
             "$ref": "../common.schema.json#/$defs/resource_candidate"
           }

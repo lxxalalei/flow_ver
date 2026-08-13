@@ -148,7 +148,6 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             database_path=data_dir / "database.sqlite",
             jobs_dir=data_dir / "jobs",
             library_dir=data_dir / "学习资料库",
-            max_search_results=20,
             max_workers=2,
             plan_ttl_seconds=60,
         )
@@ -591,7 +590,6 @@ class ArchiveServiceFoundationTests(unittest.TestCase):
             database_path=self.settings.database_path,
             jobs_dir=self.settings.jobs_dir,
             library_dir=self.settings.library_dir,
-            max_search_results=self.settings.max_search_results,
             max_workers=1,
             plan_ttl_seconds=60,
             legacy_library_dirs=(legacy_root,),

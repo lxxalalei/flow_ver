@@ -174,7 +174,6 @@ class InspectServiceTests(unittest.TestCase):
             database_path=root / "database.sqlite",
             jobs_dir=root / "jobs",
             library_dir=root / "library",
-            max_search_results=20,
             max_workers=2,
         )
         self.inspector = CountingInspector()

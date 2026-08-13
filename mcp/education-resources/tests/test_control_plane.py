@@ -89,7 +89,6 @@ class V2ControlPlaneTests(unittest.TestCase):
             database_path=root / "database.sqlite",
             jobs_dir=root / "jobs",
             library_dir=root / "library",
-            max_search_results=20,
             max_workers=1,
         )
         self.service = self._service()

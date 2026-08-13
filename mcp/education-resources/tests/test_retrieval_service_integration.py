@@ -76,7 +76,7 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
     def _service(self, provider: _IntegrationProvider) -> ResourceService:
         service = object.__new__(ResourceService)
         service.store = self.store
-        service.settings = SimpleNamespace(max_search_results=50)
+        service.settings = SimpleNamespace()
         service.search_provider = provider
         return service
 
@@ -456,7 +456,8 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
         self.assertEqual(extended["result_set_id"], status["current_result_set"]["result_set_id"])
         self.assertEqual(2, status["current_result_set"]["round"])
 
-    def test_search_extend_limit_is_total_capacity_and_reports_retained_new_items(self) -> None:
+    def test_search_extend_merges_without_truncation_and_reports_new_items(self) -> None:
+        """limit controls per-adapter return, not the merged ResultSet size."""
         base_resources = [
             {
                 "platform": "generic",
@@ -472,10 +473,10 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
             creator_resources=[],
         )
         service = self._service(provider)
-        flow = self._flow("extend-total-capacity")
+        flow = self._flow("extend-no-truncation")
         first = service.search(
             flow["flow_id"],
-            "search-integration-capacity-01",
+            "search-integration-no-truncation-01",
             [{"platform": "generic", "queries": [{"query": "基础"}]}],
             task_version=flow["task_version"],
             limit=8,
@@ -491,9 +492,9 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
             }
         ]
 
-        saturated = service.search(
+        extended = service.search(
             flow["flow_id"],
-            "search-integration-capacity-02",
+            "search-integration-no-truncation-02",
             [{"platform": "bilibili", "queries": [{"query": "新增"}]}],
             task_version=flow["task_version"],
             mode="extend",
@@ -501,25 +502,11 @@ class RetrievalServiceIntegrationTests(unittest.TestCase):
             limit=8,
         )
 
-        self.assertEqual(8, len(saturated["candidates"]))
-        self.assertEqual({"generic"}, {item["platform"] for item in saturated["candidates"]})
-        self.assertEqual(1, saturated["provenance"]["new_unique_count"])
-        self.assertEqual(0, saturated["provenance"]["new_displayable_count"])
-
-        expanded = service.search(
-            flow["flow_id"],
-            "search-integration-capacity-03",
-            [{"platform": "bilibili", "queries": [{"query": "新增"}]}],
-            task_version=flow["task_version"],
-            mode="extend",
-            base_result_set_id=saturated["result_set_id"],
-            limit=16,
-        )
-
-        self.assertEqual(9, len(expanded["candidates"]))
-        self.assertEqual("bilibili", expanded["candidates"][-1]["platform"])
-        self.assertEqual(1, expanded["provenance"]["new_unique_count"])
-        self.assertEqual(1, expanded["provenance"]["new_displayable_count"])
+        # All 8 base + 1 new = 9 candidates — no global truncation.
+        self.assertEqual(9, len(extended["candidates"]))
+        self.assertEqual("bilibili", extended["candidates"][-1]["platform"])
+        self.assertEqual(1, extended["provenance"]["new_unique_count"])
+        self.assertEqual(1, extended["provenance"]["new_displayable_count"])
         self.assertEqual(base_snapshot, self.store.get_result_set(first["result_set_id"]))
 
     def test_search_extend_rejects_stale_base_without_provider_call(self) -> None:

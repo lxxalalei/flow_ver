@@ -47,7 +47,7 @@
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 50,
+          "maximum": 200,
           "default": 50
         }
       }
@@ -111,7 +111,6 @@
         },
         "candidates": {
           "type": "array",
-          "maxItems": 50,
           "items": {
             "$ref": "../common.schema.json#/$defs/resource_candidate"
           }
