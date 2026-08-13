@@ -1,6 +1,6 @@
 ---
 name: learning-resource-flow
-description: 找书/搜书/查书/找资源/下载/归档图书、课程、视频、文章、教材、音频等学习资源的唯一入口；用户提出此类需求或继续资源任务时，先按本技能流程用 education-resources 的 resource_* 工具执行。
+description: 学习资源（图书、课程、视频、文章、教材、音频等）搜索与获取的唯一入口；用户找书、找课程、找视频、搜资料、下载或归档资源，或继续资源任务时，先按本技能流程用 education-resources 的 resource_* 工具执行。
 ---
 
 # Learning Resource Flow
