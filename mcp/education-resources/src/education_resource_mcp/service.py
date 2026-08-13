@@ -1810,7 +1810,9 @@ class ResourceService:
         job = self.store.get_job(job_id)
         if job is None or job["flow_id"] != flow_id or asset["job_id"] != job_id:
             raise DomainError("ASSET_NOT_FOUND", "资产不属于当前 Flow")
-        if job["status"] != "succeeded" or asset["status"] != "ready":
+        if job["status"] not in {"succeeded", "failed", "cancelled"}:
+            raise DomainError("ASSET_NOT_ARCHIVABLE", "只有成功且校验通过的资产可以归档")
+        if asset["status"] != "ready":
             raise DomainError("ASSET_NOT_ARCHIVABLE", "只有成功且校验通过的资产可以归档")
         try:
             asset = self.store.assert_asset_archivable(asset_id)

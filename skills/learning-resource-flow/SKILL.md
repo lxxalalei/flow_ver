@@ -168,18 +168,13 @@ Replan 时只有当前 Gap 的搜索规划本身仍复杂才使用 1 个 Gap wor
 
 若用户要求比较 N 个来源，而当前 ResultSet 已有至少 N 个语义可用候选，剩余关键 Gap 只有 inspection，则只做有预算的 Selective Inspect，不再扩写近义 query 或换 MCP 外工具。
 
-`resource_search limit` 表示**新 ResultSet 的总容量**，不是本轮新增配额：
+`resource_search` 的 `limit` 控制每平台适配器的返回量（默认 20），不截断合并后的 ResultSet。各平台结果合并去重后全部进入 ResultSet，由 Presentation 层精选展示。
 
-- 常规首轮 `replace` 通常 `limit=8`；
-- `extend` 前数当前候选，通常 `next_limit=min(20, base_count+8)`；
-- 常见容量变化为 `8 -> 16 -> 20`；
-- `extend limit` 必须大于 `base_count`；已达 20 时不再用相同 limit 假装补来源。
-
-每个平台每轮通常只提交 1 条聚焦 query；确有两个不重叠范围且容量足够时最多 2 条。Tool 输出截断时不读日志、spill 文件或 SQLite；用 `resource_flow_status` 恢复服务端摘要。
+每个平台每轮通常只提交 1 条聚焦 query；确有两个不重叠范围时最多 2 条。
 
 候选数量、标题命中、平台数量、`coverage.status` 或 SearchDirection 都不能单独触发 Present。只有当前事实和私有语义审查足以支持用户决策时才展示。
 
-低相关、偏题或字典页结果只能描述为“当前结果相关性不足”。除非 Tool 明确返回改写/分词证据，不猜 Adapter 内部原因。
+低相关、偏题或字典页结果只能描述为”当前结果相关性不足”。
 
 ### 公开/无需登录约束
 

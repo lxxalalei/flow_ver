@@ -200,7 +200,7 @@ class GenericWebSearchProvider:
             )
             all_resources.extend(task_resources)
 
-        return all_resources[:limit], platform_runs
+        return all_resources, platform_runs
 
 
 class SearXNGSearchProvider:
@@ -326,7 +326,7 @@ class SearXNGSearchProvider:
             if len(all_resources) >= limit:
                 break
 
-        return all_resources[:limit], all_errors
+        return all_resources, all_errors
 
     def search(
         self, search_tasks: list[dict[str, Any]], limit: int
@@ -389,7 +389,7 @@ class SearXNGSearchProvider:
             )
             all_resources.extend(task_resources)
 
-        return all_resources[:limit], platform_runs
+        return all_resources, platform_runs
 
 
 class MultiPlatformSearchProvider:
@@ -723,7 +723,7 @@ class MultiPlatformSearchProvider:
                 platform_runs.append(run)
                 all_resources.extend(resources)
 
-        return all_resources[:limit], platform_runs
+        return all_resources, platform_runs
 
 
 def default_search_provider(
@@ -795,4 +795,4 @@ class StaticSearchProvider:
             )
             all_resources.extend(task_resources)
 
-        return all_resources[:limit], platform_runs
+        return all_resources, platform_runs
