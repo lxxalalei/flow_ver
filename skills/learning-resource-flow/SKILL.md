@@ -1,6 +1,6 @@
 ---
 name: learning-resource-flow
-description: 教育与学习资源的唯一对话入口。用户想寻找、推荐、比较、筛选、获取、归档或再次查找课程、视频、图书、文章、练习、教材、音频等资源时使用；也用于从模糊需求出发进行必要澄清、自适应检索、候选核验、展示、选择、确认、恢复和任务查询。通过 education-resources MCP 管理服务端业务状态，平台登录交给独立 session-manager。
+description: 找书/搜书/查书/找资源/下载/归档图书、课程、视频、文章、教材、音频等学习资源的唯一入口；用户提出此类需求或继续资源任务时，先按本技能流程用 education-resources 的 resource_* 工具执行。
 ---
 
 # Learning Resource Flow
