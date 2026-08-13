@@ -50,13 +50,6 @@ class ResourceIdentity:
         if self.fingerprint:
             return "fingerprint"
         return None
-
-    @property
-    def identity_type(self) -> str | None:
-        """Readable alias for callers that use ``identity_type``."""
-
-        return self.kind
-
     @property
     def type(self) -> str | None:
         """Compatibility alias matching the planning document's JSON sketch."""
@@ -74,17 +67,6 @@ class ResourceIdentity:
         if self.canonical_url:
             return self.canonical_url
         return self.fingerprint
-
-    @property
-    def strength(self) -> int:
-        return {
-            "platform_id": 500,
-            "isbn": 400,
-            "doi": 300,
-            "canonical_url": 200,
-            "fingerprint": 100,
-        }.get(self.kind or "", 0)
-
     @property
     def is_strong(self) -> bool:
         return self.kind in {"platform_id", "isbn", "doi", "canonical_url"}
@@ -169,20 +151,6 @@ class ResourceIdentity:
                 else None
             ),
         )
-
-    def with_missing(self, other: "ResourceIdentity") -> "ResourceIdentity":
-        """Fill absent evidence while retaining this identity's facts."""
-
-        return ResourceIdentity(
-            platform=self.platform or other.platform,
-            native_type=self.native_type or other.native_type,
-            native_id=self.native_id or other.native_id,
-            isbn=self.isbn or other.isbn,
-            doi=self.doi or other.doi,
-            canonical_url=self.canonical_url or other.canonical_url,
-            fingerprint=self.fingerprint or other.fingerprint,
-        )
-
     def to_mapping(self) -> dict[str, Any]:
         result: dict[str, Any] = {"platform": self.platform}
         if self.native_id:

@@ -120,13 +120,6 @@ def _value(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
-def _resource_from_request(request: Any) -> Any:
-    resource = _value(request, "resource")
-    if resource is None:
-        resource = _value(request, "resource_record")
-    return resource if resource is not None else {}
-
-
 def _config_value(config: Any, settings: Any, names: tuple[str, ...], default: Any) -> Any:
     for source in (config, settings):
         if source is None:

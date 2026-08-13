@@ -465,17 +465,3 @@ class SessionStore:
             if existed:
                 path.unlink()
         return {"platform": platform, "deleted": existed}
-
-    def mark_expired(self, platform: str) -> dict[str, Any]:
-        """Mark a session as expired without deleting it."""
-        with self._lock:
-            record = self._read(self._path(platform))
-            if record is None:
-                return {"platform": platform, "status": "missing"}
-            record["status"] = "expired"
-            record["updated_at"] = _utc_now()
-            self._path(platform).write_text(
-                json.dumps(record, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        return {"platform": platform, "status": "expired"}

@@ -840,40 +840,6 @@ class InspectionRouter:
     @property
     def registered_platforms(self) -> tuple[str, ...]:
         return tuple(sorted(self._inspectors))
-
-    @property
-    def registered_inspectors(self) -> Mapping[str, Mapping[str, Any]]:
-        """Return a read-only runtime inventory of instantiated inspectors.
-
-        The inventory is deliberately sourced from the inspector instances,
-        never from the retrieval/catalog registry.  Adapters may declare a
-        ``supported_scopes`` tuple; an absent declaration is represented as an
-        empty tuple rather than inferred from catalog claims.
-        """
-
-        inventory: dict[str, Mapping[str, Any]] = {}
-        for platform_id, inspector in self._inspectors.items():
-            raw_scopes = getattr(inspector, "supported_scopes", ())
-            if isinstance(raw_scopes, (str, bytes, bytearray)):
-                scopes: tuple[str, ...] = ()
-            elif isinstance(raw_scopes, Sequence):
-                valid_scopes = {
-                    scope
-                    for scope in raw_scopes
-                    if isinstance(scope, str) and _SCOPE_RE.fullmatch(scope) is not None
-                }
-                scopes = tuple(sorted(valid_scopes))
-            else:
-                scopes = ()
-            entry = {
-                "platform_id": platform_id,
-                "inspector_id": getattr(inspector, "inspector_id", ""),
-                "version": getattr(inspector, "version", ""),
-                "supported_scopes": scopes,
-            }
-            inventory[platform_id] = MappingProxyType(entry)
-        return MappingProxyType(inventory)
-
     def inspect(self, resource: Mapping[str, Any]) -> InspectionResult:
         if not isinstance(resource, Mapping):
             _unsupported()

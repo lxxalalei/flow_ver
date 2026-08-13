@@ -108,16 +108,6 @@ def _first_value(data: dict[str, Any], keys: list[str]) -> Any:
     return ""
 
 
-def _grade_to_chinese(value: str) -> str:
-    cn_digits = "零一二三四五六七八九十"
-    m = re.match(r"^(\d+)$", value)
-    if m:
-        n = int(m.group(1))
-        if 0 <= n <= 12:
-            return cn_digits[n] + "年级"
-    return value
-
-
 # ---------------------------------------------------------------------------
 # Search-item extraction (ported from _search.py)
 # ---------------------------------------------------------------------------

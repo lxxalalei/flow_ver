@@ -129,61 +129,6 @@ class NetworkPolicyTests(unittest.TestCase):
 
         self.assertEqual(result.addresses, (ipaddress.ip_address("93.184.216.34"),))
         self.assertEqual(resolver.calls, [])
-
-    def test_redirect_targets_are_allowlisted_and_resolved_at_every_hop(self) -> None:
-        policy, resolver = self.make_policy(
-            {
-                "assets.example": ("93.184.216.34",),
-                "cdn.example": ("142.250.72.14",),
-            },
-            allowed_hosts=("assets.example", "cdn.example"),
-        )
-
-        result = policy.validate_redirect_chain(
-            "https://assets.example/start",
-            ("/middle", "https://cdn.example/final"),
-        )
-
-        self.assertEqual(result.hostname, "cdn.example")
-        self.assertEqual(
-            resolver.calls,
-            [
-                ("assets.example", 443),
-                ("assets.example", 443),
-                ("cdn.example", 443),
-            ],
-        )
-
-    def test_redirect_cannot_escape_host_policy(self) -> None:
-        host_policy, _resolver = self.make_policy()
-
-        self.assert_policy_code(
-            "host_not_allowed",
-            lambda: host_policy.validate_redirect(
-                "https://assets.example/start", "//evil.example/file"
-            ),
-        )
-
-    def test_redirect_limit_is_enforced(self) -> None:
-        policy, _resolver = self.make_policy(max_redirects=1)
-
-        self.assert_policy_code(
-            "too_many_redirects",
-            lambda: policy.validate_redirect_chain(
-                "https://assets.example/start", ("/one", "/two")
-            ),
-        )
-
-    def test_redirect_rejects_control_characters_before_url_join(self) -> None:
-        policy, _resolver = self.make_policy()
-
-        self.assert_policy_code(
-            "redirect_control_character",
-            lambda: policy.validate_redirect(
-                "https://assets.example/start", "\n//evil.example/file"
-            ),
-        )
-
     def test_compatibility_url_helper_supports_injected_dns_and_allowlist(self) -> None:
         resolver = RecordingResolver({"assets.example": ("93.184.216.34",)})
 

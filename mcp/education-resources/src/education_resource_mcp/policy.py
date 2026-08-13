@@ -241,45 +241,6 @@ class NetworkPolicy:
             port=effective_port,
             addresses=unique_addresses,
         )
-
-    def validate_redirect(self, current_url: str, location: str) -> ValidatedUrl:
-        """Resolve and validate one redirect target relative to *current_url*."""
-
-        current = self.validate_url(current_url)
-        if not isinstance(location, str) or not location:
-            raise PolicyViolation(
-                "invalid_redirect", "redirect location must be a non-empty string"
-            )
-        _reject_control_characters(
-            location, code="redirect_control_character", label="redirect location"
-        )
-        return self.validate_url(urljoin(current.url, location))
-
-    def validate_redirect_chain(
-        self, initial_url: str, locations: Sequence[str]
-    ) -> ValidatedUrl:
-        """Validate an initial URL and each redirect target in order."""
-
-        if len(locations) > self.max_redirects:
-            raise PolicyViolation(
-                "too_many_redirects",
-                f"redirect count exceeds the limit of {self.max_redirects}",
-            )
-        current = self.validate_url(initial_url)
-        for location in locations:
-            if not isinstance(location, str) or not location:
-                raise PolicyViolation(
-                    "invalid_redirect", "redirect location must be a non-empty string"
-                )
-            _reject_control_characters(
-                location,
-                code="redirect_control_character",
-                label="redirect location",
-            )
-            current = self.validate_url(urljoin(current.url, location))
-        return current
-
-
 def _fully_unquote(value: str) -> str:
     decoded = value
     # A successful percent decode shortens the string, so at most ``len(value)``

@@ -1485,25 +1485,6 @@ class Store:
             allow_nan=False,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-    @classmethod
-    def _canonicalize_source_fingerprint(value: Any, field: str) -> str:
-        """Normalize cache-key and authority spellings at their boundary.
-
-        ``resource_resolutions`` intentionally keeps the bare SHA-256 cache key
-        for its uniqueness constraint, whereas Plans and execution bindings use
-        the contract-level ``sha256:`` spelling.  Both are server-generated
-        facts for the same source fingerprint; this helper is deliberately
-        restricted to comparing that persisted cache value with authority.
-        """
-
-        normalized = Store._bounded_authority_text(value, field, maximum=71)
-        if re.fullmatch(r"[a-f0-9]{64}", normalized) is not None:
-            return f"sha256:{normalized}"
-        if re.fullmatch(r"sha256:[a-f0-9]{64}", normalized) is not None:
-            return normalized
-        raise ValueError(f"invalid_{field}")
-
     @staticmethod
     def _replay_in_transaction(
         connection: sqlite3.Connection, scope: str, key: str, request_hash: str
@@ -1893,12 +1874,6 @@ class Store:
                 now,
             )
         return result
-
-    def save_resource_resolution(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Compatibility name for the atomic Resolution write."""
-
-        return self.save_resolution(*args, **kwargs)
-
     def create_flow(
         self,
         task: dict[str, Any],
@@ -2406,70 +2381,6 @@ class Store:
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError(f"invalid_{field}")
         return parsed.astimezone(timezone.utc).isoformat()
-
-    @classmethod
-    def _resolution_representation_evidence(
-        cls,
-        resolved: Mapping[str, Any],
-        *,
-        resource_id: str,
-        resolution_id: str,
-        representation_id: str,
-    ) -> dict[str, Any]:
-        """Return the exact selected representation from a Resolution.
-
-        Representation IDs absent from inspector output are derived with the
-        same canonical formula as ``CapabilityAuthorityCoordinator``.  The
-        method never selects the first representation or upgrades its scope.
-        """
-
-        values = resolved.get("representations")
-        if not values:
-            single = resolved.get("representation")
-            values = [single] if isinstance(single, Mapping) else []
-        if not isinstance(values, (list, tuple)):
-            values = [values]
-        matches: list[dict[str, Any]] = []
-        for raw in values:
-            if not isinstance(raw, Mapping):
-                continue
-            evidence = _copy_resolution_json(raw)
-            if not isinstance(evidence, dict):  # pragma: no cover - type invariant
-                continue
-            observed_id = evidence.get("representation_id")
-            if not isinstance(observed_id, str) or not observed_id:
-                observed_id = "repr_" + cls._request_digest(
-                    {
-                        "resource_id": resource_id,
-                        "resolution_id": resolution_id,
-                        "representation": evidence,
-                    }
-                )[:32]
-            if observed_id == representation_id:
-                matches.append(evidence)
-        if len(matches) != 1:
-            raise RuntimeError("resolution_stale")
-        return matches[0]
-
-    @staticmethod
-    def _assert_representation_evidence_matches(
-        planned: Mapping[str, Any], observed: Mapping[str, Any]
-    ) -> None:
-        """Compare immutable Resolution evidence with bounded Plan additions."""
-
-        planned_copy = _copy_resolution_json(planned)
-        observed_copy = _copy_resolution_json(observed)
-        if not isinstance(planned_copy, dict) or not isinstance(observed_copy, dict):
-            raise RuntimeError("representation_drift")
-        for key, value in observed_copy.items():
-            if key not in planned_copy or planned_copy[key] != value:
-                raise RuntimeError("representation_drift")
-        # Capability preparation may add only these execution constraints to
-        # otherwise immutable Resolution evidence.  No arbitrary enrichment is
-        # accepted at the storage authority boundary.
-        if set(planned_copy) - set(observed_copy) - {"selected_container"}:
-            raise RuntimeError("representation_drift")
-
     def get_result_set(self, result_set_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -2580,63 +2491,6 @@ class Store:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
-
-    def replace_presented_resources(
-        self, flow_id: str, resources: list[dict[str, Any]]
-    ) -> int:
-        now = utc_now()
-        with self.transaction(immediate=True) as connection:
-            row = connection.execute(
-                "SELECT presented_version FROM flows WHERE flow_id = ?", (flow_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(flow_id)
-            version = int(row["presented_version"]) + 1
-            for resource in resources:
-                connection.execute(
-                    """
-                    INSERT INTO resources(
-                        resource_id, flow_id, presented_version, platform, title,
-                        source_url, resource_type, summary, metadata_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        resource["resource_id"],
-                        flow_id,
-                        version,
-                        resource["platform"],
-                        resource["title"],
-                        resource["source_url"],
-                        resource["resource_type"],
-                        resource.get("summary"),
-                        _json(resource.get("metadata", {})),
-                        now,
-                    ),
-                )
-            connection.execute(
-                "UPDATE flows SET presented_version = ?, updated_at = ? WHERE flow_id = ?",
-                (version, now, flow_id),
-            )
-        return version
-
-    def list_presented_resources(self, flow_id: str, version: int) -> list[dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM resources
-                WHERE flow_id = ? AND presented_version = ?
-                ORDER BY created_at, resource_id
-                """,
-                (flow_id, version),
-            ).fetchall()
-        output = []
-        for row in rows:
-            item = dict(row)
-            item["metadata"] = _load(item.pop("metadata_json"), {})
-            item["identity"] = _load(item.pop("identity_json", "{}"), {})
-            output.append(item)
-        return output
-
     def get_resources(self, flow_id: str, resource_ids: list[str]) -> list[dict[str, Any]]:
         if not resource_ids:
             return []
@@ -4360,64 +4214,6 @@ class Store:
                 (job_id,),
             ).fetchall()
             return [self._decode_asset_bundle(connection, row) for row in rows]
-
-    def create_asset(
-        self,
-        job_id: str,
-        resource_id: str,
-        local_path: Path,
-        byte_size: int,
-        media_type: str,
-        sha256: str,
-        filename: str,
-    ) -> dict[str, Any]:
-        """Compatibility wrapper that preserves the authoritative Bundle graph.
-
-        New ready Assets may not exist as orphan rows or appear after a Job has
-        left ``running``.  Older internal callers that still submit one validated
-        file are therefore mapped to a singleton primary Bundle and inherit the
-        same Job-state CAS, replay and cancellation guards as every other asset
-        publication path.
-        """
-
-        bundle = self.persist_asset_bundle(
-            job_id,
-            resource_id,
-            item_specs=[
-                {
-                    "position": 0,
-                    "role": "primary",
-                    "status": "ready",
-                    "required": True,
-                    "metadata": {},
-                    "local_path": str(local_path),
-                    "byte_size": byte_size,
-                    "media_type": media_type,
-                    "sha256": sha256,
-                    "filename": filename,
-                }
-            ],
-            failures=[],
-            completion="complete",
-        )
-        primary = next(
-            (
-                item
-                for item in bundle.get("items", [])
-                if isinstance(item, Mapping)
-                and item.get("role") == "primary"
-                and item.get("status") == "ready"
-                and isinstance(item.get("asset_id"), str)
-            ),
-            None,
-        )
-        if primary is None:  # pragma: no cover - Bundle invariant
-            raise RuntimeError("asset_bundle_primary_missing")
-        asset = self.get_asset(str(primary["asset_id"]))
-        if asset is None:  # pragma: no cover - transaction invariant
-            raise RuntimeError("asset_bundle_asset_missing")
-        return asset
-
     def get_asset(self, asset_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -4470,103 +4266,6 @@ class Store:
         )
         changed += int(cursor.rowcount)
         return changed
-
-    def quarantine_job_assets(self, job_id: str) -> None:
-        with self.transaction(immediate=True) as connection:
-            job = connection.execute(
-                "SELECT status FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            if job is None:
-                return
-            bundle_status = (
-                "cancelled"
-                if str(job["status"]) in {"cancelling", "cancelled"}
-                else "failed"
-            )
-            self._quarantine_job_assets_in_transaction(
-                connection,
-                job_id,
-                bundle_status=bundle_status,
-                updated_at=utc_now(),
-            )
-
-    def restore_quarantined_succeeded_assets(self, job_id: str) -> int:
-        """Restore assets wrongly quarantined by interrupted-job cleanup.
-
-        Only assets whose execution outcome is already ``succeeded`` and whose
-        downloaded file still exists and matches the recorded sha256 are
-        restored.  This corrects the all-or-nothing quarantine applied when a
-        Job was interrupted (e.g. MCP restart) while some items had already
-        succeeded; it never fabricates success for items that actually failed.
-        """
-        now = utc_now()
-        restored = 0
-        with self.transaction(immediate=True) as connection:
-            outcome_rows = connection.execute(
-                """
-                SELECT resource_id, bundle_id
-                FROM execution_outcomes
-                WHERE job_id = ? AND status = 'succeeded' AND bundle_id IS NOT NULL
-                """,
-                (job_id,),
-            ).fetchall()
-            for row in outcome_rows:
-                resource_id = str(row["resource_id"])
-                bundle_id = str(row["bundle_id"])
-                bundle = connection.execute(
-                    "SELECT status, completion FROM asset_bundles WHERE bundle_id = ?",
-                    (bundle_id,),
-                ).fetchone()
-                if bundle is None:
-                    continue
-                items = connection.execute(
-                    """
-                    SELECT asset_id FROM asset_bundle_items
-                    WHERE bundle_id = ? AND asset_id IS NOT NULL
-                    """,
-                    (bundle_id,),
-                ).fetchall()
-                for item in items:
-                    asset_id = str(item["asset_id"])
-                    asset = connection.execute(
-                        "SELECT status, local_path, sha256 FROM assets WHERE asset_id = ?",
-                        (asset_id,),
-                    ).fetchone()
-                    if asset is None or str(asset["status"]) != "quarantined":
-                        continue
-                    local_path = asset["local_path"]
-                    if not local_path or not Path(local_path).is_file():
-                        continue
-                    recorded = asset["sha256"]
-                    if recorded:
-                        digest = hashlib.sha256()
-                        with Path(local_path).open("rb") as handle:
-                            for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                                digest.update(chunk)
-                        if digest.hexdigest() != str(recorded):
-                            continue
-                    connection.execute(
-                        "UPDATE assets SET status = 'ready' WHERE asset_id = ?",
-                        (asset_id,),
-                    )
-                    connection.execute(
-                        """
-                        UPDATE asset_bundle_items SET status = 'ready', updated_at = ?
-                        WHERE bundle_id = ? AND asset_id = ?
-                        """,
-                        (now, bundle_id, asset_id),
-                    )
-                    restored += 1
-                connection.execute(
-                    """
-                    UPDATE asset_bundles
-                    SET status = 'succeeded', completion = 'complete', updated_at = ?
-                    WHERE bundle_id = ? AND resource_id = ?
-                    """,
-                    (now, bundle_id, resource_id),
-                )
-        return restored
-
     def get_archive_for_asset(self, asset_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -5089,12 +4788,6 @@ class Store:
         self, archive_id: str, error: dict[str, Any] | None = None
     ) -> None:
         self._mark_archive_problem(archive_id, "missing", error)
-
-    def mark_archive_corrupt(
-        self, archive_id: str, error: dict[str, Any] | None = None
-    ) -> None:
-        self._mark_archive_problem(archive_id, "corrupt", error)
-
     def list_archive_reconciliation_items(
         self,
         statuses: tuple[str, ...] = ("pending", "ready"),

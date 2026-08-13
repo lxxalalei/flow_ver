@@ -47,13 +47,13 @@ Provider 能力改为轻量 `ProviderSpec` + Start 前运行时检查。`source_
 
 ```text
 server.py
-  -> simple_service.py
-     -> acquisition/planner.py
-     -> acquisition/simple.py
-     -> simple_storage.py
+  -> service.py (ResourceService)
+     -> acquisition/planner.py   # ProviderSpec / route planning
+     -> acquisition/simple.py    # AcquisitionRequest / AcquisitionRouter
+     -> storage.py (Store)
 ```
 
-0037 前的旧 authority 代码暂时还在源码中作为迁移兼容基座，后续 cleanup 会物理删除；它们不再是新 acquisition 写入路径。
+0037 前的旧 authority 残留（migration 1-7 旧表定义、旧数据读兼容路径）仅为旧库升级和已存储数据可读保留，不再是新 acquisition 写入路径。
 
 ## 目录
 
@@ -61,15 +61,13 @@ server.py
 contracts/                  # 当前公共 Tool/Schema/平台/分类契约
 src/education_resource_mcp/
 ├── server.py               # stdio MCP 入口
-├── simple_service.py       # 当前 Active 获取服务切换层
-├── simple_storage.py       # migration 8 与简化 Plan/JobItem/Outcome
-├── service.py              # 0037 前成熟服务基座；待后续兼容清理
-├── storage.py              # 0037 前成熟存储基座；待后续兼容清理
+├── service.py              # 领域服务（下载项并发受 Provider 声明约束）
+├── storage.py              # SQLite 状态权威（Flow/Plan/Job/Asset/Library）
 ├── adapters/               # 平台 Search/Inspect/Provider Adapter
 ├── retrieval/              # 候选归一化、身份与去重
 └── acquisition/
     ├── planner.py          # ProviderSpec / route planning
-    ├── simple.py           # 简化 Provider request/router boundary
+    ├── simple.py           # AcquisitionRequest / AcquisitionRouter
     └── ...                 # Provider 与网页物化实现
 scripts/                    # 隔离测试与运行环境校验脚本
 tests/                      # 单元、契约、安全与 stdio 测试

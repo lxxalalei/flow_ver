@@ -246,10 +246,10 @@ class AcquisitionBatchTests(unittest.TestCase):
             DownloadBatchResult([value] * 51, ())
         batch = DownloadBatchResult([value], [])
         self.assertEqual(batch.results[0].item_key, "ordered")
-        payload = json.loads(batch.to_json())
+        payload = batch.to_dict()
         self.assertEqual(payload["results"][0]["item_key"], "ordered")
         self.assertNotIn("path", payload["results"][0])
-        self.assertNotIn(str(self.root), batch.to_json())
+        self.assertNotIn(str(self.root), json.dumps(payload, ensure_ascii=False))
 
     def test_cancelled_request_does_not_call_provider_and_keeps_planned_facts(self) -> None:
         cancel = threading.Event()

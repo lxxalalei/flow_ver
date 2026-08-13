@@ -419,11 +419,6 @@ class CapabilityDescriptor:
         """Alias used by callers that call capability scope simply ``scope``."""
 
         return self.capability_scope
-
-    @property
-    def is_legacy(self) -> bool:
-        return self.legacy_descriptor
-
     @property
     def capability_id(self) -> str:
         """Contract alias for the descriptor identifier."""
@@ -458,16 +453,6 @@ class CapabilityDescriptor:
     @property
     def fallback(self) -> Mapping[str, Any] | None:
         return self.fallbacks[0] if self.fallbacks else None
-
-    @property
-    def has_concrete_primary(self) -> bool:
-        return any(
-            isinstance(item, Mapping)
-            and str(item.get("role") or item.get("kind") or "") == "primary"
-            and bool(item.get("concrete", True))
-            for item in self.representations
-        )
-
     def matches(
         self,
         *,
@@ -680,11 +665,6 @@ class ReadinessSnapshot:
     @property
     def registry_digest_sha256(self) -> str:
         return f"sha256:{self.registry_digest}" if self.registry_digest else ""
-
-    @property
-    def snapshot_digest_sha256(self) -> str:
-        return f"sha256:{self.snapshot_digest}" if self.snapshot_digest else ""
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "snapshot_id": self.snapshot_id,

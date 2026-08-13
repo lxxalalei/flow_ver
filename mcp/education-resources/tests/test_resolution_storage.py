@@ -219,7 +219,7 @@ class ResolutionStorageTests(unittest.TestCase):
         self.assertEqual(resolved["resolution_id"], resolved_cache["resolution_id"])
         self.assertTrue(resolved_cache["cacheable"])
 
-        partial = self.store.save_resource_resolution(
+        partial = self.store.save_resolution(
             self.flow_id,
             "res_a",
             "inspect-v1",
@@ -308,7 +308,7 @@ class ResolutionStorageTests(unittest.TestCase):
             resolved={"title": "旧结果"},
         )
         time.sleep(0.002)
-        latest = self.store.save_resource_resolution(
+        latest = self.store.save_resolution(
             self.flow_id,
             "res_a",
             "inspect-v1",

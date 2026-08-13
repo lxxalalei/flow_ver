@@ -390,71 +390,18 @@ class AssetBundleStorageTests(unittest.TestCase):
                 "resource_a",
                 [{"role": "primary", "position": 0, "status": "ready", "asset_id": asset}],
             )
-
-    def test_create_asset_compatibility_wrapper_persists_singleton_bundle(self) -> None:
-        asset = self.store.create_asset(
-            "job_a",
-            "resource_a",
-            Path("/controlled/compat.pdf"),
-            17,
-            "application/pdf",
-            "f" * 64,
-            "compat.pdf",
-        )
-        bundle = self.store.get_asset_bundle_for_asset(asset["asset_id"])
-        assert bundle is not None
-        self.assertEqual("job_a", bundle["job_id"])
-        self.assertEqual("resource_a", bundle["resource_id"])
-        self.assertEqual("complete", bundle["completion"])
-        self.assertEqual(1, len(bundle["items"]))
-        self.assertEqual("primary", bundle["items"][0]["role"])
-        self.assertEqual(asset["asset_id"], bundle["items"][0]["asset_id"])
-
-        replay = self.store.create_asset(
-            "job_a",
-            "resource_a",
-            Path("/controlled/compat.pdf"),
-            17,
-            "application/pdf",
-            "f" * 64,
-            "compat.pdf",
-        )
-        self.assertEqual(asset["asset_id"], replay["asset_id"])
-
-    def test_create_asset_rejects_non_running_or_cancelling_job(self) -> None:
-        with self.store.transaction() as connection:
-            connection.execute("UPDATE jobs SET status = 'queued' WHERE job_id = 'job_a'")
-        with self.assertRaisesRegex(ValueError, "asset_bundle_job_not_running"):
-            self.store.create_asset(
-                "job_a",
-                "resource_a",
-                Path("/controlled/queued.pdf"),
-                1,
-                "application/pdf",
-                "e" * 64,
-                "queued.pdf",
-            )
-
-        with self.store.transaction() as connection:
-            connection.execute("UPDATE jobs SET status = 'cancelling' WHERE job_id = 'job_b'")
-        with self.assertRaisesRegex(ValueError, "job_cancelling"):
-            self.store.create_asset(
-                "job_b",
-                "resource_b",
-                Path("/controlled/cancelled.pdf"),
-                1,
-                "application/pdf",
-                "d" * 64,
-                "cancelled.pdf",
-            )
-
     def test_quarantine_synchronizes_asset_item_and_cancelled_bundle(self) -> None:
         bundle = self.store.persist_asset_bundle(
             "job_a", "resource_a", [self.item("primary", 0)]
         )
         with self.store.transaction() as connection:
             connection.execute("UPDATE jobs SET status = 'cancelling' WHERE job_id = 'job_a'")
-        self.store.quarantine_job_assets("job_a")
+            self.store._quarantine_job_assets_in_transaction(
+                connection,
+                "job_a",
+                bundle_status="cancelled",
+                updated_at=__import__('education_resource_mcp.storage', fromlist=['utc_now']).utc_now(),
+            )
         refreshed = self.store.get_asset_bundle(bundle["bundle_id"])
         assert refreshed is not None
         self.assertEqual("cancelled", refreshed["status"])

@@ -358,13 +358,6 @@ class DownloadBatchResult:
             "failures": [item.to_dict() for item in self.failures],
             "results": [item.to_dict() for item in self.results],
         }
-
-    def to_json(self) -> str:
-        return json.dumps(
-            self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-
-
 class DownloadProvider(Protocol):
     def download(
         self,

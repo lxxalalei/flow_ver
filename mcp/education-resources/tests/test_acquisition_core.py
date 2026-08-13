@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import json
 import unittest
 
 
@@ -232,8 +233,6 @@ class AcquisitionCoreTests(unittest.TestCase):
             AcquisitionStrategy.from_plan(None, {"resource_type": "article"})
         with self.assertRaisesRegex(ValueError, "explicitly planned"):
             AcquisitionStrategy.from_plan(None, {"resource_type": "video"})
-        with self.assertRaisesRegex(ValueError, "explicitly planned"):
-            AcquisitionRouter.select_strategy(None, {"resource_type": "article"})
 
     def test_request_freezes_resource_requires_server_root_and_authority_refs(self) -> None:
         request = self._request("direct")
@@ -278,8 +277,9 @@ class AcquisitionCoreTests(unittest.TestCase):
         self.assertEqual(facts["planned_scope"], "primary_resource")
         self.assertEqual(facts["actual_scope"], "primary_resource")
         self.assertEqual(facts["representation_id"], "repr_acquisition_core_0001")
-        self.assertTrue(result.to_json() == result.to_json())
-        self.assertNotIn(str(self.root), result.to_json())
+        serialized = json.dumps(result.to_dict(), sort_keys=True, ensure_ascii=False)
+        self.assertEqual(serialized, json.dumps(result.to_dict(), sort_keys=True, ensure_ascii=False))
+        self.assertNotIn(str(self.root), serialized)
 
     def test_router_records_actual_file_metadata_without_declared_integrity_gate(self) -> None:
         payload = b"provider metadata is advisory"

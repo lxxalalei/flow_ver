@@ -188,19 +188,6 @@ class InspectionCoreTests(unittest.TestCase):
                 now="2026-08-08T00:30:00Z",
             )
         )
-
-    def test_router_exposes_read_only_runtime_inspector_inventory(self) -> None:
-        router = InspectionRouter([_StubInspector("bilibili")])
-        inventory = router.registered_inspectors
-        self.assertEqual(("bilibili",), tuple(inventory))
-        self.assertEqual("bilibili.inspector", inventory["bilibili"]["inspector_id"])
-        self.assertEqual("1.0.0", inventory["bilibili"]["version"])
-        self.assertEqual(("landing_page", "metadata"), inventory["bilibili"]["supported_scopes"])
-        with self.assertRaises(TypeError):
-            inventory["new"] = {}  # type: ignore[index]
-        with self.assertRaises(TypeError):
-            inventory["bilibili"]["version"] = "changed"  # type: ignore[index]
-
     def test_router_uses_exact_platform_and_has_no_generic_fallback(self) -> None:
         generic = _StubInspector("generic")
         bilibili = _StubInspector("bilibili")

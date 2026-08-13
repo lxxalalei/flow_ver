@@ -239,19 +239,6 @@ class AcquisitionRouter:
         """Read-only view of exact registrations, useful for diagnostics only."""
 
         return self._provider_registry
-
-    @staticmethod
-    def select_strategy(
-        value: AcquisitionStrategy | str | None,
-        resource: Mapping[str, Any] | None = None,
-    ) -> AcquisitionStrategy:
-        """Translate an explicit plan value; routing itself uses request.strategy only."""
-
-        # Preserve the legacy argument shape without allowing resource type to
-        # infer an executable strategy.
-        del resource
-        return AcquisitionStrategy.from_plan(value)
-
     def acquire(self, request: AcquisitionRequest) -> AcquisitionResult:
         if not isinstance(request, AcquisitionRequest):
             raise TypeError("router.acquire expects AcquisitionRequest")
