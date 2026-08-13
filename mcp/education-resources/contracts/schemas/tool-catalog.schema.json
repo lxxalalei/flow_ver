@@ -18,7 +18,7 @@
     },
     "catalog_version": {
       "type": "string",
-      "const": "1.6.0"
+      "const": "1.7.0"
     },
     "contract_version": {
       "$ref": "common.schema.json#/$defs/contract_version"
@@ -29,8 +29,8 @@
     },
     "tools": {
       "type": "array",
-      "minItems": 13,
-      "maxItems": 13,
+      "minItems": 14,
+      "maxItems": 14,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -49,6 +49,7 @@
             "enum": [
               "resource_flow_start",
               "resource_flow_status",
+              "resource_flow_list",
               "resource_search",
               "resource_presentation_save",
               "resource_selection_save",

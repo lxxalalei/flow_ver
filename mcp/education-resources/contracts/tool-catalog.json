@@ -1,6 +1,6 @@
 {
   "$schema": "schemas/tool-catalog.schema.json",
-  "catalog_version": "1.6.0",
+  "catalog_version": "1.7.0",
   "contract_version": "1.0.0",
   "server_id": "learning_resources",
   "tools": [
@@ -21,6 +21,15 @@
       "idempotency_required": false,
       "input_schema": "schemas/tools/resource_flow_status.schema.json#/$defs/input",
       "output_schema": "schemas/tools/resource_flow_status.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_flow_list",
+      "description": "List recent flows ordered by most recently updated to discover or recover flow state after context loss.",
+      "side_effect": "none",
+      "requires_flow_id": false,
+      "idempotency_required": false,
+      "input_schema": "schemas/tools/resource_flow_list.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_flow_list.schema.json#/$defs/output"
     },
     {
       "name": "resource_search",

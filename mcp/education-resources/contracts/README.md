@@ -4,7 +4,7 @@
 
 ## 当前机器契约
 
-- [`tool-catalog.json`](tool-catalog.json)：`contract_version=1.0.0`、`catalog_version=1.6.0`、13 个领域级 Tool。
+- [`tool-catalog.json`](tool-catalog.json)：`contract_version=1.0.0`、`catalog_version=1.7.0`、14 个领域级 Tool。
 - [`schemas/tools/`](schemas/tools/) 与 [`schemas/common.schema.json`](schemas/common.schema.json)：Tool 输入/输出、稳定业务 ID、状态与公共投影。
 - [`error-codes.json`](error-codes.json)：公开业务错误码。
 - [`platforms/platform-registry.json`](platforms/platform-registry.json)：平台身份、Search/Inspect 等静态声明；不证明当前 Provider 可用或一次获取成功。
@@ -87,7 +87,7 @@ contracts/
 ## 版本规则
 
 - `contract_version=1.0.0`：当前公共协议主版本。
-- `catalog_version=1.6.0`：记录本次下载契约简化；Tool 数量仍为 13。
+- `catalog_version=1.7.0`：记录本次下载契约简化并新增 `resource_flow_list`；Tool 数量为 14。
 - Platform Registry 与 taxonomy 有独立版本域。
 - 错误码同一 major 内保持稳定语义。
 - 删除旧实现字段后，不能通过所谓“兼容 fallback”在运行时重新生成一套隐藏 authority chain。

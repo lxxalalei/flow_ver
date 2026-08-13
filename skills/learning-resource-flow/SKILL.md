@@ -48,7 +48,7 @@ Skill reads facts + task context -> private SemanticReview -> private Gap -> Sto
 
 ## 封闭工具面
 
-进入本 Skill 后，资源候选的搜索、核验、展示、选择、获取、归档和恢复只使用 `education-resources` 的 13 个业务 `resource_*` Tool。OpenClaw 通用能力不能成为第二条资源数据面：
+进入本 Skill 后，资源候选的搜索、核验、展示、选择、获取、归档和恢复只使用 `education-resources` 的 14 个业务 `resource_*` Tool。OpenClaw 通用能力不能成为第二条资源数据面：
 
 - `read` 只允许在 `resource_flow_start` 前读取本 Skill 及其 reference；Flow 建立后不得再读工作区、运行时目录、Registry、合同、日志或 Tool spill 文件；
 - 同一路径和 offset 的成功 `read` 不重复读取；只有明确截断时才使用新 offset 继续；
@@ -117,6 +117,7 @@ Understand
 - 业务 ID、版本、position、selection/plan digest、confirmation token、Provider、路径等只使用 MCP 实际返回值，不从聊天文本、标题、URL 或模型记忆重建。
 - `selection_digest` / `plan_digest` 只是当前选择与计划的服务端内容标识，不是 Capability/Readiness/Eligibility 防伪链；不要自行计算或解释其内部含义。
 - 核心 `goal`、`resource_target` 或硬约束发生实质变化时建立新 Flow；只是换 SearchDirection、来源或查询角度时继续当前 Flow。
+- 当前 `flow_id` 不确定时（上下文压缩、用户提及之前的任务、对话中存在多个并行 Flow），先调 `resource_flow_list` 发现现有 Flow，再用 `resource_flow_status` 恢复；不要猜 flow_id。
 - 已产生网络/文件副作用的操作不因上下文压缩或模型不确定而自动重放；先恢复真实 Job/Flow 状态。
 
 ## 不允许跳步

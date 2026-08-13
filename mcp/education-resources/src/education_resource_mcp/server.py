@@ -174,6 +174,19 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         return _invoke(lambda: resource_service.flow_status(flow_id), flow_id=flow_id)
 
     @server.tool(structured_output=True)
+    def resource_flow_list(
+        contract_version: Literal["1.0.0"],
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """List recent flows to discover or recover flow state after context loss.
+
+        Returns flows ordered by most recently updated.  Use when the current
+        flow_id is unknown, conversation context was compressed, or the user
+        refers to a previous task without naming it.
+        """
+        return _invoke(lambda: resource_service.flow_list(limit=limit))
+
+    @server.tool(structured_output=True)
     def resource_download_prepare(
         contract_version: Literal["1.0.0"],
         flow_id: str,

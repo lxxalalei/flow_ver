@@ -273,6 +273,32 @@ class ResourceService:
                 raise DomainError("IDEMPOTENCY_CONFLICT", "幂等键已绑定其他请求") from exc
             raise
 
+    def flow_list(self, limit: int = 20) -> dict[str, Any]:
+        """List recent flows so the agent can discover or recover flow state.
+
+        Returns flows ordered by most recently updated.  The agent uses this
+        when conversation context has been compressed or the user refers to a
+        previous task without naming a flow_id.
+        """
+
+        if not isinstance(limit, int) or limit < 1 or limit > 100:
+            limit = 20
+        rows = self.store.list_flows(limit=limit)
+        flows = [
+            {
+                "flow_id": row["flow_id"],
+                "query": row["query"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+        return {
+            "flows": flows,
+            "count": len(flows),
+        }
+
     def search(
         self,
         flow_id: str,

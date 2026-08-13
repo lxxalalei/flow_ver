@@ -28,11 +28,12 @@ SRC = SERVICE_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-EXPECTED_CATALOG_VERSION = "1.6.0"
+EXPECTED_CATALOG_VERSION = "1.7.0"
 EXPECTED_CONTRACT_VERSION = "1.0.0"
 EXPECTED_TOOL_NAMES = (
     "resource_flow_start",
     "resource_flow_status",
+    "resource_flow_list",
     "resource_search",
     "resource_presentation_save",
     "resource_selection_save",

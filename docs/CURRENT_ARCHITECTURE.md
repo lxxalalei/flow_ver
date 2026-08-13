@@ -10,7 +10,7 @@
 | MCP | `mcp/education-resources/`（Python stdio） |
 | MCP metadata | `0.2.0` |
 | 公共契约 | `contract_version=1.0.0` |
-| Tool catalog | `catalog_version=1.6.0`，13 个领域 Tool |
+| Tool catalog | `catalog_version=1.7.0`，14 个领域 Tool |
 | 分类 | `contracts/taxonomy/learning-v1.json` |
 | SQLite | migration 9 |
 | 获取服务 | `service.py` → `ResourceService` |
@@ -116,7 +116,7 @@ Skill -> private SemanticReview -> Gap -> StopDecision
 
 ## 公共 Tool
 
-`resource_flow_start`、`resource_flow_status`、`resource_search`、`resource_presentation_save`、`resource_selection_save`、`resource_download_prepare`、`resource_download_start`、`resource_job_status`、`resource_job_cancel`、`resource_archive`、`resource_library_search`、`resource_browse_creator`、`resource_inspect`。
+`resource_flow_start`、`resource_flow_status`、`resource_flow_list`、`resource_search`、`resource_presentation_save`、`resource_selection_save`、`resource_download_prepare`、`resource_download_start`、`resource_job_status`、`resource_job_cancel`、`resource_archive`、`resource_library_search`、`resource_browse_creator`、`resource_inspect`。
 
 ## 当前执行顺序
 

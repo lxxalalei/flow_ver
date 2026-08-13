@@ -2566,6 +2566,21 @@ class Store:
         result["context"] = _load(result.pop("context_json"), {})
         return result
 
+    def list_flows(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Return flows ordered by most recently updated, newest first."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT flow_id, query, status, created_at, updated_at
+                FROM flows
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def replace_presented_resources(
         self, flow_id: str, resources: list[dict[str, Any]]
     ) -> int:

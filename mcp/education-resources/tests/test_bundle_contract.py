@@ -18,6 +18,7 @@ COMMON_PATH = SCHEMA_ROOT / "common.schema.json"
 EXPECTED_TOOLS = (
     "resource_flow_start",
     "resource_flow_status",
+    "resource_flow_list",
     "resource_search",
     "resource_presentation_save",
     "resource_selection_save",
@@ -121,10 +122,10 @@ class AssetBundleContractTests(unittest.TestCase):
 
     def test_catalog_minor_addition_keeps_contract_and_tool_set(self) -> None:
         catalog = load_json(CATALOG_PATH)
-        self.assertEqual("1.6.0", catalog["catalog_version"])
+        self.assertEqual("1.7.0", catalog["catalog_version"])
         self.assertEqual("1.0.0", catalog["contract_version"])
         self.assertEqual(EXPECTED_TOOLS, tuple(tool["name"] for tool in catalog["tools"]))
-        self.assertEqual(13, len(catalog["tools"]))
+        self.assertEqual(14, len(catalog["tools"]))
 
         catalog_schema = load_json(SCHEMA_ROOT / "tool-catalog.schema.json")
         errors = sorted(

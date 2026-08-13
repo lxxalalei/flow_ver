@@ -2,7 +2,7 @@
 
 `education-resources` 是工作区唯一 active 的教育资源执行服务。它是 Python stdio MCP，负责 ResultSet、Presentation、Selection、Resolution、Plan、Job、Outcome、Asset/AssetBundle 和资料库归档的服务端业务状态；它不是用户入口 Skill，也不是登录凭据管理器。
 
-当前公共接口由机器契约定义：`contract_version=1.0.0`、`catalog_version=1.6.0`，工具集合和每个工具的输入/输出以 [`contracts/tool-catalog.json`](contracts/tool-catalog.json) 与 [`contracts/schemas/`](contracts/schemas/) 为准。Skill 负责需求理解、候选审查、实际展示、用户确认和结果解释；独立 `session-manager` 负责合法登录与会话保存。
+当前公共接口由机器契约定义：`contract_version=1.0.0`、`catalog_version=1.7.0`，工具集合和每个工具的输入/输出以 [`contracts/tool-catalog.json`](contracts/tool-catalog.json) 与 [`contracts/schemas/`](contracts/schemas/) 为准。Skill 负责需求理解、候选审查、实际展示、用户确认和结果解释；独立 `session-manager` 负责合法登录与会话保存。
 
 ## 当前服务边界
 

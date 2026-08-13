@@ -2,7 +2,7 @@
 
 ## 产品承诺
 
-产品只承诺当前公共控制面：`contract_version=1.0.0`、`catalog_version=1.6.0`。机器事实以 [`tool-catalog.json`](tool-catalog.json) 和相关 Schema 为准。
+产品只承诺当前公共控制面：`contract_version=1.0.0`、`catalog_version=1.7.0`。机器事实以 [`tool-catalog.json`](tool-catalog.json) 和相关 Schema 为准。
 
 项目不承诺任意历史客户端、缓存的旧 Tool Schema、旧 Plan 确认材料或旧内部 authority 对象仍可继续执行。兼容的首要目标是“不误执行旧状态”，不是“让所有旧字段继续存在”。
 
