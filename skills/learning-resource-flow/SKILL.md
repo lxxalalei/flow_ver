@@ -61,7 +61,7 @@ OpenClaw 的 `sessions_spawn` / `sessions_yield` / `subagents` 是唯一例外�
 
 当前 native `search_tasks[].platform` 命名空间只有：
 
-`generic`、`bilibili`、`douyin`、`zhihu`、`smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、`annas-archive`、`weibo`、`wechat`。
+`generic`、`bilibili`、`douyin`、`zhihu`、`smartedu`、`ximalaya`、`cctv`、`yixi`、`kepu`、`baiduwenku`、`runoob`、`nlc`、`open163`、`annas-archive`、`weibo`、`wechat`、`shuge`。
 
 不得猜测未注册 native ID。用户目标允许公开网页发现时，把来源名或 `site:` 放进 query 且 `platform=generic`；否则 StopWithGap。命名空间变化必须先同步机器 Registry、契约与本 Skill。
 

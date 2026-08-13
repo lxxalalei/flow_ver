@@ -9,6 +9,7 @@ from .adapters.inspect_bilibili import BilibiliInspector
 from .adapters.inspect_douyin import DouyinInspector
 from .adapters.inspect_generic import GenericWebInspector
 from .adapters.inspect_nlc import NlcInspector
+from .adapters.inspect_shuge import ShugeInspector
 from .adapters.inspect_smartedu import SmartEduInspector
 from .adapters.inspect_ximalaya import XimalayaInspector
 from .adapters.inspect_zhihu import ZhihuInspector
@@ -49,6 +50,7 @@ def default_inspection_router(
         XimalayaInspector(session_store=session_store, **inspector_options),
         ZhihuInspector(**inspector_options),
         SmartEduInspector(session_store=session_store, **inspector_options),
+        ShugeInspector(**inspector_options),
     )
     router = InspectionRouter(inspectors)
     registered = frozenset(router.registered_platforms)

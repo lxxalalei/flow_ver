@@ -56,6 +56,7 @@ EXPECTED_PLATFORM_IDS = frozenset(
         "annas-archive",
         "weibo",
         "wechat",
+        "shuge",
     }
 )
 INSPECTION_PLATFORM_IDS = frozenset(
@@ -68,6 +69,7 @@ INSPECTION_PLATFORM_IDS = frozenset(
         "ximalaya",
         "zhihu",
         "smartedu",
+        "shuge",
     }
 )
 CREATOR_BROWSE_PLATFORM_IDS = frozenset({"bilibili", "douyin", "zhihu", "weibo"})
@@ -103,6 +105,7 @@ _PLATFORM_REMOVABLE_QUERY_PARAMETERS: dict[str, frozenset[str]] = {
     "annas-archive": frozenset(),
     "weibo": frozenset(),
     "wechat": frozenset(),
+    "shuge": frozenset(),
 }
 _SAFE_QUERY_PARAMETERS = frozenset().union(*_PLATFORM_REMOVABLE_QUERY_PARAMETERS.values())
 _SOURCE_TRAITS = frozenset(

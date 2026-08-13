@@ -33,6 +33,7 @@ ADAPTER_CLASSES = {
     "annas-archive": ("annas_archive", "AnnasArchiveSearchAdapter"),
     "weibo": ("weibo", "WeiboSearchAdapter"),
     "wechat": ("wechat", "WechatSearchAdapter"),
+    "shuge": ("shuge", "ShugeSearchAdapter"),
 }
 
 

@@ -57,6 +57,7 @@ EXPECTED_REMOVABLE_QUERY_PARAMETERS = {
     "annas-archive": set(),
     "weibo": set(),
     "wechat": set(),
+    "shuge": set(),
 }
 
 
@@ -72,7 +73,7 @@ class PlatformRegistryTests(unittest.TestCase):
 
         registry = load_platform_registry()
         self.assertEqual(registry["registry_version"], "1.0.0")
-        self.assertEqual(len(registry["platforms"]), 16)
+        self.assertEqual(len(registry["platforms"]), 17)
         self.assertEqual(
             {item["platform_id"] for item in registry["platforms"]},
             EXPECTED_PLATFORM_IDS,
@@ -110,7 +111,7 @@ class PlatformRegistryTests(unittest.TestCase):
             if item["capabilities"]["inspect"]
         }
         self.assertEqual(enabled, INSPECTION_PLATFORM_IDS)
-        self.assertEqual(len(enabled), 8)
+        self.assertEqual(len(enabled), 9)
         self.assertEqual(
             EXPECTED_PLATFORM_IDS - enabled,
             {

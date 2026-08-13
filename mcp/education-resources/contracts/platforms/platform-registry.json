@@ -304,6 +304,25 @@
         "weak_identity_fields": ["title", "creator", "edition"],
         "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
       }
+    },
+
+    {
+      "platform_id": "shuge",
+      "display_name": "书格",
+      "resource_types": ["book"],
+      "capabilities": {"search": true, "browse_creator": false, "inspect": true, "acquire": true},
+      "auth_mode": "none",
+      "auth_kind": "none",
+      "source_traits": ["web", "library", "archive", "reference"],
+      "search": {"enabled": true, "recommended_limit": 10, "query_execution": "serial"},
+      "inspection": {"supported": true},
+      "acquisition": {"strategies": ["webpage"]},
+      "identity_profile": {
+        "native_id_fields": ["file_path"],
+        "strong_identity_sources": ["native_id", "isbn", "doi", "canonical_url"],
+        "weak_identity_fields": ["title", "creator", "edition"],
+        "canonical_url": {"remove_fragment": true, "removable_query_parameters": []}
+      }
     }
   ]
 }

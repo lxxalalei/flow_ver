@@ -431,6 +431,7 @@ class MultiPlatformSearchProvider:
             ("annas_archive", "AnnasArchiveSearchAdapter"),
             ("weibo", "WeiboSearchAdapter"),
             ("wechat", "WechatSearchAdapter"),
+            ("shuge", "ShugeSearchAdapter"),
         ):
             try:
                 module = importlib.import_module(
