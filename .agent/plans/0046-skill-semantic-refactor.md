@@ -29,7 +29,7 @@
 
 ## Current architecture
 
-- 主 `SKILL.md` 约 19KB，直接承载大量 Flow、ResultSet、Presentation、Selection、幂等、Plan/Job、StopDecision 和 multi-agent 协议规则。
+- 重构前主 `SKILL.md` 约 19KB，直接承载大量 Flow、ResultSet、Presentation、Selection、幂等、Plan/Job、StopDecision 和 multi-agent 协议规则。
 - 需求理解和来源路由的高价值语义知识主要分散在 `references/conversation.md`、`references/source-routing.md`、`references/retrieval.md`。
 - `examples/semantic-regression-cases.json` 同时测试语义与大量 workflow compliance，容易出现“流程合规但决策质量下降”仍看不出来的问题。
 - MCP 已能作为服务端事实来源并拒绝非法状态转换，因此 Skill 不需要重复充当 workflow validator。
@@ -76,28 +76,28 @@ Should not change:
 
 ## 步骤
 
-- [ ] in_progress：Milestone 1 — 重写主 `SKILL.md` 为薄协议、强语义 baseline，并单独提交推送。
-- [ ] pending：Milestone 2 — 重构 conversation/source-routing/retrieval references，删除与主 Skill 重复或协议化内容，并单独提交推送。
+- [x] completed：Milestone 1 — 重写主 `SKILL.md` 为薄协议、强语义 baseline，并单独提交推送（`466d257c`）。
+- [ ] in_progress：Milestone 2 — 重构 conversation/source-routing/retrieval references，删除与主 Skill 重复或协议化内容，并单独提交推送。
 - [ ] pending：Milestone 3 — 将 multi-agent 降级为实验参考，保留 acquisition/inspection/library 按需边界，检查 reference 链接与职责，并单独提交推送。
 - [ ] pending：Milestone 4 — 重构 semantic regression 为决策质量优先的用例，补 few-shot/评测说明并单独提交推送。
 - [ ] pending：Milestone 5 — 最小充分验证、整体 diff 复核、完成计划并归档。
 
 ## Milestone checkpoint
 
-每阶段完成后核对：
+### Milestone 1
 
 ```text
 Original goal still unchanged?: yes
-Non-goals still respected?:
-Business invariants still true?:
+Non-goals still respected?: yes
+Business invariants still true?: yes
 New abstraction introduced?: no
 New source of truth introduced?: no
 Fallback added?: no
 Data truncation added?: no
 Unrelated files changed?: no
 Actual user flow affected?: semantic planning and interaction only
-Actual user flow validated?: pending
-Scope drift detected?:
+Actual user flow validated?: not yet; static refactor only
+Scope drift detected?: no
 ```
 
 ## Decision log
