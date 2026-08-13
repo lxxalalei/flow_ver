@@ -165,7 +165,10 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual("document", representation["kind"])
         self.assertEqual("pdf", representation["container"])
         self.assertIn("Libgen", representation["rights_hint"])
-        self.assertFalse(representation["materializable"])
+        self.assertTrue(representation["materializable"])
+        self.assertEqual("primary_resource", representation["scope"])
+        self.assertEqual("primary", representation["role"])
+        self.assertEqual("available", representation["technical_availability"])
         self.assertEqual("annas_archive", mapped["inspection"]["inspector_id"])
 
     def test_annas_archive_invalid_md5_is_blocked_without_network(self) -> None:

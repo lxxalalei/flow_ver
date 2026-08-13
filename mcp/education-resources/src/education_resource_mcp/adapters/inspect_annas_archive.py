@@ -12,7 +12,7 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
-from ..inspection import InspectionResult
+from ..inspection import InspectionResult, build_representation_authority
 from .inspect_nlc import (
     PlatformBoundedInspector,
     _first_text,
@@ -180,16 +180,31 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             representations = current
         else:
             base = current[0] if current else {}
+            # Anna's Archive resources carry a stable md5 identifier and a
+            # known file format from search metadata.  The downloader
+            # resolves Libgen mirrors and validates the real file format
+            # post-download; the inspector does not need to prove
+            # downloadability to mark the primary as materializable.
             representation: dict[str, Any] = {
-                "representation_id": self._representation_id(resource, "document", "metadata"),
+                "representation_id": self._representation_id(resource, "document", "primary"),
                 "kind": "document",
                 "container": extension or "document",
-                "scope": "metadata",
-                "role": "metadata",
-                "technical_availability": "unknown",
-                "materializable": False,
+                "scope": "primary_resource",
+                "role": "primary",
+                "technical_availability": "available",
+                "materializable": True,
                 "rights_hint": RIGHTS_HINT,
             }
+            representation.update(
+                build_representation_authority(
+                    resource,
+                    scope="primary_resource",
+                    role="primary",
+                    technical_availability="available",
+                    source="metadata",
+                    observed_at=result.to_mapping()["inspection"].get("inspected_at"),
+                )
+            )
             mime_type = _MIME_BY_EXTENSION.get(extension or "")
             if mime_type:
                 representation["mime_type"] = mime_type
@@ -230,6 +245,7 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             metadata=metadata,
             representations=representations,
             creator=author,
+            availability="available",
         )
 
 

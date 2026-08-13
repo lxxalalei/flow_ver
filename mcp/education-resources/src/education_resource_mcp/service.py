@@ -205,6 +205,20 @@ class ResourceService:
                 )
             except Exception as exc:  # optional provider plugin boundary
                 LOGGER.warning("Provider bilibili-video unavailable during initialization (%s)", type(exc).__name__)
+            try:
+                from .adapters.annas_archive_download import AnnasArchiveDownloader
+
+                registrations.append(
+                    ProviderRegistration(
+                        provider_id="annas-archive",
+                        provider_version="1.0.0",
+                        provider=AnnasArchiveDownloader(self.session_store, self.settings),
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    )
+                )
+            except Exception as exc:  # optional provider plugin boundary
+                LOGGER.warning("Provider annas-archive unavailable during initialization (%s)", type(exc).__name__)
             self.acquisition_router = AcquisitionRouter(registrations)
         elif isinstance(acquisition_router, AcquisitionRouter):
             self.acquisition_router = acquisition_router
