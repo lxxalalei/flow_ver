@@ -154,6 +154,17 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         resource_types=frozenset({"book", "document"}),
     ),
     ProviderSpec(
+        platform_id="shuge",
+        scope="primary_resource",
+        representation_kind="document",
+        role="primary",
+        strategy=AcquisitionStrategy.DIRECT_FILE,
+        provider_id="generic-direct",
+        provider_version="1.0.0",
+        containers=_DOCUMENT_CONTAINERS,
+        resource_types=frozenset({"book", "document", "other"}),
+    ),
+    ProviderSpec(
         platform_id="generic",
         scope="primary_resource",
         representation_kind="document",
