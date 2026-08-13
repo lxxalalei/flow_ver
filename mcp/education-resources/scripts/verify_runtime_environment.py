@@ -9,6 +9,7 @@ whose metadata no longer describes the current source dependencies.
 from __future__ import annotations
 
 import importlib
+import os
 import importlib.metadata as metadata
 from pathlib import Path
 import subprocess
@@ -43,6 +44,31 @@ def _run_pip_check() -> str | None:
     )
     return output or f"pip check exited with status {completed.returncode}"
 
+
+
+def _verify_session_bridge_dependency(errors: list[str]) -> None:
+    """When the standalone session store is configured, session_bridge imports
+    ``session_manager.store`` from this environment.  A stale copy of that
+    package (missing platforms such as douyin) fails at search time, so verify
+    the registry here instead.
+    """
+    if not os.environ.get("EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR"):
+        return
+    try:
+        module = importlib.import_module("session_manager.store")
+    except Exception as exc:  # import failure is an actionable environment failure.
+        errors.append(
+            "EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR is configured, "
+            f"but session_manager.store cannot be imported: {exc!r}"
+        )
+        return
+    registry = getattr(module, "PLATFORM_REGISTRY", {})
+    for required in ("douyin",):
+        if required not in registry:
+            errors.append(
+                f"session_manager.store PLATFORM_REGISTRY is missing {required}; "
+                "openclaw-session-manager must be installed/synced into this venv"
+            )
 
 def _verify_crypto() -> None:
     """Exercise the lazy Crypto import used by download adapters."""
@@ -120,6 +146,8 @@ def main() -> int:
         _verify_crypto()
     except Exception as exc:  # Crypto is imported lazily by production adapters.
         errors.append(f"pycryptodome Crypto AES check failed: {exc!r}")
+
+    _verify_session_bridge_dependency(errors)
 
     pip_check_error = _run_pip_check()
     if pip_check_error is not None:

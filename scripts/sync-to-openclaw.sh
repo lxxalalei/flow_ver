@@ -109,6 +109,18 @@ from education_resource_mcp.adapters.bilibili import BilibiliSearchAdapter
 print('  adapters: douyin, douyin_download, bilibili import OK')
 " 2>&1 && ok "Import smoke test passed" || fail "Import smoke test FAILED"
 
+# education-resources reads sessions through the standalone session-manager
+# package when EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR is configured;
+# keep that dependency in sync in this venv too (a stale copy breaks search
+# with "未知平台" for platforms like douyin).
+install_editable "$EDU_PY" "$(winpath "$SES_SRC")" "session-manager"
+"$EDU_PY" -c "
+from session_manager.store import _PLATFORM_LIST
+ids = [p.platform_id for p in _PLATFORM_LIST]
+assert 'douyin' in ids, f'douyin not in {ids}'
+print(f'  edu-venv session_manager platforms: {ids}')
+" 2>&1 && ok "session-manager synced into education-resources venv" || fail "session-manager EDU venv sync FAILED"
+
 # ---------------------------------------------------------------------------
 # 2. session-manager MCP
 # ---------------------------------------------------------------------------
@@ -133,6 +145,18 @@ ids = [p.platform_id for p in _PLATFORM_LIST]
 assert 'douyin' in ids, f'douyin not in {ids}'
 print(f'  registered platforms: {ids}')
 " 2>&1 && ok "Import smoke test passed" || fail "Import smoke test FAILED"
+
+# education-resources reads sessions through the standalone session-manager
+# package when EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR is configured;
+# keep that dependency in sync in this venv too (a stale copy breaks search
+# with "未知平台" for platforms like douyin).
+install_editable "$EDU_PY" "$(winpath "$SES_SRC")" "session-manager"
+"$EDU_PY" -c "
+from session_manager.store import _PLATFORM_LIST
+ids = [p.platform_id for p in _PLATFORM_LIST]
+assert 'douyin' in ids, f'douyin not in {ids}'
+print(f'  edu-venv session_manager platforms: {ids}')
+" 2>&1 && ok "session-manager synced into education-resources venv" || fail "session-manager EDU venv sync FAILED"
 
 # ---------------------------------------------------------------------------
 # 3. Skills
