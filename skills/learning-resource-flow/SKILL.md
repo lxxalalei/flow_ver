@@ -84,7 +84,11 @@ OpenClaw 的 `sessions_spawn` / `sessions_yield` / `subagents` 是唯一例外�
 
 ```text
 Understand
-  -> Clarify?                         # 问清楚再搜，提问成本远低于搜索
+  ┌─> Need reconstruction           # 还原用户真正要解决什么
+  │   -> ambiguity found?
+  │      ├─ yes -> Clarify -> user answers -> back to Need reconstruction
+  │      └─ no  -> proceed
+  └── (progressive: each answer updates understanding, may reveal new questions)
   -> resource_flow_start / flow_status
   -> Plan SearchDirection
        └─ optional leaf sub-agents    # 只规划，Main Agent 汇总
