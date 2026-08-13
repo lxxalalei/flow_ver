@@ -115,7 +115,7 @@ Understand
 - `idempotency_key` 只使用 16–128 位 ASCII 字母、数字或 `._:-`；不得把展示层缩写复制回 Tool 参数。
 - Tool 返回 `ok=false`、结构化失败或结果不确定时，不假定状态已经成功转换；优先读取 `resource_flow_status` / `resource_job_status`。
 - 业务 ID、版本、position、selection/plan digest、confirmation token、Provider、路径等只使用 MCP 实际返回值，不从聊天文本、标题、URL 或模型记忆重建。
-- `selection_digest` / `plan_digest` 只是当前选择与计划的服务端内容标识，不是 Capability/Readiness/Eligibility 防伪链；不要自行计算或解释其内部含义。
+- `selection_digest` / `plan_digest` 等绑定值由 MCP 从 Plan 记录内部查取，模型不需要携带或传递。
 - 核心 `goal`、`resource_target` 或硬约束发生实质变化时建立新 Flow；只是换 SearchDirection、来源或查询角度时继续当前 Flow。
 - 当前 `flow_id` 不确定时（上下文压缩、用户提及之前的任务、对话中存在多个并行 Flow），先调 `resource_flow_list` 发现现有 Flow，再用 `resource_flow_status` 恢复；不要猜 flow_id。
 - 已产生网络/文件副作用的操作不因上下文压缩或模型不确定而自动重放；先恢复真实 Job/Flow 状态。
@@ -141,8 +141,6 @@ Plan -> Search -> Evaluate -> SemanticReview -> Inspect? -> Gap -> StopDecision
 `SearchDirection` 描述要覆盖的目标/证据，不是 query、platform 或 resource type。首轮通常 1–2 个方向，只选少量直接相关来源；常规任务最多 3 轮，明确要求全面横向比较时最多 4 轮。
 
 首轮 `resource_search` 使用 `replace`；只有 Replan 且有当前 `base_result_set_id` 时使用 `extend`。跨轮合并与去重由 MCP 创建新的不可变 ResultSet，Skill 不手工拼接候选。
-
-`task_version` 只使用 `resource_flow_start` / `resource_flow_status` 返回值；Search 不会自动增加它。出现 `TASK_VERSION_CONFLICT` 时先读取 Flow，再用当前值纠正一次，不猜递增版本。
 
 一个 Flow 的首个成功 Search 只能是一次 `replace`；后续搜索必须是带当前 `base_result_set_id` 的 `extend`，不得用连续 `replace` 的近义查询覆盖前一轮事实。
 

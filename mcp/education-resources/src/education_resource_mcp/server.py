@@ -61,9 +61,9 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     def resource_search(
         contract_version: Literal["1.0.0"],
         flow_id: str,
-        task_version: int,
         idempotency_key: str,
         search_tasks: list[SearchTask],
+        task_version: int | None = None,
         mode: Literal["replace", "extend"] = "replace",
         base_result_set_id: str | None = None,
         filters: SearchFilters | None = None,
@@ -88,10 +88,10 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     def resource_browse_creator(
         contract_version: Literal["1.0.0"],
         flow_id: str,
-        task_version: int,
         idempotency_key: str,
         platform: str,
         creator_id: str,
+        task_version: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         """Browse a creator's content list when the platform supports it."""
@@ -216,26 +216,21 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         contract_version: Literal["1.0.0"],
         flow_id: str,
         plan_id: str,
-        presentation_id: str,
-        presented_version: int,
-        selection_version: int,
-        selection_digest: str,
-        plan_digest: str,
         confirmation_token: str,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        """Start an asynchronous Job after explicit user confirmation."""
+        """Start an asynchronous Job after explicit user confirmation.
+
+        Only flow_id, plan_id, confirmation_token and idempotency_key are
+        required.  All binding values (presentation, selection, digests) are
+        looked up from the stored Plan.
+        """
         return _invoke(
             lambda: resource_service.download_start(
                 flow_id,
                 plan_id,
                 confirmation_token,
                 idempotency_key,
-                presentation_id=presentation_id,
-                presented_version=presented_version,
-                selection_version=selection_version,
-                selection_digest=selection_digest,
-                plan_digest=plan_digest,
             ),
             flow_id=flow_id,
             plan_id=plan_id,

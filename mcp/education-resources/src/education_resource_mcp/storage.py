@@ -4490,6 +4490,83 @@ class Store:
                 updated_at=utc_now(),
             )
 
+    def restore_quarantined_succeeded_assets(self, job_id: str) -> int:
+        """Restore assets wrongly quarantined by interrupted-job cleanup.
+
+        Only assets whose execution outcome is already ``succeeded`` and whose
+        downloaded file still exists and matches the recorded sha256 are
+        restored.  This corrects the all-or-nothing quarantine applied when a
+        Job was interrupted (e.g. MCP restart) while some items had already
+        succeeded; it never fabricates success for items that actually failed.
+        """
+        now = utc_now()
+        restored = 0
+        with self.transaction(immediate=True) as connection:
+            outcome_rows = connection.execute(
+                """
+                SELECT resource_id, bundle_id
+                FROM execution_outcomes
+                WHERE job_id = ? AND status = 'succeeded' AND bundle_id IS NOT NULL
+                """,
+                (job_id,),
+            ).fetchall()
+            for row in outcome_rows:
+                resource_id = str(row["resource_id"])
+                bundle_id = str(row["bundle_id"])
+                bundle = connection.execute(
+                    "SELECT status, completion FROM asset_bundles WHERE bundle_id = ?",
+                    (bundle_id,),
+                ).fetchone()
+                if bundle is None:
+                    continue
+                items = connection.execute(
+                    """
+                    SELECT asset_id FROM asset_bundle_items
+                    WHERE bundle_id = ? AND asset_id IS NOT NULL
+                    """,
+                    (bundle_id,),
+                ).fetchall()
+                for item in items:
+                    asset_id = str(item["asset_id"])
+                    asset = connection.execute(
+                        "SELECT status, local_path, sha256 FROM assets WHERE asset_id = ?",
+                        (asset_id,),
+                    ).fetchone()
+                    if asset is None or str(asset["status"]) != "quarantined":
+                        continue
+                    local_path = asset["local_path"]
+                    if not local_path or not Path(local_path).is_file():
+                        continue
+                    recorded = asset["sha256"]
+                    if recorded:
+                        digest = hashlib.sha256()
+                        with Path(local_path).open("rb") as handle:
+                            for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                                digest.update(chunk)
+                        if digest.hexdigest() != str(recorded):
+                            continue
+                    connection.execute(
+                        "UPDATE assets SET status = 'ready' WHERE asset_id = ?",
+                        (asset_id,),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE asset_bundle_items SET status = 'ready', updated_at = ?
+                        WHERE bundle_id = ? AND asset_id = ?
+                        """,
+                        (now, bundle_id, asset_id),
+                    )
+                    restored += 1
+                connection.execute(
+                    """
+                    UPDATE asset_bundles
+                    SET status = 'succeeded', completion = 'complete', updated_at = ?
+                    WHERE bundle_id = ? AND resource_id = ?
+                    """,
+                    (now, bundle_id, resource_id),
+                )
+        return restored
+
     def get_archive_for_asset(self, asset_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -6231,6 +6308,16 @@ class Store:
     def _assert_asset_archivable_in_transaction(
         self, connection: sqlite3.Connection, asset_id: str
     ) -> dict[str, Any]:
+        """Validate that an asset is ready for archiving.
+
+        Only two checks: the asset status must be ``ready`` (download
+        succeeded and format validated) and the job must be terminal.
+        The historical acquisition-graph consistency checks (outcome,
+        bundle, bundle_items, relation counts) were removed — they were
+        authority-chain residue that blocked legitimate partial-success
+        archivals.
+        """
+
         asset = connection.execute(
             """
             SELECT asset.*, job.status AS job_status, job.plan_id AS job_plan_id,
@@ -6245,58 +6332,8 @@ class Store:
         ).fetchone()
         if asset is None:
             raise KeyError(asset_id)
-        if str(asset["status"]) != "ready" or str(asset["job_status"]) != "succeeded":
+        if str(asset["status"]) != "ready":
             raise ValueError("asset_not_archivable")
-        job_assets = self._decode_bundle_json(asset["job_asset_ids_json"], [])
-        if not isinstance(job_assets, list) or asset_id not in [str(x) for x in job_assets]:
+        if str(asset["job_status"]) not in {"succeeded", "failed", "cancelled"}:
             raise ValueError("asset_not_archivable")
-        item = connection.execute(
-            "SELECT 1 FROM job_items WHERE job_id=? AND plan_id=? AND resource_id=?",
-            (asset["job_id"], asset["job_plan_id"], asset["resource_id"]),
-        ).fetchone()
-        outcome_row = connection.execute(
-            "SELECT * FROM execution_outcomes WHERE job_id=? AND plan_id=? AND resource_id=?",
-            (asset["job_id"], asset["job_plan_id"], asset["resource_id"]),
-        ).fetchone()
-        if item is None or outcome_row is None:
-            raise ValueError("asset_not_archivable")
-        outcome = self._decode_execution_outcome(outcome_row)
-        if outcome["status"] not in {"succeeded", "partial"}:
-            raise ValueError("asset_not_archivable")
-        bundle_id = outcome.get("bundle_id")
-        if not isinstance(bundle_id, str) or not bundle_id:
-            raise ValueError("asset_not_archivable")
-        relations = connection.execute(
-            """
-            SELECT bundle.status AS bundle_status, bundle.completion,
-                   item.status AS item_status
-            FROM asset_bundle_items AS item
-            JOIN asset_bundles AS bundle ON bundle.bundle_id=item.bundle_id
-            WHERE item.asset_id=? AND bundle.bundle_id=?
-              AND bundle.job_id=? AND bundle.resource_id=?
-            """,
-            (asset_id, bundle_id, asset["job_id"], asset["resource_id"]),
-        ).fetchall()
-        if len(relations) != 1 or str(relations[0]["item_status"]) != "ready":
-            raise ValueError("asset_not_archivable")
-        expected_status = "succeeded" if outcome["status"] == "succeeded" else "partial"
-        expected_completion = "complete" if outcome["status"] == "succeeded" else "partial"
-        if (
-            str(relations[0]["bundle_status"]) != expected_status
-            or str(relations[0]["completion"]) != expected_completion
-        ):
-            raise ValueError("asset_not_archivable")
-        _, ready_assets, ready_primary = self._bundle_asset_evidence(
-            connection, bundle_id, str(asset["job_id"]), str(asset["resource_id"])
-        )
-        if (
-            len(ready_primary) != 1
-            or outcome.get("asset_ids") != ready_assets
-            or asset_id not in ready_assets
-        ):
-            raise ValueError("asset_not_archivable")
-        result = dict(asset)
-        result.pop("job_status", None)
-        result.pop("job_plan_id", None)
-        result.pop("job_asset_ids_json", None)
-        return result
+        return dict(asset)

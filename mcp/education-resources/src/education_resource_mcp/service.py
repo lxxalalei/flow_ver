@@ -955,40 +955,25 @@ class ResourceService:
         plan_id: str,
         confirmation_token: str,
         idempotency_key: str,
-        *,
-        presentation_id: str,
-        presented_version: int,
-        selection_version: int,
-        selection_digest: str,
-        plan_digest: str,
     ) -> dict[str, Any]:
         self._require_flow(flow_id)
         if not confirmation_token:
             raise DomainError("INVALID_ARGUMENT", "confirmation_token 不能为空")
         self._validate_idempotency_key(idempotency_key)
-        if not isinstance(presentation_id, str) or not presentation_id:
-            raise DomainError("INVALID_ARGUMENT", "presentation_id 不能为空")
-        for field, value in (
-            ("presented_version", presented_version),
-            ("selection_version", selection_version),
-        ):
-            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-                raise DomainError("INVALID_ARGUMENT", f"{field} 必须是正整数")
-        for field, value in (
-            ("selection_digest", selection_digest),
-            ("plan_digest", plan_digest),
-        ):
-            if not isinstance(value, str) or _BARE_SHA256.fullmatch(value) is None:
-                raise DomainError("INVALID_ARGUMENT", f"{field} 必须是 SHA-256 摘要")
-
-        bindings = {
-            "presentation_id": presentation_id,
-            "presented_version": presented_version,
-            "selection_version": selection_version,
-            "selection_digest": selection_digest,
-            "plan_digest": plan_digest,
-        }
         normalized_key = idempotency_key.strip()
+
+        # Load the Plan and extract binding values from it — the model
+        # no longer carries presentation/selection/digest parameters.
+        plan = self.store.get_plan(plan_id)
+        if plan is None or plan["flow_id"] != flow_id:
+            raise DomainError("PLAN_NOT_FOUND", "下载计划不存在")
+        bindings = {
+            "presentation_id": str(plan.get("presentation_id") or ""),
+            "presented_version": int(plan.get("presented_version") or 0),
+            "selection_version": int(plan.get("selection_version") or 0),
+            "selection_digest": str(plan.get("selection_digest") or ""),
+            "plan_digest": str(plan.get("plan_digest") or ""),
+        }
         request_hash = self._request_hash(
             {
                 "flow_id": flow_id,
@@ -1018,9 +1003,6 @@ class ResourceService:
                 "queued_at": replayed["created_at"],
             }
 
-        plan = self.store.get_plan(plan_id)
-        if plan is None or plan["flow_id"] != flow_id:
-            raise DomainError("PLAN_NOT_FOUND", "下载计划不存在")
         plan_items = plan.get("plan_items")
         resource_ids = list(plan.get("resource_ids") or [])
         if (
