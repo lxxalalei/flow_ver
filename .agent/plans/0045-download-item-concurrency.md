@@ -7,13 +7,13 @@
 
 ## Objective
 
-一个已确认的 Download Job 包含多个资源时，资源项可以并发进入各自已绑定的 exact Provider；不同平台不再被单个 `for item in job_items` 强制串行。同一平台/Provider 的具体并发限制由对应 Downloader 自己负责，Service 不维护平台并发表。
+一个已确认的 Download Job 包含多个资源时，资源项可以并发进入各自已绑定的 exact Provider；不同平台不再被单个 `for item in job_items` 强制串行。同一 exact Provider 的资源并发数由对应 Downloader 声明自己的 `max_concurrent_items`，Service 只负责执行该声明并提供全局资源执行上限，不维护平台并发表。
 
 ## Non-goals
 
 - 不改变 Search / Presentation / Selection / Inspect / Prepare / Confirm 流程。
-- 不新增平台级并发配置表、调度器、队列系统或新的 Provider 抽象。
-- 不在本任务中为 Bilibili、Douyin 等 Downloader 预设未经真实问题验证的并发数。
+- 不新增平台级并发配置表、调度器服务、队列系统或新的 Provider 抽象。
+- 不在本任务中为 Bilibili、Douyin 等 Downloader 预设未经并发安全验证的并发数。
 - 不改变现有 `ACQUISITION_ABORT_CODES`、普通 item failure、Job cancellation 和 Asset/Bundle 业务语义。
 - 不处理 0041 网页抽取或其他平台接入问题。
 
@@ -23,14 +23,16 @@
 - 每个 JobItem 仍使用 Plan 已绑定的 `(provider_id, provider_version, strategy, scope, representation)`，不重新选路。
 - 普通资源失败只完成该资源的失败 Outcome，不阻止其他资源完成。
 - Job 级 fatal error 仍按现有规则结束 Job；取消必须以持久化 `cancelling` 状态为权威，process-local event 只用于唤醒。
-- Service 只提供总的资源执行上限；平台更低的并发/限速应由对应 Downloader 内部实现。
+- Service 提供总的资源执行上限，并执行 Downloader 自己声明的同 Provider 并发能力；未声明时默认 `1`。
+- Downloader 若声明 `max_concurrent_items > 1`，必须先保证自身临时文件、输出文件、Session/API 调用可并发安全。
 - 不静默丢弃任何 JobItem。
 
 ## Current architecture
 
 - `JobRunner(max_workers)` 控制同时运行的 Job 数。
 - `ResourceService._run_download_job()` 当前对 `job_items` 使用单一串行 `for` 循环。
-- `AcquisitionRouter.acquire(request)` 是单资源同步调用；Downloader 目前接收一个资源，因此 Service 若串行调用同 Provider，会把平台并发硬限制为 1。
+- `AcquisitionRouter.acquire(request)` 是单资源同步调用。
+- 当前 Generic Downloader 固定使用 `jobs/<job>/payload.part`，Bilibili/Douyin 也存在按标题生成临时/输出文件名的行为，因此不能默认放开同 Provider 多资源并发。
 - Store 的 Job/Outcome/Bundle 写入均通过独立 SQLite 事务完成；Job progress 更新已有单调写保护。
 
 ## Expected change surface
@@ -43,7 +45,7 @@ Likely to change:
 
 Should not change:
 
-- Downloader 公共签名
+- Downloader 公共 `download(...)` 签名
 - Acquisition Planner / Router 路由规则
 - 数据库 Schema / migration
 - MCP Tool Schema
@@ -51,25 +53,35 @@ Should not change:
 
 ## Acceptance criteria
 
-### AC-01 跨平台/Provider 不再串行
+### AC-01 跨 Provider 不再串行
 
 Given: 一个 Job 有至少两个绑定到不同 exact Provider 的 JobItem，两个 Provider 都会阻塞直到对方开始
 When: Job 启动
 Then: 两个 Provider 都能在任一方结束前进入 `download/acquire`，证明 Service 不再按列表顺序串行。
 
-### AC-02 Service 不强制同 Provider 串行
+### AC-02 Provider 自己拥有同平台并发能力
 
-Given: 一个 Job 有多个绑定到同一 Provider 的 JobItem，Provider 本身允许并发
-When: Job 启动
-Then: Service 允许这些调用并发进入 Provider；若某 Downloader 需要更低并发，应由其内部 semaphore/实现自行限制。
+Given: 一个 Job 有多个绑定到同一 exact Provider 的 JobItem
+When: Downloader 未声明 `max_concurrent_items`
+Then: Service 默认最多同时进入该 Provider 1 个资源，避免现有临时文件/输出文件竞争。
 
-### AC-03 失败与成功可独立完成
+Given: Downloader 明确声明 `max_concurrent_items = N` 且自身实现已并发安全
+When: 同一 Job 有多个该 Provider 的 JobItem
+Then: Service 最多允许 N 个资源同时进入该 Provider，不另外维护平台并发配置。
+
+### AC-03 不因同 Provider 排队饿死其他 Provider
+
+Given: JobItem 列表前面有多个同 Provider 资源，后面还有其他 Provider 资源
+When: 全局 worker 数有限
+Then: 等待该 Provider 并发槽的资源不占用实际执行 worker；其他 Provider 仍能及时进入执行。
+
+### AC-04 失败与成功可独立完成
 
 Given: 并发资源中一个返回普通 `DOWNLOAD_FAILED`，另一个成功
 When: Job 执行结束
 Then: 成功资源仍产生 ready Asset/成功 Outcome，失败资源产生失败 Outcome，Job 保持现有 partial-success 终态语义。
 
-### AC-04 取消与 fatal 语义不退化
+### AC-05 取消与 fatal 语义不退化
 
 Given: Job 正在并发执行多个资源
 When: 用户取消，或某资源触发现有 Job 级 fatal error
@@ -84,7 +96,7 @@ Then: 不再启动可取消的排队工作；运行中的 Provider 共享原 Job
 
 - [x] completed：读取最新 HEAD、`AGENTS.md` 和当前下载执行链，确认最新修改未实现 JobItem 并发。
 - [ ] in_progress：实现 Job 内资源受限并发，同时保持现有 item/Job failure 与 cancellation 语义。
-- [ ] pending：新增窄回归，覆盖跨 Provider、同 Provider、普通失败继续执行和取消/fatal。
+- [ ] pending：新增窄回归，覆盖跨 Provider、Provider 默认串行/显式放宽、普通失败继续执行和取消/fatal。
 - [ ] pending：执行最小充分验证并静态复核 diff。
 - [ ] pending：完成后归档本计划并同步必要文档。
 
