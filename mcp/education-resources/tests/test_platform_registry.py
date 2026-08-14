@@ -69,6 +69,14 @@ class PlatformRegistryTests(unittest.TestCase):
         self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
         self.assertIs(schema["additionalProperties"], False)
         self.assertEqual(payload["$schema"], "../schemas/platform-registry.schema.json")
+        self.assertEqual(
+            schema["properties"]["platforms"]["minItems"],
+            len(EXPECTED_PLATFORM_IDS),
+        )
+        self.assertEqual(
+            schema["properties"]["platforms"]["maxItems"],
+            len(EXPECTED_PLATFORM_IDS),
+        )
         validate_platform_registry(payload, schema_path=DEFAULT_SCHEMA_PATH)
 
         registry = load_platform_registry()
