@@ -77,7 +77,7 @@ Sensitive values removed: yes/no
 - [x] completed：2026-08-12 明确真实验收由用户执行，Coding Agent 停止代跑 OpenClaw。
 - [ ] in_progress：用户测试 SmartEdu active route，并反馈第一个真实结果。
 - [ ] pending：用户测试 0039 后续接入的平台。
-- [ ] pending：Coding Agent 根据真实反馈修复并更新本计划结果。
+- [x] completed：2026-08-14 用户反馈 Anna's Archive Inspect 全量失败；已定位并按 0049 修复，等待复测。
 - [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
 
 ## Completion criteria
@@ -88,6 +88,32 @@ Sensitive values removed: yes/no
 - 用户报告的问题已进入 0039 或后续明确工程计划。
 
 ## Current result
+
+### 2026-08-14 — Anna's Archive 电子书：Inspect 全量失败（已修复，待复测）
+
+```text
+Date/time: 2026-08-14
+Platform: annas-archive（Libgen-backed）
+User request: 下载《毛选》类电子书
+Reached stage: Search 正常返回 13 个候选；Inspect 全部失败，Prepare 被拒
+Observed status or error code: 检查提示“需要授权”（AUTH_REQUIRED，检查结果未通过）
+Expected behavior: 匿名 Libgen 通道应可检查并进入下载准备
+Actual behavior: Inspect 对合成详情页 annas-archive.gl/md5/<md5> 发起 GET，
+  该站点风控返回 403，被归类为 AUTH_REQUIRED，13 个候选全部阻塞；
+  而真实下载通道（libgen.bz / libgen.gl 匿名 md5）从未被检查环节使用
+Sensitive values removed: yes
+```
+
+定位：检查通道与获取通道错位。`AnnasArchiveInspector` 继承
+`PlatformBoundedInspector` 的 bounded GET，检查对象是搜索适配器合成的
+`annas-archive.gl/md5/<md5>` 身份页；该页既非数据源（Libgen 镜像）也非下载
+通道（Libgen 镜像），其风控否决了整条链路。
+
+修复：[`0049`](0049-annas-metadata-inspection.md)。合法 md5 资源的检查改为
+纯元数据通道（`inspection.method=platform_metadata`），零网络请求；planner
+命中 `annas-archive@1.0.0 / direct_file`。下载失败继续在 Job 层按项结构化
+暴露。Level 2 验证通过（inspector/contract/adapter 定向测试 + compileall +
+planner 冒烟），已部署；等待用户复测真实链路。
 
 SmartEdu、Douyin、Ximalaya、Bilibili 的 active exact route 均已完成工程接入；用户尚未执行真实平台验收。
 0039 当前只根据用户真实测试反馈修复平台问题。本计划不把任何离线验证解释为真实平台通过。

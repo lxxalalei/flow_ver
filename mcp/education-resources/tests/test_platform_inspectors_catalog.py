@@ -136,9 +136,8 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
 
     def test_annas_archive_is_libgen_backed_and_requires_valid_md5(self) -> None:
         md5 = "ABCDEF0123456789ABCDEF0123456789"
-        transport = QueueTransport(
-            FakeResponse(final_url="https://libgen.test/book/42")
-        )
+        # No queued response: any network request fails the test.
+        transport = QueueTransport()
         candidate = resource(
             "annas-archive",
             "https://libgen.test/book/42",
@@ -170,6 +169,31 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual("primary", representation["role"])
         self.assertEqual("available", representation["technical_availability"])
         self.assertEqual("annas_archive", mapped["inspection"]["inspector_id"])
+        self.assertEqual("platform_metadata", mapped["inspection"]["method"])
+        self.assertEqual([], transport.requests)
+
+    def test_annas_archive_blocked_detail_site_does_not_gate_inspection(self) -> None:
+        # Incident 2026-08-14: the synthetic annas-archive.gl detail URL is
+        # neither the data source nor the download channel.  Its risk control
+        # (403) or unreachability must not block the pipeline.
+        md5 = "0123456789abcdef0123456789abcdef"
+        transport = QueueTransport()  # any request fails the test
+        candidate = resource(
+            "annas-archive",
+            f"https://annas-archive.gl/md5/{md5}",
+            platform_signals={"md5": md5, "extension": "epub"},
+        )
+
+        mapped = make_inspector(AnnasArchiveInspector, transport).inspect(candidate).to_mapping()
+        resolved = mapped["resolved_resource"]
+        representation = resolved["representations"][0]
+
+        self.assertEqual("resolved", mapped["resolution_status"])
+        self.assertEqual("available", resolved["availability"]["status"])
+        self.assertEqual([], mapped["failures"])
+        self.assertEqual("document", representation["kind"])
+        self.assertTrue(representation["materializable"])
+        self.assertEqual([], transport.requests)
 
     def test_annas_archive_invalid_md5_is_blocked_without_network(self) -> None:
         transport = QueueTransport()
@@ -217,15 +241,11 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual(1, len(transport.requests))
 
     def test_auth_and_not_found_statuses_are_preserved(self) -> None:
+        # Anna's Archive inspects from metadata without a GET, so it has no
+        # auth/not-found transport path; only GET-backed inspectors appear here.
         cases = (
             (NlcInspector, "nlc", "https://www.nlc.cn/catalog/1", {}),
             (XimalayaInspector, "ximalaya", "https://www.ximalaya.com/album/1", {}),
-            (
-                AnnasArchiveInspector,
-                "annas-archive",
-                "https://libgen.test/book/1",
-                {"md5": "0123456789abcdef0123456789abcdef"},
-            ),
         )
         for status in (401, 404):
             for inspector_class, platform, source_url, metadata in cases:

@@ -1,9 +1,11 @@
 """Bounded Anna's Archive inspection backed by public Libgen metadata.
 
-The search adapter currently obtains Anna-compatible MD5/book metadata from
-Libgen.  This inspector therefore does not call an Anna API or expose a
-mirror/download locator.  A valid MD5 must already be present in the server's
-resource metadata before any platform enrichment is allowed.
+The search adapter obtains Anna-compatible MD5/book metadata from Libgen, and
+the downloader fetches the file from Libgen mirrors by MD5.  The synthetic
+``annas-archive.gl/md5/<md5>`` source URL is a user-facing identity page only:
+it is neither the data source nor the acquisition channel, so this inspector
+performs no request against it.  A valid MD5 must already be present in the
+server's resource metadata before any platform enrichment is allowed.
 """
 
 from __future__ import annotations
@@ -73,32 +75,38 @@ def _size_bytes(value: Any) -> int | None:
 
 
 class AnnasArchiveInspector(PlatformBoundedInspector):
-    """Inspect a public Libgen-backed detail page using a validated MD5."""
+    """Inspect a Libgen-backed resource from search metadata using a validated MD5."""
 
     platform_id = "annas-archive"
     inspector_id = INSPECTOR_ID
-    # Libgen-backed retrieval may return a public candidate on more than one
-    # mirror.  The shared Generic inspector still validates the actual host,
-    # DNS result, redirects, response size, and content.
-    allow_any_public_host = True
 
     def inspect(self, resource: Mapping[str, Any]) -> InspectionResult:
-        if isinstance(resource, Mapping):
-            md5 = None
-            # The URL is intentionally not consulted.  The search result must
-            # carry the identity in a server-controlled field or metadata.
-            for mapping in self._md5_mappings(resource):
-                candidate = _valid_md5(mapping.get("md5"))
-                if candidate is not None:
-                    md5 = candidate
-                    break
-            if md5 is None:
-                return self._validation_result(
-                    resource,
-                    "PLATFORM_VALIDATION_BLOCKED",
-                    "Libgen-backed 检查需要资源元数据中的合法 32 位 MD5",
-                )
-        return super().inspect(resource)
+        if not isinstance(resource, Mapping):
+            return super().inspect(resource)
+        md5 = None
+        # The URL is intentionally not consulted.  The search result must
+        # carry the identity in a server-controlled field or metadata.
+        for mapping in self._md5_mappings(resource):
+            candidate = _valid_md5(mapping.get("md5"))
+            if candidate is not None:
+                md5 = candidate
+                break
+        if md5 is None:
+            return self._validation_result(
+                resource,
+                "PLATFORM_VALIDATION_BLOCKED",
+                "Libgen-backed 检查需要资源元数据中的合法 32 位 MD5",
+            )
+        # The MD5 is the whole platform identity: search and download both go
+        # through Libgen mirrors, and the downloader resolves mirrors and
+        # validates the real file format post-download.  The synthetic
+        # Anna's Archive detail page is not the inspection or acquisition
+        # channel, so no request is made against it — its risk control or
+        # unreachability must not veto the pipeline.
+        base = self._result(
+            resource, resolution_status="resolved", availability="available"
+        )
+        return self._enrich(resource, base)
 
     @staticmethod
     def _md5_mappings(resource: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
@@ -246,6 +254,7 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             representations=representations,
             creator=author,
             availability="available",
+            method="platform_metadata",
         )
 
 

@@ -305,6 +305,7 @@ class PlatformBoundedInspector(GenericWebInspector):
         representations: Sequence[Mapping[str, Any]],
         creator: str | None = None,
         availability: str | None = None,
+        method: str = PLATFORM_INSPECTION_METHOD,
     ) -> InspectionResult:
         mapping = result.to_mapping()
         resolved = mapping["resolved_resource"]
@@ -347,7 +348,7 @@ class PlatformBoundedInspector(GenericWebInspector):
         resolved["representations"] = normalised_representations
         if creator:
             resolved["creator"] = creator
-        mapping["inspection"]["method"] = PLATFORM_INSPECTION_METHOD
+        mapping["inspection"]["method"] = method
         # Every platform enrichment, including IDs and allowlist metadata,
         # must pass through InspectionResult validation once more.
         return InspectionResult.from_mapping(mapping)
