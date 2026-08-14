@@ -96,6 +96,14 @@ webbundle.zip
 
 其中公开 primary Asset 是可直接打开的 `index.html`。成功抓取并校验的同源正文图片以内嵌 `data:` 形式写入该 HTML，因此 Archive 可以直接发布 `.html`；`content.md`、`metadata.json`、`assets/*` 与 `webbundle.zip` 继续作为 Job 工作产物保留，不扩展公共 Asset / Archive 状态模型。当前跨域/CDN 图片仍按既有策略跳过，这一问题不在本次修正范围内。
 
+## 下载执行边界
+
+- `JobRunner(max_workers)` 只控制同时运行的异步 Job 数，不定义各平台内部下载并发。
+- 一个 Download Job 启动后，`ResourceService` 按 Plan 绑定的 exact `(provider_id, provider_version)` 分组；每个平台只创建一个批次 worker，不再为几百个 JobItem 创建几百个 Service worker。
+- 当前 Provider 内部接口仍以单资源调用为基础，所以批次 worker 按项调用并收集结果；平台后续需要提高同平台吞吐时，应在对应 Downloader/Provider 的批次实现和文件隔离完成后自行放宽，而不是增加 MCP 全局并发参数。
+- `JobItem` / `Outcome` 保留为逐资源结果、失败报告和恢复记录，不代表独立 Service 线程或额外任务状态机。
+- 不同 exact Provider 的批次可并行；所有批次共享 Job `cancel_event`。Job 生命周期、进度、普通失败、fatal error、Outcome、Asset 和 Bundle 收口仍由 Service 负责。
+
 ## 安全边界
 
 - `prepare -> 用户确认 -> start`

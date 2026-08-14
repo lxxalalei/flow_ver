@@ -59,3 +59,6 @@
 | [0040-search-subagent-orchestration.md](0040-search-subagent-orchestration.md) | completed | OpenClaw leaf sub-agent 并行规划 SearchDirection；MCP 继续统一串行执行搜索与业务状态 |
 | [0042-web-resource-current-path-fix.md](0042-web-resource-current-path-fix.md) | completed | 修正当前 Generic HTML primary/landing 语义，并将网页主归档物改为图片自包含 HTML；0041 benchmark 继续 pending |
 | [0046-skill-semantic-refactor.md](0046-skill-semantic-refactor.md) | completed | 将 active Skill 重构为 semantic-first；主测需求还原、来源派发、query 和结果判断，multi-agent 降级为实验能力 |
+| [0045-download-item-concurrency.md](0045-download-item-concurrency.md) | completed / superseded | 历史 Service 执行 Provider 并发声明设计；0047 已将并发所有权下沉到获取实现 |
+| [0047-downloader-owned-concurrency.md](0047-downloader-owned-concurrency.md) | completed / superseded | 历史“一 Item 一 worker + Downloader 锁”方案；0048 已改为 exact Provider 批次派发 |
+| [0048-provider-batch-dispatch-simplification.md](0048-provider-batch-dispatch-simplification.md) | completed | Service 按 exact Provider 批次派发；保留逐项结果但不再为每个 JobItem 创建 worker |

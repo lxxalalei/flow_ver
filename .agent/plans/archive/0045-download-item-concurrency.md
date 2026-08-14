@@ -1,8 +1,10 @@
 # 0045 Download Job 资源并发执行
 
-- 状态：in_progress
+> 2026-08-14：本计划记录的“Service 执行 Provider 声明并发上限”设计已被 `0047-downloader-owned-concurrency.md` 替代。保留本文只用于历史审计；当前事实是 Service 不施加 JobItem/Provider 并发限制，获取实现内部拥有并发策略。
+
+- 状态：completed（历史设计；并发所有权已由 0047 替代）
 - 创建日期：2026-08-13
-- 完成日期：未完成
+- 完成日期：2026-08-14
 - 范围：`mcp/education-resources` 下载 Job 执行层
 
 ## Objective

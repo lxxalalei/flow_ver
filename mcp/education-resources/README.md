@@ -61,7 +61,7 @@ server.py
 contracts/                  # 当前公共 Tool/Schema/平台/分类契约
 src/education_resource_mcp/
 ├── server.py               # stdio MCP 入口
-├── service.py              # 领域服务（下载项并发受 Provider 声明约束）
+├── service.py              # 领域服务（按 exact Provider 批次派发并收口 Job/Asset）
 ├── storage.py              # SQLite 状态权威（Flow/Plan/Job/Asset/Library）
 ├── adapters/               # 平台 Search/Inspect/Provider Adapter
 ├── retrieval/              # 候选归一化、身份与去重

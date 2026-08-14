@@ -1,8 +1,8 @@
 """Domain service backing the public MCP tools.
 
-Download Job items run within global and Downloader-declared concurrency
-bounds (max_concurrent_items); the service never schedules more items
-than the exact Provider declares safe.
+Download Job items are grouped by their exact Provider before execution.
+The service owns Job lifecycle and cross-provider dispatch without creating a
+worker per item; each Provider can evolve its own batch concurrency policy.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 import re
 import secrets
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from typing import Any
 
@@ -1449,27 +1449,6 @@ class ResourceService:
             )
             return result
 
-    def _provider_max_concurrent_items(self, item: dict[str, Any]) -> int:
-        key = (
-            str(item["provider_id"]),
-            str(item["provider_version"]),
-        )
-        registration = self.acquisition_router.provider_registry.get(key)
-        if registration is None:
-            raise DomainError(
-                "PLAN_BINDING_CONFLICT",
-                "任务执行项绑定的 Provider 未部署",
-                details={"provider_id": key[0], "provider_version": key[1]},
-            )
-        value = getattr(registration.provider, "max_concurrent_items", 1)
-        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-            raise DomainError(
-                "INTERNAL_ERROR",
-                "Provider 的 max_concurrent_items 配置无效",
-                details={"provider_id": key[0], "provider_version": key[1]},
-            )
-        return value
-
     def _run_download_item(
         self,
         job: dict[str, Any],
@@ -1721,7 +1700,7 @@ class ResourceService:
         return True, bundle_completion == "partial", None
 
     def _run_download_job(self, job_id: str, cancel_event: threading.Event) -> None:
-        """Run JobItems within global and Downloader-declared concurrency bounds."""
+        """Dispatch one batch per exact Provider and collect per-item results."""
 
         job = self.store.get_job(job_id)
         if job is None:
@@ -1744,85 +1723,72 @@ class ResourceService:
                 )
                 return
 
-            provider_items: dict[tuple[str, str], list[dict[str, Any]]] = {}
-            provider_limits: dict[tuple[str, str], int] = {}
+            provider_batches: dict[tuple[str, str], list[dict[str, Any]]] = {}
             for item in job_items:
-                key = (
+                provider_key = (
                     str(item["provider_id"]),
                     str(item["provider_version"]),
                 )
-                provider_items.setdefault(key, []).append(item)
-                if key not in provider_limits:
-                    provider_limits[key] = self._provider_max_concurrent_items(item)
-
-            provider_order = list(provider_items)
-            next_index = {key: 0 for key in provider_order}
-            active_by_provider = {key: 0 for key in provider_order}
-            worker_count = max(1, min(total_items, self.settings.max_workers))
-            futures: dict[
-                Future[tuple[bool, bool, DomainError | None]], tuple[str, str]
-            ] = {}
-
-            def submit_available(pool: ThreadPoolExecutor) -> None:
-                made_progress = True
-                while len(futures) < worker_count and made_progress:
-                    made_progress = False
-                    for key in provider_order:
-                        if len(futures) >= worker_count:
-                            break
-                        index = next_index[key]
-                        items = provider_items[key]
-                        if index >= len(items):
-                            continue
-                        if active_by_provider[key] >= provider_limits[key]:
-                            continue
-                        future = pool.submit(
-                            self._run_download_item,
-                            job,
-                            job_id,
-                            items[index],
-                            cancel_event,
-                        )
-                        futures[future] = key
-                        next_index[key] = index + 1
-                        active_by_provider[key] += 1
-                        made_progress = True
+                provider_batches.setdefault(provider_key, []).append(item)
 
             abort_error: Exception | None = None
-            with ThreadPoolExecutor(
-                max_workers=worker_count,
-                thread_name_prefix="education-resource-item",
-            ) as pool:
-                submit_available(pool)
-                while futures:
-                    done, _pending = wait(
-                        tuple(futures), return_when=FIRST_COMPLETED
-                    )
-                    for future in done:
-                        key = futures.pop(future)
-                        active_by_provider[key] -= 1
+            stop_event = threading.Event()
+            result_lock = threading.Lock()
+
+            def run_provider_batch(items: list[dict[str, Any]]) -> Exception | None:
+                nonlocal processed_count, usable_primary_count, saw_partial
+                for item in items:
+                    if stop_event.is_set():
+                        return None
+                    try:
+                        usable, partial, item_abort = self._run_download_item(
+                            job,
+                            job_id,
+                            item,
+                            cancel_event,
+                        )
+                    except Exception as exc:
+                        stop_event.set()
+                        return exc
+
+                    with result_lock:
+                        usable_primary_count += int(usable)
+                        saw_partial = saw_partial or partial
+                        processed_count += 1
                         try:
-                            usable, partial, item_abort = future.result()
+                            self._update_download_job_progress(
+                                job_id,
+                                int((processed_count / total_items) * 100),
+                            )
                         except Exception as exc:
-                            abort_error = abort_error or exc
-                        else:
-                            usable_primary_count += int(usable)
-                            saw_partial = saw_partial or partial
-                            processed_count += 1
-                            try:
-                                self._update_download_job_progress(
-                                    job_id,
-                                    int((processed_count / total_items) * 100),
-                                )
-                            except Exception as exc:
-                                abort_error = abort_error or exc
-                            if abort_error is None and item_abort is not None:
-                                abort_error = item_abort
-                    if abort_error is not None:
-                        for pending in futures:
-                            pending.cancel()
-                        break
-                    submit_available(pool)
+                            stop_event.set()
+                            return exc
+                    if item_abort is not None:
+                        stop_event.set()
+                        return item_abort
+                return None
+
+            if len(provider_batches) == 1:
+                abort_error = run_provider_batch(next(iter(provider_batches.values())))
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=len(provider_batches),
+                    thread_name_prefix="education-resource-provider",
+                ) as pool:
+                    futures = [
+                        pool.submit(run_provider_batch, items)
+                        for items in provider_batches.values()
+                    ]
+                    for future in as_completed(futures):
+                        try:
+                            batch_abort = future.result()
+                        except Exception as exc:
+                            batch_abort = exc
+                        if batch_abort is not None and abort_error is None:
+                            abort_error = batch_abort
+                            stop_event.set()
+                            for pending in futures:
+                                pending.cancel()
 
             if abort_error is not None:
                 raise abort_error
