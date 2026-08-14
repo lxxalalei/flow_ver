@@ -225,6 +225,20 @@ class ResourceService:
                 )
             except Exception as exc:  # optional provider plugin boundary
                 LOGGER.warning("Provider annas-archive unavailable during initialization (%s)", type(exc).__name__)
+            try:
+                from .adapters.zjer_download import ZjerVideoDownloader
+
+                registrations.append(
+                    ProviderRegistration(
+                        provider_id="zjer-video",
+                        provider_version="1.0.0",
+                        provider=ZjerVideoDownloader(self.session_store, self.settings),
+                        strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                        scopes=("primary_resource",),
+                    )
+                )
+            except Exception as exc:  # optional provider plugin boundary
+                LOGGER.warning("Provider zjer-video unavailable during initialization (%s)", type(exc).__name__)
             self.acquisition_router = AcquisitionRouter(registrations)
         elif isinstance(acquisition_router, AcquisitionRouter):
             self.acquisition_router = acquisition_router

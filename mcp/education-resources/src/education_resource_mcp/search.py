@@ -447,6 +447,20 @@ class MultiPlatformSearchProvider:
                 require_descriptor=True,
             )
 
+        # Zjer is a runtime-experimental direct-course integration from real
+        # course-detail evidence (plan 0052). It is intentionally registered
+        # outside the strict broad Registry set until native keyword search is
+        # confirmed and the Registry is aligned with a separate minimal diff.
+        try:
+            module = importlib.import_module(".adapters.zjer", package=__package__)
+            cls = getattr(module, "ZjerSearchAdapter")
+            self.register_adapter(
+                cls(self.session_store, self.settings),
+                require_descriptor=False,
+            )
+        except ImportError:
+            pass
+
     def register_adapter(
         self,
         adapter: PlatformSearchAdapter,
