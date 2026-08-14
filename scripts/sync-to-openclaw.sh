@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Sync MCP packages and skills from the WSL repo to the Windows OpenClaw deployment.
+# Sync MCP packages and skills from the Windows repo to the Windows OpenClaw deployment.
 #
 # Run from WSL:  bash scripts/sync-to-openclaw.sh
+# Source is the Windows checkout (mounted at /mnt/c); the old WSL clone is retired.
 # After sync, restart the OpenClaw gateway on Windows and verify:
 #   openclaw gateway restart
 #   openclaw mcp doctor education-resources --probe
@@ -11,7 +12,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-REPO="/home/admin_quanxiao/projects/quanxiao/collector_flow_ver"
+REPO="/mnt/c/Users/admin/projects/collector_flow"
 WIN_LOCAL="/mnt/c/Users/admin/AppData/Local/OpenClaw"
 WIN_HOME="/mnt/c/Users/admin"
 
@@ -36,6 +37,7 @@ RSYNC_EXCLUDES=(
     --exclude '*.pyc'
     --exclude .pytest_cache
     --exclude venv
+    --exclude .venv
     --exclude build
     --exclude '*.egg-info'
     --exclude database.sqlite
