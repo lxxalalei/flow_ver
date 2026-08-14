@@ -162,8 +162,8 @@ class WebMaterializerGoldenTests(unittest.TestCase):
             {"index.html", "content.md", "metadata.json", "webbundle.zip", "assets"},
             {path.name for path in job_dir.iterdir()},
         )
-        self.assertIn("<h1>云为什么会下雨</h1>", (job_dir / "index.html").read_text())
-        self.assertNotIn("site-nav", (job_dir / "index.html").read_text())
+        self.assertIn("<h1>云为什么会下雨</h1>", (job_dir / "index.html").read_text(encoding="utf-8"))
+        self.assertNotIn("site-nav", (job_dir / "index.html").read_text(encoding="utf-8"))
 
     def test_output_is_deterministic_and_primary_html_embeds_images(self) -> None:
         url = "https://example.com/image-blog"
@@ -181,7 +181,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
             hashlib.sha256(first_zip).hexdigest(),
             _get(bundle_artifact, "sha256"),
         )
-        primary_html = (self.root / "job-a" / "index.html").read_text()
+        primary_html = (self.root / "job-a" / "index.html").read_text(encoding="utf-8")
         self.assertIn("data:image/png;base64,", primary_html)
         self.assertNotIn("assets/image-", primary_html)
         self.assertIn("img-src &#x27;self&#x27; data:", primary_html)
@@ -226,7 +226,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         )
         result = WebMaterializer(fetcher=fetcher).acquire(_request(self.root, url))
         job_dir = self.root / "job-web-001"
-        self.assertIn("图片未能安全加载", (job_dir / "index.html").read_text())
+        self.assertIn("图片未能安全加载", (job_dir / "index.html").read_text(encoding="utf-8"))
         self.assertIn("image_fetch_failed", result.warnings)
         self.assertFalse(list((job_dir / "assets").iterdir()))
 
@@ -245,7 +245,7 @@ class WebMaterializerGoldenTests(unittest.TestCase):
         WebMaterializer(fetcher=fetcher, config=config).acquire(_request(self.root, url))
         job_dir = self.root / "job-web-001"
         self.assertEqual(len(list((job_dir / "assets").iterdir())), 1)
-        self.assertIn("图片未能安全加载", (job_dir / "index.html").read_text())
+        self.assertIn("图片未能安全加载", (job_dir / "index.html").read_text(encoding="utf-8"))
         image_calls = [call for call in fetcher.calls if call["purpose"] == "image"]
         self.assertEqual(len(image_calls), 1)
 
@@ -337,8 +337,8 @@ class WebMaterializerSecurityTests(unittest.TestCase):
         fetcher = FakeFetcher({url: page})
         WebMaterializer(fetcher=fetcher).acquire(_request(self.root, url))
         job_dir = self.root / "job-web-001"
-        sanitized = (job_dir / "index.html").read_text()
-        markdown = (job_dir / "content.md").read_text()
+        sanitized = (job_dir / "index.html").read_text(encoding="utf-8")
+        markdown = (job_dir / "content.md").read_text(encoding="utf-8")
         self.assertNotIn("<script", sanitized.casefold())
         self.assertNotIn("javascript:", sanitized.casefold())
         self.assertNotIn("onerror", sanitized.casefold())

@@ -10,3 +10,5 @@ __pycache__/
 # OpenClaw runtime / control files
 HEARTBEAT.md
 openclaw-workspace-state.json
+# Local isolated runtime/test data
+.openclaw-test/

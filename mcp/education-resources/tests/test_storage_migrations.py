@@ -537,7 +537,7 @@ class StorageMigrationTests(unittest.TestCase):
             self.assertEqual([("asset_c", 0, "primary")], grouped["resource_v4_b"])
             first_ids = [bundle["bundle_id"] for bundle in bundles]
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 connection.execute("DELETE FROM schema_migrations WHERE version >= 5")
                 connection.execute("PRAGMA user_version = 4")
                 connection.commit()

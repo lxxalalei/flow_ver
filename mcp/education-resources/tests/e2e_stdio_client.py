@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import select
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any
 
@@ -115,6 +116,12 @@ def build_fixture_subprocess_environment(
             # writes enabled so no child repeatedly pays the cold-compile cost;
             # no bytecode can land in the repository.
             "PYTHONPYCACHEPREFIX": str(pycache_dir),
+            # On Windows, PYTHONPYCACHEPREFIX can deadlock the import phase of a
+            # subprocess started with inherited pipe handles (the child blocks
+            # inside the interpreter's first bytecode-write and never reaches the
+            # event loop).  Suppress bytecode generation there; the cache prefix
+            # above still applies on POSIX.
+            "PYTHONDONTWRITEBYTECODE": "1" if sys.platform == "win32" else "0",
             "PYTHONHASHSEED": "0",
             "HOME": str(home_dir),
             "USERPROFILE": str(home_dir),
@@ -136,13 +143,15 @@ def build_fixture_subprocess_environment(
 
 
 class RawMcpClient:
-    def __init__(self, data_dir: str | Path, mode: str = "standard", timeout: float = 5.0) -> None:
+    def __init__(self, data_dir: str | Path, mode: str = "standard", timeout: float = 15.0) -> None:
         self.data_dir = Path(data_dir).resolve()
         self.mode = mode
         self.timeout = timeout
         self.process: subprocess.Popen[str] | None = None
         self._next_id = 1
         self._stderr = None
+        self._reader_queue: queue.Queue[str | None] | None = None
+        self._reader_thread: threading.Thread | None = None
 
     def __enter__(self) -> "RawMcpClient":
         self.start()
@@ -171,6 +180,17 @@ class RawMcpClient:
                 encoding="utf-8",
                 bufsize=1,
             )
+            # ``select`` cannot watch a pipe on Windows, so drain stdout on a
+            # daemon thread into a queue and wait on the queue instead.
+            self._reader_queue = queue.Queue()
+            stream = self.process.stdout
+            self._reader_thread = threading.Thread(
+                target=self._pump_stdout,
+                args=(stream, self._reader_queue),
+                name="e2e-mcp-stdout-reader",
+                daemon=True,
+            )
+            self._reader_thread.start()
             initialized = self.request(
                 "initialize",
                 {
@@ -198,6 +218,18 @@ class RawMcpClient:
         self._stderr.seek(0)
         return self._stderr.read()[-4000:]
 
+    @staticmethod
+    def _pump_stdout(stream: Any, out: "queue.Queue[str | None]") -> None:
+        """Read subprocess stdout lines into *out*; a ``None`` sentinel marks EOF."""
+        try:
+            for line in stream:
+                out.put(line)
+        except Exception:
+            # A closed/aborted pipe should surface as EOF, not as a reader crash.
+            pass
+        finally:
+            out.put(None)
+
     def _write(self, message: dict[str, Any]) -> None:
         if self.process is None or self.process.stdin is None:
             raise RuntimeError("MCP process is not running")
@@ -221,15 +253,16 @@ class RawMcpClient:
             }
         )
         deadline = time.monotonic() + self.timeout
+        reader_queue = self._reader_queue
         while time.monotonic() < deadline:
-            if self.process is None or self.process.stdout is None:
+            if reader_queue is None:
                 break
             remaining = max(0.0, deadline - time.monotonic())
-            ready, _, _ = select.select([self.process.stdout], [], [], remaining)
-            if not ready:
+            try:
+                line = reader_queue.get(timeout=remaining)
+            except queue.Empty:
                 break
-            line = self.process.stdout.readline()
-            if not line:
+            if line is None:
                 break
             response = json.loads(line)
             if response.get("id") != request_id:
@@ -293,6 +326,19 @@ class RawMcpClient:
                 self._close_stream(process.stdout)
                 self._close_stream(process.stdin)
             self._close_stream(stderr)
+            # The reader thread exits on stdout EOF; join best-effort so it can
+            # never outlive the client on Windows where the pipe handle closes
+            # asynchronously.
+            thread = self._reader_thread
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=2)
+            self._reader_thread = None
+            self._reader_queue = None
+            # On Windows, a killed child's SQLite WAL/SHM handles can linger
+            # briefly after process exit; give the OS a moment to release them
+            # before the caller's TemporaryDirectory cleanup runs.
+            if sys.platform == "win32" and process is not None:
+                time.sleep(0.2)
             # Popen can fail after stderr is created, so reset both fields even
             # when there is no process to wait for.
             self.process = None

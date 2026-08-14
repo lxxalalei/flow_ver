@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -159,10 +160,15 @@ class RawMcpClientStartupCleanupTests(unittest.TestCase):
         self.assertEqual(str(root / "xdg-config"), captured_environment["XDG_CONFIG_HOME"])
         self.assertEqual(str(root / "xdg-data"), captured_environment["XDG_DATA_HOME"])
         self.assertEqual(str(root / "pycache"), captured_environment["PYTHONPYCACHEPREFIX"])
-        self.assertNotIn("PYTHONDONTWRITEBYTECODE", captured_environment)
+        # On Windows PYTHONDONTWRITEBYTECODE=1 is intentionally injected to avoid a
+        # subprocess import deadlock; on POSIX the parent's value must not leak.
+        if sys.platform != "win32":
+            self.assertNotIn("PYTHONDONTWRITEBYTECODE", captured_environment)
         self.assertEqual("restart", captured_environment["EDUCATION_RESOURCE_E2E_MODE"])
         self.assertEqual("/host/bin", captured_environment["PATH"])
-        self.assertEqual(r"C:\\Windows", captured_environment["SystemRoot"])
+        # Windows stores environment-variable keys in uppercase; POSIX preserves casing.
+        systemroot_key = "SYSTEMROOT" if sys.platform == "win32" else "SystemRoot"
+        self.assertEqual(r"C:\\Windows", captured_environment[systemroot_key])
         self.assertEqual(
             os.pathsep.join(
                 [
@@ -188,7 +194,6 @@ class RawMcpClientStartupCleanupTests(unittest.TestCase):
             "EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR",
             "EDUCATION_RESOURCE_MCP_SEARXNG_URL",
             "EDUCATION_RESOURCE_MCP_MAX_WORKERS",
-            "PYTHONDONTWRITEBYTECODE",
             "PYTHONUSERBASE",
             "QIANFAN_API_KEY",
             "BING_COOKIE",
@@ -242,7 +247,10 @@ class RawMcpClientStartupCleanupTests(unittest.TestCase):
         self.assertEqual(
             str(shared_pycache), captured_environment["PYTHONPYCACHEPREFIX"]
         )
-        self.assertNotIn("PYTHONDONTWRITEBYTECODE", captured_environment)
+        # On Windows PYTHONDONTWRITEBYTECODE=1 is injected to avoid the import
+        # deadlock; on POSIX the parent's value must not reach the child.
+        if sys.platform != "win32":
+            self.assertNotIn("PYTHONDONTWRITEBYTECODE", captured_environment)
         self.assertTrue(process.killed)
         self.assertTrue(process.stdin.closed)
         self.assertTrue(process.stdout.closed)
