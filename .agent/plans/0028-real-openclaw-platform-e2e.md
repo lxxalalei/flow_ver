@@ -54,10 +54,11 @@ Coding Agent：
 
 1. **Anna's Archive 复测**：Search 已真实返回候选；0049 已修复 Inspect 误访问合成详情页导致的 403/AUTH_REQUIRED，当前优先确认 Inspect → Prepare 是否恢复。
 2. **Shuge**：Search 已能得到公开存储 `/d/` 文件候选，Inspect 与 `shuge -> generic-direct@1.0.0` 路由已接入；等待真实 Search → Inspect → Prepare → Start → Asset。
-3. **Bilibili**：active `bilibili-video@1.0.0`，Windows ffmpeg 合并依赖已具备；等待真实视频下载闭环。
-4. **SmartEdu**：PDF、direct MP4、MP3、M4A active route 已完成工程接入；等待真实闭环。
-5. **Douyin**：active `douyin-video@1.0.0`；需要可用登录态时应显式暴露认证事实。
-6. **Ximalaya**：active `ximalaya-audio@1.0.0`；重点验证具体 track 绑定，不允许 album 静默变成第一首。
+3. **Yixi / 一席**：真实样本 `speech_id=1435`《教育就是生长》已确认 `play_detail` 返回标清/高清公开 MP4；0051 已接入 Search 解析最高可用 MP4、YixiInspector 与 `yixi -> generic-direct@1.0.0` 路由。优先用该样本跑真实闭环。
+4. **Bilibili**：active `bilibili-video@1.0.0`，Windows ffmpeg 合并依赖已具备；等待真实视频下载闭环。
+5. **SmartEdu**：PDF、direct MP4、MP3、M4A active route 已完成工程接入；等待真实闭环。
+6. **Douyin**：active `douyin-video@1.0.0`；需要可用登录态时应显式暴露认证事实。
+7. **Ximalaya**：active `ximalaya-audio@1.0.0`；重点验证具体 track 绑定，不允许 album 静默变成第一首。
 
 Generic Web materialize 可作为网页资源独立验收，但不要求与平台下载队列绑定在同一次测试中。
 
@@ -83,7 +84,8 @@ Sensitive values removed: yes/no
 - [x] completed：历史真实 OpenClaw 调查和失败记录已保留在 Git 历史与归档计划中。
 - [x] completed：2026-08-12 明确真实验收由用户执行，Coding Agent 停止代跑 OpenClaw。
 - [x] completed：2026-08-14 用户反馈 Anna's Archive Inspect 全量失败；已定位并按归档计划 [`0049`](archive/0049-annas-metadata-inspection.md) 修复。
-- [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
+- [x] completed：2026-08-14 用户提供一席 1435 的真实 `play_detail` 响应；0051 已按实际静态公开 MP4 数据模型接入可测试获取链。
+- [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
 - [ ] pending：对后续真实失败建立独立修复计划并记录复测结果。
 - [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
 
@@ -121,4 +123,4 @@ Sensitive values removed: yes
 命中 `annas-archive@1.0.0 / direct_file`。下载失败继续在 Job 层按项结构化
 暴露。Level 2 定向验证通过；等待用户复测真实链路。
 
-SmartEdu、Douyin、Ximalaya、Bilibili、Anna's Archive 与 Shuge 均已有工程获取路线；是否真实 production-ready 仍以本计划中的用户 OpenClaw 结果为准。
+SmartEdu、Douyin、Ximalaya、Bilibili、Anna's Archive、Shuge 与 Yixi 均已有工程获取路线；是否真实 production-ready 仍以本计划中的用户 OpenClaw 结果为准。
