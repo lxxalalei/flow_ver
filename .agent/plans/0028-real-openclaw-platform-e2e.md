@@ -2,14 +2,14 @@
 
 - 状态：in_progress
 - 创建日期：2026-08-08
-- 更新日期：2026-08-14
+- 更新日期：2026-08-15
 - 完成日期：未完成
 - 负责人：用户执行真实 Windows OpenClaw 与平台测试；Coding Agent 只根据用户反馈修复代码和记录结果
 - 工程接入历史：[`0039 可实际测试下载平台 Active 接入`](archive/0039-download-platform-active-expansion.md) 已完成；当前真实验收由本计划直接跟踪
 
 ## Objective
 
-记录用户在 Windows OpenClaw 中对 active 平台的实际测试结果，并把真实失败反馈到独立修复计划。
+记录用户在 Windows OpenClaw 中对 active / experimental 平台的实际测试结果，并把真实失败反馈到独立修复计划。
 
 fixture、单元测试、MCP doctor/probe、Provider 注册或 Downloader 文件存在都不能代替用户的实际平台测试。
 
@@ -42,11 +42,12 @@ Coding Agent：
 
 ## Business invariants
 
-- 只有 active `Representation -> ProviderSpec -> exact Provider` 路线才进入 Prepare/Start。
+- 只有已接入的 `Representation -> ProviderSpec -> exact Provider` 路线才进入 Prepare/Start。
 - 所有下载继续采用 `prepare -> 用户明确确认 -> start`。
 - 失败后不切 generic Provider、其他平台、scope 或 strategy。
 - Tool/错误/记录不包含 Cookie、Token、动态下载 URL、Header、响应体或本地路径。
 - 未产生 ready Asset 时不得记录为下载成功；fixture 或环境检查不得标记平台实际可用。
+- experimental 平台在 Registry / 原生搜索未完成前不得冒充完整 active 平台。
 
 ## Current test queue
 
@@ -55,10 +56,11 @@ Coding Agent：
 1. **Anna's Archive 复测**：Search 已真实返回候选；0049 已修复 Inspect 误访问合成详情页导致的 403/AUTH_REQUIRED，当前优先确认 Inspect → Prepare 是否恢复。
 2. **Shuge**：Search 已能得到公开存储 `/d/` 文件候选，Inspect 与 `shuge -> generic-direct@1.0.0` 路由已接入；等待真实 Search → Inspect → Prepare → Start → Asset。
 3. **Yixi / 一席**：真实样本 `speech_id=1435`《教育就是生长》已确认 `play_detail` 返回标清/高清公开 MP4；0051 已接入 Search 解析最高可用 MP4、YixiInspector 与 `yixi -> generic-direct@1.0.0` 路由。优先用该样本跑真实闭环。
-4. **Bilibili**：active `bilibili-video@1.0.0`，Windows ffmpeg 合并依赖已具备；等待真实视频下载闭环。
-5. **SmartEdu**：PDF、direct MP4、MP3、M4A active route 已完成工程接入；等待真实闭环。
-6. **Douyin**：active `douyin-video@1.0.0`；需要可用登录态时应显式暴露认证事实。
-7. **Ximalaya**：active `ximalaya-audio@1.0.0`；重点验证具体 track 绑定，不允许 album 静默变成第一首。
+4. **Zjer / 之江汇（experimental）**：真实样本 `courseCateId=34941` 已确认课程详情返回课时 `videoId`、MP4 与带过期签名的媒体 URL；0052 已接入 direct-course Search、ZjerInspector 与 `zjer-video@1.0.0`。当前先用 `34941` 跑真实闭环，关键词原生搜索尚未宣称支持。
+5. **Bilibili**：active `bilibili-video@1.0.0`，Windows ffmpeg 合并依赖已具备；等待真实视频下载闭环。
+6. **SmartEdu**：PDF、direct MP4、MP3、M4A active route 已完成工程接入；等待真实闭环。
+7. **Douyin**：active `douyin-video@1.0.0`；需要可用登录态时应显式暴露认证事实。
+8. **Ximalaya**：active `ximalaya-audio@1.0.0`；重点验证具体 track 绑定，不允许 album 静默变成第一首。
 
 Generic Web materialize 可作为网页资源独立验收，但不要求与平台下载队列绑定在同一次测试中。
 
@@ -85,13 +87,14 @@ Sensitive values removed: yes/no
 - [x] completed：2026-08-12 明确真实验收由用户执行，Coding Agent 停止代跑 OpenClaw。
 - [x] completed：2026-08-14 用户反馈 Anna's Archive Inspect 全量失败；已定位并按归档计划 [`0049`](archive/0049-annas-metadata-inspection.md) 修复。
 - [x] completed：2026-08-14 用户提供一席 1435 的真实 `play_detail` 响应；0051 已按实际静态公开 MP4 数据模型接入可测试获取链。
-- [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
+- [x] completed：2026-08-15 用户提供之江汇 34941 的真实课程详情和 signed MP4 数据；0052 已按“稳定课时 ID + Start 时刷新签名 URL”接入 experimental 获取链。
+- [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Zjer/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
 - [ ] pending：对后续真实失败建立独立修复计划并记录复测结果。
 - [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
 
 ## Completion criteria
 
-- 至少一个 active 平台由用户在 Windows OpenClaw 中完成真实下载并得到正确 ready Asset；
+- 至少一个已接入平台由用户在 Windows OpenClaw 中完成真实下载并得到正确 ready Asset；
 - 所有副作用经过用户明确确认；
 - 失败没有被 fallback 或伪造成功掩盖；
 - 用户报告的问题已进入独立工程修复计划并完成必要复测。
@@ -123,4 +126,4 @@ Sensitive values removed: yes
 命中 `annas-archive@1.0.0 / direct_file`。下载失败继续在 Job 层按项结构化
 暴露。Level 2 定向验证通过；等待用户复测真实链路。
 
-SmartEdu、Douyin、Ximalaya、Bilibili、Anna's Archive、Shuge 与 Yixi 均已有工程获取路线；是否真实 production-ready 仍以本计划中的用户 OpenClaw 结果为准。
+SmartEdu、Douyin、Ximalaya、Bilibili、Anna's Archive、Shuge 与 Yixi 均已有工程获取路线；Zjer 已有 experimental 获取路线。是否真实 production-ready 仍以本计划中的用户 OpenClaw 结果为准。
