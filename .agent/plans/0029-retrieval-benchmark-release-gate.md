@@ -1,186 +1,370 @@
-# 0029 Retrieval Benchmark and Release Gate
+# 0029 — Semantic Retrieval Benchmark 与 Release Gate
 
 - 状态：pending
 - 创建日期：2026-08-08
+- 更新日期：2026-08-14
 - 完成日期：未完成
-- 范围：固定 gold 任务集、离线 benchmark runner、Retrieval/SemanticReview/StopDecision/Capability truth 指标、基线与差异报告、本地与 CI 发布门禁
-- 前置条件：[`0025 Platform Capability Contract Alignment`](archive/0025-platform-capability-contract-alignment.md) 完成；真实 Agent 指标需 [`0028 Real OpenClaw and Real Platform E2E`](0028-real-openclaw-platform-e2e.md) 证据
-- 权威边界：[`Retrieval Authority`](../../docs/RETRIEVAL_AUTHORITY.md)
+- 范围：`learning-resource-flow` 的语义决策质量、检索结果质量、必要 Inspect 决策，以及不可破坏的 MCP 业务边界
+- 真实 Agent 证据：[`0028 Real OpenClaw and Real Platform E2E`](0028-real-openclaw-platform-e2e.md)
 
-## 目标
+## Objective
 
-建立版本化、可重复、机器可比较且不访问真实凭据的检索质量门禁，使每次修改都能回答：
-候选相关性是否改善、是否过早 Present、Gap 是否准确、Inspect 是否有效、能力是否被误承诺、
-真实 Agent 是否能完成闭环。Benchmark 不是第二套生产状态机，不写 MCP 公共事实，也不以一个
-综合总分掩盖 P0 安全或真实性失败。
+建立一套版本化、可重复、能逐 case 审查的资源检索质量评测，使每次 Skill/Search 相关修改都能回答：
 
-## 硬边界
+- 模型有没有理解用户真正想完成什么；
+- 搜索角度是不是少量、互补而不是关键词改写；
+- 来源/平台是不是因为内容或证据需求而选择；
+- query 是否像该来源里的真实搜索；
+- 搜到结果以后能不能识别“关键词命中但实际没用”；
+- 是否只在存在明确缺口和更好的下一路线时继续搜索；
+- 是否在需要时 Inspect、在不需要时不过度 Inspect；
+- 最终推荐是否真正满足用户目标和显式约束。
 
-- production factual coverage 仍由 MCP Search ResultSet 事实产生；SemanticReview/Gap/StopDecision
-  仍由唯一入口 Skill 执行；offline oracle 只用于 gold 比较和回归。
-- Benchmark runner 不搜索真实平台、不下载、不归档、不持久化到生产 SQLite，不读取真实凭据。
-- 真实网络 smoke 和 OpenClaw 对话指标使用 0028 的独立、脱敏证据；不得混入确定性离线分数。
-- 不以增加样本宽松度、删负例、随机重试、多次取最好结果或静默 fallback 提高分数。
-- Critical invariant 任一失败都直接阻断发布，不能被平均分抵消。
-- Gold 变更必须可审查、版本化并说明为何用户期望发生变化；不能只为让当前实现通过而改 gold。
+Benchmark 的主要对象是 **semantic decision quality**，不是让模型复现 MCP 的内部状态机。MCP 的状态、安全和副作用约束作为独立 hard gate 验证。
 
-## Benchmark 领域模型
+## Why this plan changed
 
-每个 case 至少包含：
+0029 最初写于 Flow-heavy Skill 阶段，当时把 `SemanticReview / Gap / StopDecision`、旧 Capability Authority、Readiness/Eligibility/digest 链作为大量 benchmark 字段和指标。
+
+0046 已把 active Skill 重构为 semantic-first：模型负责需求理解、搜索角度、来源派发、query、结果判断和自然的补搜/停止判断；MCP 负责 Flow/ResultSet/Presentation/Selection/Resolution/Plan/Job/Asset 等事实和副作用。
+
+因此 0029 不应把已经退出模型主思维的术语重新做成评测目标，否则 benchmark 会反向迫使 Skill 再次变成 Workflow Operator Manual。
+
+## Non-goals
+
+- 不建立第二套生产状态机、Planner、Intent Service 或 SemanticReview 服务。
+- 不要求模型输出内部 chain-of-thought、固定 JSON 推理模板或 `Gap/StopDecision` 对象。
+- 不用 Tool 调用数量、平台数量、搜索轮数或“成功走完 Flow”代替语义质量。
+- 不以固定 120 cases 等数量目标推动低信息密度样本堆积；case 数量由真实覆盖缺口驱动。
+- 不通过随机重试、多次取最好结果、放宽 gold 或删除负例提高分数。
+- 不为 benchmark 增加 benchmark digest、authority digest 或新的运行时哈希链。
+- 不访问真实平台、不执行真实下载、不读取真实凭据；真实网络/OpenClaw 证据继续由 0028 独立记录。
+- 不把 benchmark 结果写回生产 SQLite 或 MCP 业务状态。
+
+## Business invariants
+
+1. Skill 负责语义研究与决策；MCP 负责事实、状态和副作用。
+2. ResultSet/Resolution/Provider/Asset 等事实只能来自 MCP/fixture，不由 evaluator 或模型补造。
+3. `prepare -> 用户明确确认 -> start` 不因 benchmark 被绕过。
+4. exact Provider 失败后不切 generic、其他 provider、scope 或 strategy。
+5. benchmark 可以测“是否应该 Inspect”，但不能把 Inspect 全量化当高分行为。
+6. 真实 OpenClaw 成功率与离线 semantic score 分开报告；两者不能互相替代。
+7. Gold 描述可接受的决策边界，不要求所有模型逐字给出同一自然语言答案。
+
+## 评测对象
+
+### 1. Need reconstruction
+
+判断模型是否从用户原话还原实际目标，而不是直接生成关键词。
+
+例：
+
+```text
+用户：帮孩子找一些火山科普资料，形式你看着办。
+
+合理：目标是建立火山喷发的原理理解与过程直观认识。
+机械：topic=火山；query=儿童优质火山科普资料。
+```
+
+### 2. Clarification judgment
+
+只在答案会导致明显不同搜索路线时追问。
+
+重点同时惩罚：
+
+- 关键分叉存在却直接猜；
+- 信息已经足够却为了填字段追问平台、数量、年龄等；
+- 搜索结果差就反过来追问用户已经说明的约束。
+
+### 3. Search angle quality
+
+好的搜索角度描述不同的信息/学习价值，例如：
+
+```text
+喷发原理理解
+喷发过程观察
+```
+
+而不是：
+
+```text
+火山
+火山知识
+火山科普
+儿童火山科普
+```
+
+不要求固定角度数量。窄任务一个角度即可；宽任务只有在确实需要互补价值时才扩展。
+
+### 4. Source routing quality
+
+来源选择必须能回答“为什么这个来源对当前角度有独特价值”。
+
+例如：
+
+- 观察过程 → 视频/公共媒体生态；
+- 教材同步 → 结构化教育来源；
+- 版本/ISBN/古籍 → 图书目录、公版/古籍来源；
+- 朗读/故事 → 音频来源；
+- 具体公开文件 → 文档来源或 Generic Web。
+
+不因 Registry 里存在某平台就机械派发，也不以平台覆盖数计分。
+
+### 5. Query quality
+
+Query 应是对应来源中的自然搜索表达：主题 + 当前切面；只有确实影响召回时才加入学段、版本、格式、语言等条件。
+
+需要识别的反模式包括：
+
+- 原句整段复制；
+- 机械拼接所有约束；
+- `优质 / 精品 / 权威 / 高赞 / 最好` 等评价词替代候选判断；
+- 同一来源首轮发多条近义 query；
+- 为了表现“规划”制造没有召回差异的 query。
+
+### 6. Result judgment
+
+Search 返回很多结果不等于任务完成。
+
+评测模型是否会检查：
+
+- 与目标的真实相关性；
+- 对实际使用者是否合适；
+- must / exclude 是否满足；
+- 是否有实质内容而不是聚合、广告、空壳详情；
+- 当前任务所需可信度是否足够；
+- 多个候选是否互补而不是重复。
+
+### 7. Inspect decision
+
+Inspect 是为决策补事实，而不是流程仪式。
+
+好的判断包括：
+
+- 用户要求公开可读/可下载，而 Search 只有线索 → Inspect 高潜候选；
+- 需要确认 primary resource vs landing page → Inspect；
+- 标题/摘要已经足够做初步推荐、用户也没要求获取 → 不为全部候选 Inspect；
+- Prepare 前需要 fresh Representation → 进入获取阶段按 MCP 事实执行。
+
+### 8. Next action quality
+
+搜索后自然选择：
+
+- `clarify`：仍存在会改变路线的关键歧义；
+- `search`：能指出一个具体缺失部分，并存在明显不同的下一条搜索路线；
+- `inspect`：一个具体事实会改变推荐/获取决策；
+- `present`：当前结果已经足够帮助用户选择；
+- `stop_with_limit`：无法进一步可靠改善，应明确说明限制。
+
+Evaluator 判断的是**理由是否符合实际任务**，而不是要求模型输出上述标签。
+
+## Case schema
+
+每个 case 保持可人工审查，不要求把模型思考过程结构化落盘。建议字段：
 
 ```text
 case_id
 benchmark_version
 task_family
-user_utterance
-user_role
-resource_target
+messages / user_utterance
+available_user_context              # 仅该 case 明确提供的上下文
 explicit_constraints
-fixture/search/inspection facts
-expected_displayable_ids
-forbidden_display_ids
-expected_key_gaps
-expected_clarify
-expected_inspect_ids / inspect_budget
-expected_stop_decision
-expected_acquisition_scope
-expected_capability_status / reason_codes
+fixture_search_results              # 可选；确定性搜索事实
+fixture_inspection_facts            # 可选；确定性 Inspect 事实
+
+expected_need                       # 目标/使用者/成功标准的关键点
+critical_ambiguity                  # null 或真正会分叉的歧义
+acceptable_search_angles            # 可接受方向及职责，不要求唯一措辞
+source_role_expectations             # 来源需要承担什么角色；仅必要时固定平台
+query_expectations                   # 应包含/不应包含的搜索意图特征
+recommendable_ids                    # 基于 fixture 确实适合推荐
+forbidden_recommendation_ids         # 明确不应展示的候选
+facts_requiring_inspect              # 哪些事实不足会改变决策
+acceptable_next_actions              # 基于当前事实可接受的下一步
+rationale
 critical_invariants
-gold_rationale
 ```
 
-Runner 输出每 case 的原始事实摘要、预测/期望差异、指标贡献和稳定失败码，同时生成 JSON 和
-人可读 Markdown 报告。所有排序指标必须明确 N、去重规则、无候选分母与 unknown 处理方式。
+Gold 不要求模型输出内部 chain-of-thought。可观察输出、Tool arguments、选择的平台/query、实际 Presentation 和下一步行为足以评估。
 
-## 步骤
+## Case families
 
-- [ ] pending：A. 冻结 benchmark schema、gold 评审规则、指标数学定义、随机性/重复运行策略和 critical invariant 列表
-- [ ] pending：B. 从 0024 calibration、0025 capability truth、0028 Agent evidence 和历史 regression 提炼版本化任务集，建立独立 train-free gold
-- [ ] pending：C. 实现确定性离线 runner、case-level JSON、聚合 Markdown、baseline snapshot 和版本/digest 校验
-- [ ] pending：D. 实现 Retrieval relevance、Present/Replan、Gap、Clarify、Inspect efficiency、dedup/source diversity 指标
-- [ ] pending：E. 实现 acquisition truthfulness、scope/provider/readiness/policy、no-fallback、Plan/Outcome consistency 指标与 P0 门禁
-- [ ] pending：F. 将 0028 脱敏 OpenClaw 证据接入独立 E2E completion/readiness 报告，不污染离线确定性指标
-- [ ] pending：G. 建立本地单命令和 CI/release gate，支持与批准 baseline 比较、失败阈值、报告归档和可审查 baseline 更新
-- [ ] pending：H. 执行全量 benchmark、单元/契约/全量/stdio 回归，更新 DEVELOPMENT_PLAN/CURRENT_ARCHITECTURE/README，由根 Agent 完成逐指标审计
+不设为了凑数量的总 case 数门槛。初始集合应优先覆盖高信息密度边界，并在真实失败出现时扩充：
 
-## 最低任务集
+| 任务族 | 重点覆盖 |
+| --- | --- |
+| 已充分指定的窄任务 | 不该追问；直接形成高质量 query |
+| 真正存在路线分叉的模糊任务 | 关键澄清而非字段收集 |
+| 多形态学习任务 | 是否形成真正互补角度 |
+| 可打印/具体文件任务 | 内容形态 vs 文件格式；不误派视频 |
+| 教材/课程同步 | 学段、版本真的影响路线时才追问 |
+| 图书/版本/古籍 | 书名、作者、版本、ISBN、Shuge/NLC 等来源职责 |
+| 音视频过程观察 | 视频/音频生态的正确职责 |
+| 结果数量多但方向错 | 不因数量充足而过早推荐 |
+| Search 摘要不足 | 有选择地 Inspect 高潜候选 |
+| 公开访问/无需登录 | availability/auth 事实必须被核验 |
+| 网页 primary vs landing | 不把导航页当资源本体 |
+| 部分失败/来源不可用 | 不掩盖失败、不无意义扩散平台 |
+| 用户只想搜索不下载 | 不越权进入 Prepare/Start |
+| 用户明确选择并下载 | Presentation/Selection/确认安全 gate |
+| 上下文中已有可靠信息 | 不重复追问，也不扩展成长期偏好 |
 
-| 任务族 | 最低数量 | 必须覆盖 |
-| --- | ---: | --- |
-| 窄目标查找 | 12 | 指定主题、格式、来源、语言，precision 与硬约束 |
-| 宽泛探索 | 12 | 多方向探索、search-only 可展示边界、停止成本 |
-| 混合资源 | 12 | article/video/document/book/course 组合与来源多样性 |
-| 教材同步 | 10 | 必须澄清与不应询问年级/年龄的边界 |
-| 版本与表示 | 10 | 版本、册次、PDF/EPUB、primary/representation/landing/metadata |
-| 来源可信度 | 10 | 官方、专业、社区、聚合/镜像来源差异 |
-| 认证与策略 | 10 | AUTH_REQUIRED、policy block、unsupported、readiness expiry |
-| 低质量负例 | 14 | 标题党、重复、无正文、错误 target、候选数量伪充分 |
-| 网页物化 | 10 | 文本、图文、长文、代码、表格、复杂页面与资源边界 |
-| 恢复与状态 | 8 | 重启、幂等、Selection/Plan 失效、取消、partial |
-| Capability truth | 12 | search-only、landing-only、concrete primary、provider drift/no fallback |
+每个任务族至少要有能够区分“看起来合理”和“真正决策正确”的正例、负例或边界例；发现新系统性失败时增加能复现该失败的 case，而不是机械扩充数量。
 
-最低总量为 120 cases；每个任务族至少包含正例、负例、unknown/insufficient 例和一个会改变
-StopDecision 或 acquisition scope 的边界例。新增 case 不得复制同一事实仅改标题凑数。
+## 评分方式
 
-## 指标定义
+### 语义维度
 
-### Retrieval / Conversation
+沿用 `skills/learning-resource-flow/examples/semantic-evaluation.md` 的 0/1/2 三档思想，不做伪精确加权总分：
 
-- **Top-N Relevance Precision**：实际展示 Top-N 中 gold relevant 的比例；N 和空集合行为固定。
-- **Forbidden Display Rate**：被 gold 明确禁止展示的候选进入 Presentation 的比例。
-- **Premature Present Rate**：仍有 gold critical Gap 或必要证据缺失却选择 Present 的 case 比例。
-- **Unnecessary Replan Rate**：gold 已满足目标且无 critical Gap 却继续搜索/Inspect 的比例。
-- **Gap Precision / Recall / F1**：按规范化 Gap 类型与绑定对象比较，不用自由文本相似度冒充。
-- **Clarification Precision / Recall**：只对会改变资源范围/选择的必要澄清计分；年龄/年级误问单列。
-- **Inspect Precision**：Inspect 的候选中 gold 认为需要 Inspect 的比例。
-- **Inspect Recall**：gold 必须 Inspect 的候选被检查比例。
-- **Inspect Efficiency**：完成目标所需 Inspect 次数与 gold 最小预算的差异，安全必要检查不作为浪费。
-- **Source Diversity / Dedup Accuracy**：来源族覆盖与逻辑重复识别准确性，不能用数量替代质量。
+- `0`：核心判断错误，或工作流合规但实际资源决策明显失败；
+- `1`：基本相关，但仍有机械派发、机械 query、无效澄清或结果判断不足；
+- `2`：目标还原、搜索角度、来源职责、query 和基于结果的调整都合理。
 
-### Capability / Acquisition
+分别记录：
 
-- **Acquisition Truthfulness**：scope、strategy、provider、representation、eligibility 和 outcome 与 gold/事实一致比例。
-- **Primary False-Promise Rate**：landing/metadata/unknown 被承诺为 primary 的比例。
-- **Implicit Fallback Rate**：Provider/strategy/scope 在 prepare/start/outcome 间未经声明改变的比例。
-- **Revalidation Escape Rate**：descriptor/readiness/source/policy 漂移却成功 start 的比例。
-- **Asset Truth Rate**：成功结论具有真实、校验过且与 outcome/Bundle 绑定的 Asset 比例。
-- **E2E Completion**：来自 0028 真实 Agent 证据的任务完成比例；与离线质量分开报告。
+1. Need reconstruction
+2. Clarification judgment
+3. Search angle quality
+4. Source routing quality
+5. Query quality
+6. Result judgment
+7. Inspect decision
+8. Next action quality
 
-## Critical Invariants（零容忍）
+不要用单一综合分掩盖某个维度的系统性退化。
 
-以下任一 case 失败即 release gate 失败，不允许综合分抵消：
+### 候选结果指标
 
-1. landing/metadata/search-only 被升级为 primary，或无 concrete primary 仍报告下载成功。
-2. 未经 `prepare -> 用户确认 -> start` 发生副作用。
-3. descriptor/readiness/resolution/eligibility/authority digest 漂移未阻止 start。
-4. exact provider 失败后切换 generic/其他 provider，或 strategy/scope 被静默改变。
-5. 私网/本机/metadata endpoint、恶意重定向、超限、MIME/magic 冲突绕过安全校验。
-6. 模型/fixture 伪造 Job、Outcome、Asset、Archive、路径或成功状态。
-7. 用户未要求教材同步却仅为“适龄”主动追问年龄/年级，或从 user_role 推断 resource_target。
-8. legacy Skill/Tool 被默认发现，公共 Tool 数偏离 13，或 active MCP 运行时导入 legacy。
-9. 真实凭据、Cookie、Token、浏览器档案、SQLite 或下载产物进入仓库/报告。
+有确定性 fixture 时可以计算：
 
-## Release Gate
+- **Recommendation Precision**：实际 Presentation 中适合推荐的比例；
+- **Forbidden Recommendation Rate**：明确不应推荐的候选进入 Presentation 的比例；
+- **Constraint Satisfaction**：must/exclude 是否被真实满足；
+- **Inspect Precision**：被 Inspect 的候选中确实需要补事实的比例；
+- **Inspect Recall**：gold 明确必须核验的关键事实是否被核验；
+- **Redundant Search Rate**：没有新信息价值的近义搜索比例。
 
-首个批准 baseline 建立后，默认门禁为：
+这些指标只解释可观察行为，不尝试量化模型隐藏思考过程。
 
-- Critical invariants：**0 failure**。
-- Premature Present、Forbidden Display、Primary False-Promise、Implicit Fallback、
-  Revalidation Escape：**不得高于批准 baseline，且目标绝对值为 0**。
-- Top-N precision、Gap F1、Clarification F1、Inspect precision/recall、Acquisition Truthfulness、
-  Asset Truth：**不得低于批准 baseline**；任何下降必须有逐 case 审查和明确用户价值证据，不能自动放行。
-- Unnecessary Replan 和 Inspect cost：不得显著恶化；显著性阈值在 Phase A 根据重复运行方差冻结，
-  冻结后只能通过版本化决策修改。
-- 任务集、schema、gold、runner、baseline 均有版本和 digest；digest 不匹配直接失败。
-- 单元/契约/全量/stdio E2E、compileall、Markdown link、`git diff --check` 同时通过。
-- 0028 未完成时，E2E Completion 只能显示 `not_verified`，不得用 fixture 分数代替；0029 可先完成
-  离线 gate，但主体架构最终 DoD 必须等 0028 真实证据接入。
+## Hard gates
 
-## 目录与产物建议
+以下不是语义加分项，而是零容忍业务边界：
+
+1. 模型不得伪造 `flow_id`、ResultSet、Resolution、Provider、Plan、Job、Asset、Archive 或本地路径。
+2. 用户序号选择必须绑定实际 Presentation；不能选择没有展示的候选。
+3. 未经当前 Plan 的用户明确确认不得 `resource_download_start`。
+4. Start/Job 只执行 Plan 的 exact Provider；失败后不得 silent fallback 到 generic、其他 provider、scope 或 strategy。
+5. AUTH_REQUIRED、unavailable、policy block 等事实不得被隐藏或乐观改写。
+6. 未产生真实 ready Asset 不得报告下载成功或可归档。
+7. Skill 资源任务不得绕开 `education-resources`，使用 browser/web/curl/其他 MCP 建第二条候选发现或获取数据面。
+8. MCP 当前公共 Tool 数为 14；benchmark 不要求新增工具来满足评测。
+
+状态版本、幂等、Representation freshness 等后端机械约束继续由 MCP 单元/集成/E2E 测试负责；它们不需要被重新包装成模型的语义 benchmark 状态机。
+
+## A/B 方法
+
+至少保留一个 Flow-heavy Skill 的 Git ref 作为历史 baseline，与 semantic-first Skill 使用：
 
 ```text
-mcp/education-resources/benchmarks/
-├── schemas/
+同一 Main Agent 模型
+同一用户输入
+同一 fixture / MCP 事实
+同一运行参数
+唯一主要变量：Skill 版本
+```
+
+逐 case 保存：
+
+- 是否澄清以及问了什么；
+- 实际平台/来源与 query；
+- Search/Inspect 的可观察调用；
+- 实际展示候选；
+- 是否识别错误方向并调整；
+- 下一步行为；
+- 用户可见解释；
+- Tool 调用数和无效搜索数，仅作为成本参考。
+
+A/B 目标不是证明新版“Tool 更少”，而是确认新版在多数代表性任务中稳定做出更好的资源研究决策，并且没有新的系统性失败。
+
+## Offline runner
+
+开始实施时，runner 应尽量简单：
+
+```text
+benchmarks/
 ├── cases/
-├── gold/
+├── fixtures/
 ├── baselines/
 └── README.md
-mcp/education-resources/scripts/run_retrieval_benchmark.py
-mcp/education-resources/tests/test_benchmark_contract.py
-mcp/education-resources/tests/test_benchmark_metrics.py
-.openclaw-test/benchmark-output/   # 临时运行输出，不进入版本库
+scripts/run_semantic_benchmark.py
 ```
 
-仓库只保存小型、脱敏、可审查的 fixture/gold/baseline；大型运行日志和真实平台产物不进入仓库。
+输出：
 
-## 验证入口
+- case-level JSON：输入、可观察决策、各维度评分/断言结果、hard gate；
+- Markdown 报告：按失败模式分组，展示 baseline vs candidate 差异；
+- 失败返回非零退出码。
 
-最终应提供一个无需网络和凭据的稳定入口，例如：
+不为 runner 新建服务、数据库或 Runtime Registry。baseline 用普通版本化 JSON 保存即可，不增加 digest 权威链。
 
-```bash
-cd mcp/education-resources
-PYTHONPATH=src TMPDIR=/tmp TEMP=/tmp <venv-python> scripts/run_retrieval_benchmark.py \
-  --cases benchmarks/cases \
-  --gold benchmarks/gold \
-  --baseline benchmarks/baselines/approved.json \
-  --output .openclaw-test/benchmark-output
+## 与现有语义回归的关系
+
+`skills/learning-resource-flow/examples/semantic-regression-cases.json` 与 `semantic-evaluation.md` 是当前 seed，而不是需要推翻重写的第二套系统。
+
+0029 实施时应：
+
+1. 先复用其中高质量 case；
+2. 加入 0028 的真实 OpenClaw 失败/成功场景；
+3. 加入会区分旧 Flow-heavy 与 semantic-first 行为的边界 case；
+4. 只有出现新覆盖缺口时再增加 case。
+
+避免复制同一语义只改标题、平台名或主题来凑数量。
+
+## 真实 OpenClaw 验证
+
+Offline benchmark 不能证明真实 Agent 运行质量。
+
+0028 独立记录真实：
+
+```text
+用户自然语言
+→ Skill 实际分析
+→ Search/Inspect
+→ 实际候选
+→ 选择/确认
+→ 下载/Asset（如任务需要）
 ```
 
-以及受影响测试、全量 unittest、stdio E2E、compileall、Markdown links、文件存在性和仓库根
-`git diff --check`。Runner 必须以非零退出码报告 schema/digest/critical invariant/threshold 失败。
+对 Skill 语义改动，应从 0029 代表 case 中抽取若干场景在真实 OpenClaw 上执行 A/B。真实成功率、真实失败阶段和用户可见结果单独报告，不能被离线分数覆盖。
 
-## 退出条件
+## Release gate
 
-1. 120+ 个去重且经审查的 gold cases 覆盖全部任务族与关键边界。
-2. Schema、gold、runner、baseline 都有稳定版本/digest，报告可在同一环境重复生成。
-3. 所有指标有数学定义、边界行为、单元测试和 case-level 可追溯差异。
-4. Critical invariants 零失败，Release Gate 的 baseline/absolute 阈值全部通过。
-5. Acquisition truth 覆盖 0025 authority 全链，真实 E2E 指标与 0028 证据分层。
-6. 本地单命令和 CI/release 入口可用，失败返回非零且生成可审查报告。
-7. 全量 unittest、stdio E2E、compileall、契约/链接/diff 检查通过。
-8. DEVELOPMENT_PLAN、CURRENT_ARCHITECTURE、README/运维文档写明门禁、更新流程与剩余风险。
-9. 根 Agent 对任务集质量、gold 独立性、指标、baseline、critical invariants 和运行证据逐项审查通过。
+首个可信 baseline 建立后：
 
-## 结果
+- Hard gates：0 failure。
+- Forbidden Recommendation Rate：不得恶化；目标为 0。
+- Need/Clarification/Angles/Source/Query/Result/Inspect/Next-action 八个维度不得出现新的系统性退化。
+- 关键真实场景若 candidate 明显劣于 baseline，应阻断相关 Skill/Search 修改，直到逐 case 解释并修复。
+- Tool 成本可作为辅助比较，但不能通过少搜、少 Inspect 换取低质量结果。
+- 真实 OpenClaw 尚未验证的版本必须标记 `real_e2e=not_verified`，不能由 fixture/单测代替。
 
-- 尚未开始；当前仅冻结执行计划。0025 已完成；0028 真实证据未完成前，E2E Completion 必须保持 `not_verified`，不得用 fixture 分数替代。
+发布判断以“是否产生可解释的用户价值退化”为核心，而不是一个加权总分阈值。
+
+## Steps
+
+- [ ] pending：A. 从现有 semantic regression + 0028 真实反馈整理第一版高信息密度 case 集，并冻结可观察字段与评分说明。
+- [ ] pending：B. 实现最小 offline runner 与 baseline/candidate 对比报告，不引入生产状态或 digest 链。
+- [ ] pending：C. 为八个语义维度、候选结果指标和 hard gates 添加直接测试。
+- [ ] pending：D. 运行历史 Flow-heavy Skill vs semantic-first Skill A/B，逐 case 审查系统性差异。
+- [ ] pending：E. 抽取代表 case 在真实 OpenClaw 中执行并把结果关联到 0028。
+- [ ] pending：F. 建立本地/release 入口；只有达到 hard gates 与无系统性语义退化后才批准 baseline。
+
+## Completion criteria
+
+1. case 集覆盖当前主要资源决策边界，并能复现至少一批历史真实失败/退化模式；不以总 case 数作为完成标准。
+2. 每个语义维度和 hard gate 都有可观察、可复核的判定方法。
+3. Offline runner 能稳定比较 baseline/candidate 并生成逐 case 差异，不依赖网络或真实凭据。
+4. Flow-heavy vs semantic-first A/B 已形成可审查结论，而不是只比较 Tool 调用是否成功。
+5. 真实 OpenClaw 代表场景已由 0028 记录；未验证项明确标记。
+6. Benchmark 没有反向把 Skill 重新塑造成 MCP Workflow Operator，也没有引入第二套业务状态权威。
