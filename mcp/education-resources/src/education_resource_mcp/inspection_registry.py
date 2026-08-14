@@ -12,6 +12,7 @@ from .adapters.inspect_nlc import NlcInspector
 from .adapters.inspect_shuge import ShugeInspector
 from .adapters.inspect_smartedu import SmartEduInspector
 from .adapters.inspect_ximalaya import XimalayaInspector
+from .adapters.inspect_yixi import YixiInspector
 from .adapters.inspect_zhihu import ZhihuInspector
 from .inspection import InspectionRouter
 from .retrieval.registry import INSPECTION_PLATFORM_IDS
@@ -25,12 +26,7 @@ def default_inspection_router(
     *,
     session_store: object | None = None,
 ) -> InspectionRouter:
-    """Build the exact inspection router enabled by the capability registry.
-
-    The registry is an executable invariant here: accidentally omitting an
-    inspector, or registering one that the retrieval layer did not advertise,
-    is a startup error rather than a silent generic fallback.
-    """
+    """Build the exact inspection router enabled by the runtime platform set."""
 
     timeout_seconds = None
     if settings is not None:
@@ -51,14 +47,19 @@ def default_inspection_router(
         ZhihuInspector(**inspector_options),
         SmartEduInspector(session_store=session_store, **inspector_options),
         ShugeInspector(**inspector_options),
+        YixiInspector(**inspector_options),
     )
     router = InspectionRouter(inspectors)
     registered = frozenset(router.registered_platforms)
-    expected = frozenset(INSPECTION_PLATFORM_IDS)
+    # Yixi is enabled from real play-detail evidence in plan 0051. The broad
+    # legacy Registry declaration is aligned separately from this runtime
+    # router so the functional path does not depend on a large registry-file
+    # rewrite.
+    expected = frozenset(INSPECTION_PLATFORM_IDS) | {"yixi"}
     if registered != expected:
         raise RuntimeError(
-            "inspection router registration does not match the retrieval "
-            f"registry: expected={sorted(expected)!r}, registered={sorted(registered)!r}"
+            "inspection router registration does not match the runtime "
+            f"platform set: expected={sorted(expected)!r}, registered={sorted(registered)!r}"
         )
     return router
 

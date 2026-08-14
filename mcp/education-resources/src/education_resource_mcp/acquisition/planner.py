@@ -143,6 +143,17 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         resource_types=frozenset({"video"}),
     ),
     ProviderSpec(
+        platform_id="yixi",
+        scope="primary_resource",
+        representation_kind="video",
+        role="primary",
+        strategy=AcquisitionStrategy.DIRECT_FILE,
+        provider_id="generic-direct",
+        provider_version="1.0.0",
+        containers=frozenset({"mp4"}),
+        resource_types=frozenset({"video"}),
+    ),
+    ProviderSpec(
         platform_id="annas-archive",
         scope="primary_resource",
         representation_kind="document",
