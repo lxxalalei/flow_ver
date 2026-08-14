@@ -12,10 +12,10 @@
 
 ## 当前顶层计划
 
-- [0023-retrieval-e2e-hardening.md](../0023-retrieval-e2e-hardening.md) — blocked
-- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress，但当前先受 0037 简化收口影响
-- [0029-retrieval-benchmark-release-gate.md](../0029-retrieval-benchmark-release-gate.md) — pending
-- [0037-acquisition-state-simplification.md](../0037-acquisition-state-simplification.md) — in_progress，当前最高优先级
+- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress，用户执行真实 OpenClaw/平台验收
+- [0029-retrieval-benchmark-release-gate.md](../0029-retrieval-benchmark-release-gate.md) — pending，等待按 semantic-first Skill 收口
+- [0041-web-content-extraction-benchmark.md](../0041-web-content-extraction-benchmark.md) — pending
+- [0050-project-state-alignment.md](../0050-project-state-alignment.md) — in_progress，当前事实/文档/benchmark 收口
 
 ## 归档索引
 
@@ -56,9 +56,13 @@
 | [0034-skill-semantic-loss-audit.md](0034-skill-semantic-loss-audit.md) | completed | 对照 0031 前 Skill 语义补回仍有效规则 |
 | [0035-deleted-skill-reference-complete-audit.md](0035-deleted-skill-reference-complete-audit.md) | completed | 旧 Skill/reference 逐文件语义守恒审计 |
 | [0036-platform-acquisition-capability-recovery.md](0036-platform-acquisition-capability-recovery.md) | superseded | 平台恢复目标保留；旧 Capability Authority 和重新引入大小/哈希门禁的路线被 0037 覆盖 |
+| [0039-download-platform-active-expansion.md](0039-download-platform-active-expansion.md) | completed | SmartEdu 之后的 Douyin/Ximalaya/Bilibili active exact route 工程接入已完成；真实平台验收继续由 0028 跟踪 |
 | [0040-search-subagent-orchestration.md](0040-search-subagent-orchestration.md) | completed | OpenClaw leaf sub-agent 并行规划 SearchDirection；MCP 继续统一串行执行搜索与业务状态 |
 | [0042-web-resource-current-path-fix.md](0042-web-resource-current-path-fix.md) | completed | 修正当前 Generic HTML primary/landing 语义，并将网页主归档物改为图片自包含 HTML；0041 benchmark 继续 pending |
-| [0046-skill-semantic-refactor.md](0046-skill-semantic-refactor.md) | completed | 将 active Skill 重构为 semantic-first；主测需求还原、来源派发、query 和结果判断，multi-agent 降级为实验能力 |
+| [0043-shuge-guji-source.md](0043-shuge-guji-source.md) | completed engineering scope | Shuge OpenList 搜索、Inspect 与公开 `/d/` 文件链已实现；真实用户 E2E 继续由 0028 跟踪 |
+| [0044-shuge-detail-url-search.md](0044-shuge-detail-url-search.md) | completed engineering scope | Shuge 详情页/短链可解析书名并回查公开存储；真实用户 E2E 继续由 0028 跟踪 |
 | [0045-download-item-concurrency.md](0045-download-item-concurrency.md) | completed / superseded | 历史 Service 执行 Provider 并发声明设计；0047 已将并发所有权下沉到获取实现 |
+| [0046-skill-semantic-refactor.md](0046-skill-semantic-refactor.md) | completed | 将 active Skill 重构为 semantic-first；主测需求还原、来源派发、query 和结果判断，multi-agent 降级为实验能力 |
 | [0047-downloader-owned-concurrency.md](0047-downloader-owned-concurrency.md) | completed / superseded | 历史“一 Item 一 worker + Downloader 锁”方案；0048 已改为 exact Provider 批次派发 |
 | [0048-provider-batch-dispatch-simplification.md](0048-provider-batch-dispatch-simplification.md) | completed | Service 按 exact Provider 批次派发；保留逐项结果但不再为每个 JobItem 创建 worker |
+| [0049-annas-metadata-inspection.md](0049-annas-metadata-inspection.md) | completed | Anna's Archive Inspect 改为合法 MD5 元数据通道，避免合成详情页 403 阻断；等待 0028 用户复测 |

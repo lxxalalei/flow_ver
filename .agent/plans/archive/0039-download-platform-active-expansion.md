@@ -1,11 +1,11 @@
 # 0039 — 可实际测试下载平台 Active 接入
 
-- 状态：in_progress
+- 状态：completed
 - 创建日期：2026-08-12
-- 完成日期：未完成
+- 完成日期：2026-08-14
 - 分支：`codex/growth-resource-taxonomy-rework`
-- 优先级：当前唯一工程主线
-- 关联验收：[`0028 Real OpenClaw and Real Platform E2E`](0028-real-openclaw-platform-e2e.md)，由用户执行真实 OpenClaw/平台测试
+- 优先级：已完成的工程接入切片；真实平台验收继续由 0028 跟踪
+- 关联验收：[`0028 Real OpenClaw and Real Platform E2E`](../0028-real-openclaw-platform-e2e.md)，由用户执行真实 OpenClaw/平台测试
 
 ## Objective
 
@@ -25,14 +25,14 @@ Search
 
 ## Priority
 
-当前实现顺序：
+本计划实施顺序：
 
 1. **Douyin**：已有 Search 与单文件 MP4 Downloader，不依赖 ffmpeg；补 active Inspector、concrete Representation、ProviderSpec 与 exact registration。
 2. **Ximalaya**：已有 Search、Inspector 与单文件音频 Downloader；必须把用户选择绑定到具体 track，禁止 album 静默变成第一首。
-3. **Bilibili**：已有 Search、Inspector 与 DASH Downloader；Windows 当前缺 ffmpeg，先完成链路设计与依赖显式失败，待可用合并路径后开放真实成功声明。
-4. **Anna/LibGen**：不列入本阶段 active 下载接入；保持 Search/metadata Inspect，避免镜像自动切换、挑战页或书目 MD5 被误报为 concrete primary。
+3. **Bilibili**：已有 Search、Inspector 与 DASH Downloader；解决 Windows ffmpeg 合并依赖后开放 active route。
+4. **Anna/LibGen**：不属于本计划最初接入范围；后续已由独立实现接入，并在 0028 真实测试中暴露 Inspect 问题后通过 0049 修复。
 
-优先级是为了减少用户实际测试前的工程缺口，不要求下一会话重新进行全平台泛化审计。若实现证据推翻上述顺序，应在本计划 Decision log 中用具体代码/运行事实调整，而不是停留在讨论。
+本计划只记录工程接入历史；后续真实平台问题不把 0039 永久保持为 `in_progress`，而是由 0028 记录事实并按问题建立独立修复计划。
 
 ## Non-goals
 
@@ -53,37 +53,16 @@ Search
 - Tool/错误/日志不得暴露 Cookie、Token、动态下载 URL、Header、响应体或本地路径。
 - ready Asset 必须非空且真实格式与声明一致；HTML/挑战页不能伪装为 MP4、MP3 或 M4A。
 
-## Current architecture
+## Current architecture at completion
 
-- SmartEdu 已在 0038 完成 active exact route，作为接入模式参考，但新平台不得复用其私有 HTTP/Representation 绑定字段。
+- SmartEdu 已在 0038 完成 active exact route。
+- Douyin 已形成 concrete MP4 Representation，并 exact 路由到 `douyin-video@1.0.0`。
+- Ximalaya 已绑定具体 `track_id`，并 exact 路由到 `ximalaya-audio@1.0.0`。
+- Bilibili 已解决 Windows ffmpeg 最终 MP4 合并依赖，并 exact 路由到 `bilibili-video@1.0.0`。
 - Active Planner：`mcp/education-resources/src/education_resource_mcp/acquisition/planner.py`。
 - Active Provider registry：`mcp/education-resources/src/education_resource_mcp/service.py`。
 - Inspector registry：`mcp/education-resources/src/education_resource_mcp/inspection_registry.py`。
-- 平台实现：
-  - Douyin：`adapters/douyin.py`、`adapters/douyin_download.py`；当前无 active Inspector。
-  - Ximalaya：`adapters/ximalaya.py`、`adapters/inspect_ximalaya.py`、`adapters/ximalaya_download.py`；当前 audio Representation 不可物化。
-  - Bilibili：`adapters/bilibili.py`、`adapters/inspect_bilibili.py`、`adapters/bilibili_download.py`；当前 video Representation 不可物化，Downloader 依赖 ffmpeg。
 - 服务端 Flow、Resolution、Representation、Plan、Job、Outcome、Asset 仍是业务状态权威。
-
-## Expected change surface
-
-Likely to change per platform slice:
-
-- 对应 Search/Inspector/Downloader Adapter；
-- `inspection_registry.py` 与 platform registry（仅新增真实 Inspector 时）；
-- `acquisition/planner.py`；
-- `service.py`；
-- 直接相关 Schema（仅实际新增 container 时）；
-- 每个平台独立的 acquisition tests；
-- `contracts/platforms/README.md`、`CURRENT_ARCHITECTURE.md`。
-
-Should not change:
-
-- `legacy/`；
-- MCP Tool 数量与两阶段确认协议；
-- Archive 只接受 `asset_id` 的边界；
-- SmartEdu 私有 planned Representation 注入，除非抽取确有两个已实现用例且先完成复杂度举证；
-- 用户预先存在的 `.openclaw-test/pytest-tmp/`。
 
 ## Acceptance criteria
 
@@ -104,14 +83,13 @@ Should not change:
 ### AC-03 — Bilibili
 
 - 只有能产生包含音视频的可验证最终 MP4 时才开放 materializable primary。
-- Windows 缺少 ffmpeg 或等价受控合并能力时，应在 Prepare 前保持不可规划或在依赖检查中明确阻断，不能先承诺成功再在 Job 中意外失败。
+- Windows 缺少 ffmpeg 或等价受控合并能力时，应明确阻断；当前部署已具备 ffmpeg 9.0。
 - exact route 不使用 generic fallback。
 
 ### AC-04 — 用户可测试交付
 
 - 每个平台提供最短真实测试说明：需要的会话前置、示例自然语言、预期确认点、成功/失败状态。
 - Coding Agent 只运行与 diff 匹配的离线/子系统验证；真实 Windows OpenClaw 平台测试由用户执行并把结果记录到 0028。
-
 
 ## 用户真实测试步骤（AC-04 交付，2026-08-12）
 
@@ -134,23 +112,6 @@ Coding Agent 不代跑真实下载；真实结果由用户记录到 0028。
 - 成功状态：Job succeeded，产生非空 MP3/M4A Asset。
 - 失败状态：album 级候选不会静默变成第一首；track 不可用或内容签名不匹配 → 显式失败；无 generic fallback。
 
-## Worker strategy
-
-下一会话应主动并行使用子 Agent，但写入必须隔离：
-
-- `terra_worker`：每个平台一个跨层实现任务，负责 Inspector → ProviderSpec → Provider → lifecycle 的完整 slice；使用独立 worktree。
-- `luna_worker`：契约/fixture/定向测试、文档表格、Windows 依赖检测等边界清晰任务；使用独立 worktree。
-- 根 Agent：冻结每个平台 Acceptance Criteria、选择合并顺序、复核 diff、解决冲突并运行最终定向验证。
-
-不要给所有子 Agent 继承完整历史。任务描述应包含平台目标、文件所有权、禁止范围、验收标准和测试命令；使用 `fork_turns="none"`，显式选择 `terra_worker` 或 `luna_worker`。
-
-建议首轮并行：
-
-1. `terra_worker`：Douyin 完整 active slice；
-2. `terra_worker`：Ximalaya concrete track slice；
-3. `luna_worker`：为两者整理 fixture、契约与测试缺口，但不修改与前两者相同文件；
-4. 主 Agent：审查 Bilibili Windows 合并依赖，只产出是否进入下一轮的明确决策，不做泛化审计。
-
 ## Validation plan
 
 每个平台按 Level 2 验证：
@@ -167,8 +128,6 @@ Coding Agent 不代跑真实下载；真实结果由用户记录到 0028。
 
 默认：无。
 
-如果要抽取跨平台 planned-binding 或 HTTP client，必须先证明至少两个正在实现的平台确实需要同一语义，并在本计划中填写完整复杂度举证；不得为了未来平台预先泛化。
-
 ## Steps
 
 - [x] completed：SmartEdu active 工程链路由 0038 完成并作为参考切片归档。
@@ -176,17 +135,21 @@ Coding Agent 不代跑真实下载；真实结果由用户记录到 0028。
 - [x] completed：实现 Douyin concrete Representation、exact Provider route 与定向测试。
 - [x] completed：实现 Ximalaya concrete track Representation、exact Provider route 与定向测试。
 - [x] completed：处理 Bilibili Windows 最终 MP4 合并依赖——本地已安装 ffmpeg 9.0（在 PATH），Bilibili DASH 合并可执行；接入 active bilibili-video provider。
-- [x] completed：更新平台契约/架构说明（`contracts/platforms/README.md` 路由表同步），并在本计划交付用户真实测试步骤。
-- [ ] pending：根据用户在 0028 中的实际测试结果修复真实平台问题。
+- [x] completed：更新平台契约/架构说明，并交付用户真实测试步骤。
+- [x] completed：工程接入范围收口；真实平台反馈继续由 0028 跟踪，并按具体问题建立独立修复计划。
 
 ## Milestone checkpoint
 
 ```text
-Original goal still unchanged?: yes — 继续接入用户可实际测试的下载平台
+Original goal still unchanged?: yes
 Non-goals still respected?: yes
 New abstraction introduced?: no
 New source of truth introduced?: no
 Fallback added?: no
 Real OpenClaw validation owner?: user
-Scope drift detected?: previous Agent-side OpenClaw verification and authorization review have been stopped
+Scope drift detected?: no
 ```
+
+## Result
+
+0039 的平台工程接入目标已经完成。后续真实可用性不由本计划声明：用户在 0028 中继续执行 OpenClaw/真实平台验收；任何失败都以真实阶段和错误事实建立独立修复计划。
