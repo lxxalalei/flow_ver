@@ -89,6 +89,7 @@ Sensitive values removed: yes/no
 - [x] completed：2026-08-14 用户提供一席 1435 的真实 `play_detail` 响应；0051 已按实际静态公开 MP4 数据模型接入可测试获取链。
 - [x] completed：2026-08-15 用户提供之江汇 34941 的真实课程详情和 signed MP4 数据；0052 已按“稳定课时 ID + Start 时刷新签名 URL”接入 experimental 获取链。
 - [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Zjer/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
+- [x] completed：2026-08-15 用户反馈抖音搜索「停云小阁」登录后持续失败；已定位两层原因（document.cookie 读不到 httpOnly 凭证 + 模型转述 cookie 被 maxTokens 截断），按 [`0053`](0053-browser-cookie-capture-chain.md) 修复捕获链；当日人工经 CDP 重存完整会话并验证搜索恢复。
 - [ ] pending：对后续真实失败建立独立修复计划并记录复测结果。
 - [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
 
@@ -100,6 +101,27 @@ Sensitive values removed: yes/no
 - 用户报告的问题已进入独立工程修复计划并完成必要复测。
 
 ## Current result
+
+### 2026-08-15 — 抖音：登录后搜索持续失败（已修复，待复测）
+
+```text
+Date/time: 2026-08-15 15:00–15:33 (UTC+8)
+Platform: douyin
+User request: 在抖音上搜索停云小阁这个用户
+Reached stage: Search AUTH_REQUIRED → 登录引导 → 用户扫码登录成功 → 保存 → 重存反复中断
+Observed status or error code: 保存后搜索仍 AUTH_REQUIRED；重存每次 output 顶格 4096，
+  terminalError=non_deliverable_terminal_turn
+Expected behavior: 登录且保存后搜索应恢复
+Actual behavior: 捕获走 document.cookie 拿不到 httpOnly 的 sessionid 等关键凭证；
+  agent 拿到完整 cookie 后重存需模型转述 ~28KB，被 maxTokens=4096 截断，重存永不完成
+Sensitive values removed: yes
+```
+
+修复：[`0053 浏览器 cookie 捕获链`](0053-browser-cookie-capture-chain.md)——
+session-manager 新增 `resource_session_capture_browser`（服务端 CDP 直读含 httpOnly、
+不经模型转述）；store 对空名垃圾 cookie 丢弃计数；openclaw.json 两个模型
+maxTokens 4096→8192。当日人工经 CDP 重存完整会话后，
+`DouyinSearchAdapter` 真实搜索「停云小阁」返回 6 条结果，链路已恢复。
 
 ### 2026-08-14 — Anna's Archive 电子书：Inspect 全量失败（已修复，待复测）
 
