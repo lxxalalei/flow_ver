@@ -17,8 +17,6 @@
         "IDEMPOTENCY_STALE",
         "UNSAFE_DATA_PATH",
         "SECURE_STORAGE_UNAVAILABLE",
-        "BROWSER_UNAVAILABLE",
-        "BROWSER_CDP_ERROR",
         "INTERNAL_ERROR"
       ]
     }
@@ -89,18 +87,6 @@
       "category": "storage",
       "retriable": false,
       "description": "The platform secure-storage backend cannot encrypt or decrypt the local credential record."
-    },
-    {
-      "code": "BROWSER_UNAVAILABLE",
-      "category": "capture",
-      "retriable": false,
-      "description": "The OpenClaw-managed browser's local CDP endpoint is not reachable; open the browser and retry (runtime responses mark this retriable)."
-    },
-    {
-      "code": "BROWSER_CDP_ERROR",
-      "category": "capture",
-      "retriable": false,
-      "description": "The managed browser's CDP endpoint answered, but the cookie exchange was malformed or rejected."
     },
     {
       "code": "INTERNAL_ERROR",

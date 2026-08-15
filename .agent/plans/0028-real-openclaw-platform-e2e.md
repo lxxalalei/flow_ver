@@ -2,7 +2,7 @@
 
 - 状态：in_progress
 - 创建日期：2026-08-08
-- 更新日期：2026-08-15
+- 更新日期：2026-08-16
 - 完成日期：未完成
 - 负责人：用户执行真实 Windows OpenClaw 与平台测试；Coding Agent 只根据用户反馈修复代码和记录结果
 - 工程接入历史：[`0039 可实际测试下载平台 Active 接入`](archive/0039-download-platform-active-expansion.md) 已完成；当前真实验收由本计划直接跟踪
@@ -89,8 +89,8 @@ Sensitive values removed: yes/no
 - [x] completed：2026-08-14 用户提供一席 1435 的真实 `play_detail` 响应；0051 已按实际静态公开 MP4 数据模型接入可测试获取链。
 - [x] completed：2026-08-15 用户提供之江汇 34941 的真实课程详情和 signed MP4 数据；0052 已按“稳定课时 ID + Start 时刷新签名 URL”接入 experimental 获取链。
 - [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Zjer/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
-- [x] completed：2026-08-15 用户反馈抖音搜索「停云小阁」登录后持续失败；已定位两层原因（document.cookie 读不到 httpOnly 凭证 + 模型转述 cookie 被 maxTokens 截断），按 [`0053`](0053-browser-cookie-capture-chain.md) 修复捕获链；当日人工经 CDP 重存完整会话并验证搜索恢复。
-- [x] completed：2026-08-15 用户"拉取停云小阁全部视频清单"任务中 browse_creator 缺 creator_id 来源，Agent 读源码撑爆上下文触发 compaction；按 [`0054`](0054-douyin-creator-id-exposure.md) 在搜索/inspect 元数据暴露 `creator_sec_uid` 并写明工具来源；真实链路验证 inspect→sec_uid→browse_creator 返回账号视频列表。
+- [x] completed：2026-08-15 用户反馈抖音搜索「停云小阁」登录后持续失败；当时 Agent 实际走了 `document.cookie` / 大对象模型转述路径，导致 httpOnly Cookie 缺失和重存截断。0053 曾以“自建 CDP 捕获”修复；2026-08-16 复核 OpenClaw 官方源码确认原生 browser cookies 已使用 Playwright `BrowserContext.cookies()` 获取完整 Cookie，因此自建 CDP 方案被撤销并归档。当前正确链路恢复为 OpenClaw 原生 browser cookies → `resource_session_save`；保留空名 Cookie 丢弃修复。
+- [x] completed：2026-08-15 用户“拉取停云小阁全部视频清单”任务中 browse_creator 缺 creator_id 来源，Agent 读源码撑爆上下文触发 compaction；按 [`0054`](0054-douyin-creator-id-exposure.md) 在搜索/inspect 元数据暴露 `creator_sec_uid` 并写明工具来源；真实链路验证 inspect→sec_uid→browse_creator 返回账号视频列表。
 - [ ] pending：对后续真实失败建立独立修复计划并记录复测结果。
 - [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
 
@@ -103,7 +103,7 @@ Sensitive values removed: yes/no
 
 ## Current result
 
-### 2026-08-15 — 抖音：登录后搜索持续失败（已修复，待复测）
+### 2026-08-15 — 抖音：登录后搜索持续失败（事故已定位；0053 自建 CDP 方案后续撤销）
 
 ```text
 Date/time: 2026-08-15 15:00–15:33 (UTC+8)
@@ -113,16 +113,23 @@ Reached stage: Search AUTH_REQUIRED → 登录引导 → 用户扫码登录成�
 Observed status or error code: 保存后搜索仍 AUTH_REQUIRED；重存每次 output 顶格 4096，
   terminalError=non_deliverable_terminal_turn
 Expected behavior: 登录且保存后搜索应恢复
-Actual behavior: 捕获走 document.cookie 拿不到 httpOnly 的 sessionid 等关键凭证；
-  agent 拿到完整 cookie 后重存需模型转述 ~28KB，被 maxTokens=4096 截断，重存永不完成
+Actual behavior: 当时 Agent 选择了 page-context document.cookie 捕获，拿不到 httpOnly
+  登录 Cookie；随后把完整 Cookie 大对象经模型转述给 save，又被 maxTokens 截断。
 Sensitive values removed: yes
 ```
 
-修复：[`0053 浏览器 cookie 捕获链`](0053-browser-cookie-capture-chain.md)——
-session-manager 新增 `resource_session_capture_browser`（服务端 CDP 直读含 httpOnly、
-不经模型转述）；store 对空名垃圾 cookie 丢弃计数；openclaw.json 两个模型
-maxTokens 4096→8192。当日人工经 CDP 重存完整会话后，
-`DouyinSearchAdapter` 真实搜索「停云小阁」返回 6 条结果，链路已恢复。
+当日曾按 [`0053`](archive/0053-browser-cookie-capture-chain.md) 增加 session-manager 自建 CDP `Storage.getCookies` 捕获工具，并人工验证可恢复抖音搜索。
+
+2026-08-16 重新阅读 OpenClaw 官方实现后确认：OpenClaw 原生 browser cookies 本来就通过 Playwright `page.context().cookies()` 获取浏览器上下文 Cookie，包含 httpOnly；0053 把“Agent 当时选错 document.cookie”误判成了“OpenClaw 缺完整 Cookie 能力”。因此自建 CDP/WebSocket、`resource_session_capture_browser`、专用错误码和契约均撤销。当前使用既有简单链：
+
+```text
+OpenClaw browser cookies
+→ resource_session_save
+→ SessionStore 平台提取 / 最小化 / 保存
+→ status / probe / search
+```
+
+真实样本暴露的空名/非法名 Cookie 仍按垃圾条目丢弃计数，不再让整批保存失败。抖音登录链应按当前路径由用户再次实际复测，不用旧 0053 的离线/人工 CDP 结果冒充当前路径已通过。
 
 ### 2026-08-14 — Anna's Archive 电子书：Inspect 全量失败（已修复，待复测）
 

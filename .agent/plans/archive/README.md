@@ -15,6 +15,9 @@
 - [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress，用户执行真实 OpenClaw/平台验收
 - [0029-retrieval-benchmark-release-gate.md](../0029-retrieval-benchmark-release-gate.md) — pending，semantic-first 检索质量 benchmark
 - [0041-web-content-extraction-benchmark.md](../0041-web-content-extraction-benchmark.md) — pending
+- [0051-yixi-video-acquisition.md](../0051-yixi-video-acquisition.md) — in_progress，一席真实视频获取闭环
+- [0052-zjer-course-video-acquisition.md](../0052-zjer-course-video-acquisition.md) — in_progress，之江汇 experimental 课程视频获取链
+- [0054-douyin-creator-id-exposure.md](../0054-douyin-creator-id-exposure.md) — in_progress，抖音 creator_id 来源与 browse_creator 验收
 
 ## 归档索引
 
@@ -66,3 +69,4 @@
 | [0048-provider-batch-dispatch-simplification.md](0048-provider-batch-dispatch-simplification.md) | completed | Service 按 exact Provider 批次派发；保留逐项结果但不再为每个 JobItem 创建 worker |
 | [0049-annas-metadata-inspection.md](0049-annas-metadata-inspection.md) | completed | Anna's Archive Inspect 改为合法 MD5 元数据通道，避免合成详情页 403 阻断；等待 0028 用户复测 |
 | [0050-project-state-alignment.md](0050-project-state-alignment.md) | completed | 对齐当前计划、17 平台 schema、semantic-first 架构和 0029 benchmark；未运行本地 pytest，真实 E2E 继续由 0028 跟踪 |
+| [0053-browser-cookie-capture-chain.md](0053-browser-cookie-capture-chain.md) | superseded | 真实登录事故保留；自建 CDP/WebSocket 捕获经 OpenClaw 官方源码复核后判定为重复实现并撤销，仅保留空名 Cookie 清洗修复 |
