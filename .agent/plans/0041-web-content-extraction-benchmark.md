@@ -526,6 +526,16 @@ Failure modes introduced:
 Runtime/deployment cost:
 ```
 
+## 关联工具
+
+[`mcp/education-resources/scripts/live_search_download_demo.py`](../../mcp/education-resources/scripts/live_search_download_demo.py)
+（2026-08-15 由另一会话先行创建，本轮收编）直接驱动生产类
+`GenericWebSearchProvider` + `AcquisitionRouter`（generic-direct / generic-web-materializer），
+在真实网络下搜索并物化候选页面，产物落在 `.openclaw-test/<run-dir>/`（含
+`web-materialization-v1` 的 content.md / webbundle.zip / metadata.json）。
+它可作为 Track A/B 的 current-path 样本采集器与改动后的实弹自检；不是回归门，
+也不进入生产 runtime。
+
 ## Steps
 
 - [ ] pending：执行前重新核对候选项目版本、许可证、维护状态和部署要求。

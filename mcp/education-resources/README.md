@@ -130,6 +130,17 @@ EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh all
 EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh e2e
 ```
 
+需要真实网络验证生产代码本身（不经 MCP 子进程与业务链）时：
+
+```bash
+.venv/Scripts/python scripts/live_search_download_demo.py --query "恐龙科普 图文" --limit 10 --download-count 2
+```
+
+该脚本直接驱动 `GenericWebSearchProvider`（duckduckgo/baidu/bing 真实引擎）与
+`AcquisitionRouter` 的 generic 注册（`generic-direct` / `generic-web-materializer`），
+run 产物写入 `.openclaw-test/<run-dir>/`（已 gitignore）。它用于采集真实能力证据
+（0041/0029）和改动后的实弹自检；结果依赖真实引擎与网络，不作为回归门。
+
 0037 已在隔离 GitHub Actions 中实际通过：包安装、active package compileall、全部 JSON 契约解析以及 0037 定向测试。旧 capability-authority 专项测试需要按新业务行为重写或移出 Active 测试面，不能用它们强迫实现恢复已废弃状态链。
 
 离线 E2E/单测不能把平台标为 production-ready。真实 Agent、真实网络、合法会话和人工确认验收仍由 [0028 执行计划](../../.agent/plans/0028-real-openclaw-platform-e2e.md) 跟踪。
