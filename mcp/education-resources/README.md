@@ -1,178 +1,203 @@
 # Education Resources MCP
 
-`education-resources` 是工作区唯一 active 的教育资源执行服务。它是 Python stdio MCP，负责 ResultSet、Presentation、Selection、Resolution、Plan、Job、Outcome、Asset/AssetBundle 和资料库归档的服务端业务状态；它不是用户入口 Skill，也不是登录凭据管理器。
+`education-resources` 是一个很薄的 Python stdio MCP。它的目标不是管理学习资源工作流，而是把已有的**搜索脚本、平台 Inspect 和下载脚本**稳定地暴露给 Agent。
 
-当前公共接口由机器契约定义：`contract_version=1.0.0`、`catalog_version=1.7.0`，工具集合和每个工具的输入/输出以 [`contracts/tool-catalog.json`](contracts/tool-catalog.json) 与 [`contracts/schemas/`](contracts/schemas/) 为准。Skill 负责需求理解、候选审查、实际展示、用户确认和结果解释；独立 `session-manager` 负责合法登录与会话保存。
-
-## 当前服务边界
-
-业务主链：
+## 核心边界
 
 ```text
-FlowTask
-  -> ResultSet
-  -> Presentation
-  -> Selection
-  -> Resolution / Representation
-  -> AcquisitionPlan
-  -> Job / JobItem
-  -> exact Provider
-  -> Outcome
-  -> AssetBundle / Asset
-  -> Archive
+Main Agent / Skill
+  负责需求理解、搜索规划、相关性判断、补搜、候选展示和用户选择
+        ↓
+education-resources MCP
+  Search / Browse Creator / Inspect / Download / Job
+        ↓
+平台 Search Adapter / Inspector / Downloader
 ```
 
-这些对象是**服务端业务事实**，不是要求 Agent 逐层搬运的公共协议对象。
+MCP 不再维护：
 
-- Search 和 creator browse 产生候选 ResultSet；只有 Skill 实际展示后保存的 Presentation 才能被选择。
-- `resource_inspect` 产生/刷新完整 Resolution 与 Representation；Public Tool 只暴露会改变用户/Agent 决策的 availability、Representation 与失败事实。
-- `resource_download_prepare` 基于当前 Selection + fresh Representation 选择明确的 `scope / strategy / provider`，只准备计划，不下载。
-- 下载必须经过 `prepare -> 用户明确确认 -> start`。Start 再次读取当前 Resolution，确认 Representation 和 exact Provider route 没有漂移，然后创建 Job。
-- Router 只执行 Plan 指定的 `(provider_id, provider_version)`，失败不会静默换 generic Provider。
-- Job 是异步的；状态、取消、Outcome、Asset 和 Archive 由 MCP 服务端产生，模型不能伪造这些业务 ID 或执行结果。
-- 检索结果是否“够好”、还缺什么、要不要继续搜，由 Skill/Main Agent 根据用户目标判断，不由 ResultSet 状态机替代。
+- Flow / ResultSet / Presentation / Selection；
+- Selection version / digest；
+- Download Plan / confirmation token；
+- SQLite 工作流状态；
+- capability/readiness/eligibility authority 链；
+- descriptor/registry digest 权威层；
+- Archive/Library 工作流。
 
-## 0055 Public MCP Surface Simplification
+用户正常对话里的“看过哪些候选、选了第几个、是否明确要求下载”由 Agent 根据当前会话理解，不复制成数据库事务。
 
-OpenClaw 不再需要在相邻 Tool 调用之间搬运大批内部版本和摘要字段。完整状态仍由 Service/Store 保存并校验，Public MCP 只暴露下一步所需事实。
+## 6 个 Tool
 
-当前主要调用形态：
+### `resource_search`
 
 ```text
-resource_search(flow_id, search_tasks, mode?, filters?, limit?)
-  -> compact candidates + failures
-
-resource_presentation_save(flow_id, displayed_resource_ids)
-  -> server binds current ResultSet
-
-resource_selection_save(flow_id, selected_positions)
-  -> server binds current Presentation/version
-
-resource_inspect(flow_id, resource_id)
-  -> compact availability + representations + failures
-
-resource_download_prepare(flow_id, options?)
-  -> server binds current Selection/Presentation/digest
-
-resource_download_start(flow_id, plan_id, confirmation_token)
-  -> Job
-
-resource_job_status(flow_id, job_id)
-  -> compact progress + ready assets + failures
+resource_search(search_tasks=[...], limit=8)
 ```
 
-`resource_flow_status` 现在是**紧凑恢复摘要**，不是全量状态转储。它不会重新发送完整 ResultSet、Resolution evidence、selection/plan digest 或 execution route；只有在上下文丢失、flow 状态不确定时才需要调用。
+调用 Generic Web 或平台 Search Adapter，返回候选资源和 `resource_id`。
 
-普通 Search 默认 `limit=8`，候选摘要最多公开 600 字并用 `summary_complete` 标明是否完整；Creator Browse 保留请求范围内候选清单，但不回灌逐条长摘要。被移出 Agent-facing 输入/输出的内部字段并没有从数据库或一致性校验中删除。详细兼容边界见 [`contracts/compatibility.md`](contracts/compatibility.md)。
-
-## 0037 获取简化
-
-当前 Active 获取路径已不再把以下对象作为持久业务状态：
-
-- Capability Descriptor binding；
-- Deployment Readiness Snapshot；
-- Eligibility Decision；
-- `authority_digest`；
-- `plan_binding_digest` / `execution_binding_digest`；
-- `outcome_digest`。
-
-Provider 能力改为轻量 `ProviderSpec` + Start 前运行时检查。`source_fingerprint` 只用于资源身份与 Resolution cache 关联，不是执行凭证。
-
-当前实现入口：
+### `resource_browse_creator`
 
 ```text
-server.py
-  -> service.py (ResourceService)
-     -> acquisition/planner.py   # ProviderSpec / route planning
-     -> acquisition/simple.py    # AcquisitionRequest / AcquisitionRouter
-     -> storage.py (Store)
+resource_browse_creator(platform="douyin", creator_id="...", limit=50)
 ```
 
-0037 前的旧 authority 残留（migration 1-7 旧表定义、旧数据读兼容路径）仅为旧库升级和已存储数据可读保留，不再是新 acquisition 写入路径。
+用于已知创作者账号后的作品枚举。
 
-## 目录
+### `resource_inspect`
 
 ```text
-contracts/                  # 当前公共 Tool/Schema/平台/分类契约
-src/education_resource_mcp/
-├── server.py               # stdio MCP 入口 + thin public projection/binding
-├── service.py              # 领域服务（完整业务事实、校验、Job/Asset 收口）
-├── storage.py              # SQLite 状态权威（Flow/Plan/Job/Asset/Library）
-├── adapters/               # 平台 Search/Inspect/Provider Adapter
-├── retrieval/              # 候选归一化、身份与去重
-└── acquisition/
-    ├── planner.py          # ProviderSpec / route planning
-    ├── simple.py           # AcquisitionRequest / AcquisitionRouter
-    └── ...                 # Provider 与网页物化实现
-scripts/                    # 隔离测试与运行环境校验脚本
-tests/                      # 单元、契约、安全与 stdio 测试
+resource_inspect(resource_id="res_...")
 ```
 
-## 安装
+只在可访问性、格式、版本、资源本体等事实会改变当前判断时调用。
+
+### `resource_download`
+
+```text
+resource_download(
+  resource_ids=["res_..."],
+  preferred_container="original"
+)
+```
+
+用户明确要求下载后直接调用。服务端会在真正下载前 fresh Inspect，选择实际能处理当前 Representation 的 Provider，然后启动异步 Job。
+
+不再经过：
+
+```text
+Selection -> Prepare -> Plan -> Token -> Start
+```
+
+### `resource_job_status`
+
+```text
+resource_job_status(job_id="job_...")
+```
+
+返回下载状态、进度、真实文件和失败。
+
+### `resource_job_cancel`
+
+```text
+resource_job_cancel(job_id="job_...")
+```
+
+取消当前下载任务。
+
+## 最小内部状态
+
+只保留两个进程内映射：
+
+```text
+resource_id -> Search 返回的原始候选
+job_id      -> 下载状态 / 文件 / 失败
+```
+
+这是调用脚本所需的最小跨 Tool 状态。
+
+`resource_id` 和 Job 不做进程重启恢复。MCP 重启后重新搜索即可；不为这个低频情况恢复 SQLite/Flow 状态机。
+
+## 下载路由
+
+`acquisition/planner.py` 现在只是一次性的 Provider router：
+
+```text
+fresh Inspect
+  -> 找到 concrete Representation
+  -> 根据 platform / kind / scope / container 选择已注册 Provider
+  -> Downloader
+```
+
+它不创建 Plan，不生成 fingerprint/digest，不保存 revalidation snapshot。
+
+当前仍复用已经验证过的平台 Downloader，例如：
+
+- SmartEdu
+- Douyin
+- Ximalaya
+- Bilibili
+- Anna's Archive
+- Zjer
+- generic direct HTTP
+- generic webpage materializer
+
+Provider 失败不会被 Agent伪装成成功；需要登录时返回真实 `AUTH_REQUIRED`。
+
+## 文件位置
+
+下载产物直接位于：
+
+```text
+$EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/
+```
+
+`resource_job_status` 会返回真实 `path / filename / media_type / size_bytes`。当前没有额外 Archive 状态层。
+
+默认数据目录：
+
+```text
+~/.local/share/quanxiao/education-resource-mcp-data
+```
+
+## 配置
+
+主要环境变量：
+
+```text
+EDUCATION_RESOURCE_MCP_DATA_DIR
+EDUCATION_RESOURCE_MCP_SEARCH_TIMEOUT
+EDUCATION_RESOURCE_MCP_DOWNLOAD_TIMEOUT
+EDUCATION_RESOURCE_MCP_MAX_WORKERS
+EDUCATION_RESOURCE_MCP_SEARXNG_URL
+EDUCATION_RESOURCE_MCP_PREFER_SEARXNG
+EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR
+```
+
+## 安装与启动
 
 ```bash
 cd mcp/education-resources
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
+.venv/bin/education-resource-mcp
 ```
 
-## 启动
+Windows：
 
-stdio 的 stdout 只用于 MCP 协议；诊断日志写入 stderr，业务数据只写入受控数据目录。
-
-```bash
-EDUCATION_RESOURCE_MCP_DATA_DIR=/absolute/path/to/data \
-EDUCATION_RESOURCE_MCP_LIBRARY_DIR=/absolute/path/to/library \
-EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR=/absolute/path/to/session-manager-data \
-EDUCATION_RESOURCE_MCP_SEARXNG_URL=http://127.0.0.1:8888 \
-  .venv/bin/education-resource-mcp
+```powershell
+.venv\Scripts\python -m pip install -e .
+.venv\Scripts\education-resource-mcp.exe
 ```
 
-默认/关键目录：
+## 仍然保留的必要边界
 
-- `EDUCATION_RESOURCE_MCP_DATA_DIR`：`~/.local/share/quanxiao/education-resource-mcp-data`，用于 SQLite、Job 工作区等内部数据；
-- `EDUCATION_RESOURCE_MCP_LIBRARY_DIR`：默认 `~/Documents/学习资料库`。Windows 原生环境通常对应 `%USERPROFILE%\Documents\学习资料库`；显式配置该环境变量时使用用户指定目录；
-- `EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR`：独立 session store；
-- `EDUCATION_RESOURCE_MCP_SEARXNG_URL`：可选受信任搜索后端。
+做减法不等于删除真实业务需要的检查。当前仍保留：
 
-归档资料库与内部工作区有意分离：下载中的文件先进入 `$EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/`，成功 Asset 经 `resource_archive` 后发布到用户可直接找到的 `Documents/学习资料库`。
+- HTTP/HTTPS 网络与路径边界；
+- 登录会话的真实处理；
+- Provider 下载输出必须产生真实文件；
+- 取消信号；
+- 文件 MIME/格式等下载器本身需要的校验；
+- exact Provider 路由，不在失败后偷偷换 Provider。
 
-SQLite、Job 临时目录、Cookie/Token 和浏览器档案不得放入源码目录；正式归档资料可以位于用户 Documents 或显式配置的独立资料盘。
+这些直接保护搜索/下载的正确性。与业务无关的状态证明链已经移除。
 
-## 安全与数据边界
+## 当前目录重点
 
-- 来源只允许经过策略校验的 `http`/`https`；逐跳检查重定向。
-- Provider 输出只能进入服务端受控 Job 目录；取消/失败要清理或隔离临时产物。
-- 认证由独立 `session-manager` 管理。
-- Tool 不接受 shell 命令、脚本、解释器、任意下载 URL 或本地文件路径；Archive 只接受服务端 `asset_id`。
-- 文件真实格式、MIME、路径和网络策略检查继续保留。
-- 文件 `sha256` / `byte_size` 作为 Asset 元数据与去重信息，不作为“声明值必须一致”的额外下载验收门禁，也不恢复通用下载大小上限。
-
-## 验证
-
-优先跑与改动直接相关的定向测试；不要因为一个小改动默认重复执行整个仓库的耗时测试。
-
-0055 的无运行时依赖静态门禁：
-
-```bash
-cd mcp/education-resources
-python -m unittest tests.test_public_surface_simplification_0055
+```text
+src/education_resource_mcp/
+├── server.py              # 6 个 MCP Tool
+├── service.py             # 轻量资源句柄 + Download Job
+├── search.py              # Generic + 多平台 Search
+├── inspection.py          # Inspect 基础能力
+├── inspection_registry.py # 直接注册实际 Inspector
+├── adapters/              # 平台搜索/Inspect/下载脚本
+├── acquisition/           # Provider router + Downloader
+├── jobs.py                # 小型进程内异步 JobRunner
+└── sessions.py            # 登录会话读取
 ```
 
-安装 MCP 运行依赖后，再按需运行 contract/stdio 定向测试。需要验证更大范围时才显式运行：
+没有 `storage.py`、Flow database、tool contract catalog 或 retrieval authority registry。
 
-```bash
-EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh all
-EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh e2e
-```
-
-离线 E2E/单测不能把平台标为 production-ready。真实 Agent、真实网络、合法会话和人工确认验收仍由 [0028 执行计划](../../.agent/plans/0028-real-openclaw-platform-e2e.md) 跟踪。
-
-## 契约与架构导航
-
-- [工作区根 README](../../README.md)
-- [当前架构事实](../../docs/CURRENT_ARCHITECTURE.md)
-- [开发路线](../../docs/DEVELOPMENT_PLAN.md)
-- [检索权威边界](../../docs/RETRIEVAL_AUTHORITY.md)
-- [`contracts/` 契约总览](contracts/README.md)
-- [0055 Public MCP Surface Simplification](../../.agent/plans/archive/0055-public-mcp-surface-simplification.md)
+项目当前最重要的验证仍然是真实 OpenClaw 场景：能不能顺利搜到、判断、选择并下载，而不是重新增加新的形式化门禁。

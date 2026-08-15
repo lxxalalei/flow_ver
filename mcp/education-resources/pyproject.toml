@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "education-resource-mcp"
-version = "0.2.0"
-description = "Local MCP service for education resource search, controlled download, jobs, and archive"
+version = "0.3.0"
+description = "Thin MCP capability service for resource search, inspection and download"
 requires-python = ">=3.12"
 dependencies = [
   "mcp==2.0.0",
@@ -27,6 +27,5 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = [
-  "slow: long-running or environment-sensitive tests (E2E subprocess, storage migrations, contract parsing); use -m 'not slow' for fast daily runs",
+  "slow: long-running or environment-sensitive tests",
 ]
-

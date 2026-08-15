@@ -1,159 +1,119 @@
-# 0028 — 用户执行的 Windows OpenClaw / 真实平台验收
+# 0028 — Windows OpenClaw / 真实资源能力验收
 
 - 状态：in_progress
 - 创建日期：2026-08-08
 - 更新日期：2026-08-16
-- 完成日期：未完成
-- 负责人：用户执行真实 Windows OpenClaw 与平台测试；Coding Agent 只根据用户反馈修复代码和记录结果
-- 工程接入历史：[`0039 可实际测试下载平台 Active 接入`](archive/0039-download-platform-active-expansion.md) 已完成；当前真实验收由本计划直接跟踪
+- 负责人：用户执行真实 Windows OpenClaw 测试；Coding Agent 根据真实失败修代码
 
 ## Objective
 
-记录用户在 Windows OpenClaw 中对 active / experimental 平台的实际测试结果，并把真实失败反馈到独立修复计划。
+验证当前**薄 MCP**在 OpenClaw 中能否稳定完成真实资源任务，而不是验证旧 Flow/Contract 状态机。
 
-fixture、单元测试、MCP doctor/probe、Provider 注册或 Downloader 文件存在都不能代替用户的实际平台测试。
+fixture、单元测试、Provider 类存在都不能替代真实用户闭环。
 
-## Scope
-
-用户按自己选择的平台执行：
+## 当前真实链路
 
 ```text
 自然语言需求
-  -> Search
-  -> Inspect
-  -> Present
-  -> Select
-  -> Prepare
-  -> 用户确认
-  -> Start
-  -> JobStatus
-  -> Asset / Bundle
-  -> 可选 Archive / Recover
+  -> resource_search / resource_browse_creator
+  -> Agent 判断候选
+  -> 可选 resource_inspect / 补搜
+  -> Agent 在对话中展示
+  -> 用户选择
+  -> 用户明确要求下载
+  -> resource_download
+  -> resource_job_status
+  -> files / failures
 ```
 
-Coding Agent：
-
-- 不主动替用户运行 OpenClaw 验收；
-- 不主动重启 Windows gateway；
-- 不主动执行真实平台下载或 Archive；
-- 根据用户提供的真实输出定位并修复 active 代码；
-- 每个真实问题按需建立独立修复计划，避免让平台扩展计划永久保持 `in_progress`；
-- 修复后运行与 diff 匹配的离线/子系统测试，并给出复测步骤。
-
-## Business invariants
-
-- 只有已接入的 `Representation -> ProviderSpec -> exact Provider` 路线才进入 Prepare/Start。
-- 所有下载继续采用 `prepare -> 用户明确确认 -> start`。
-- 失败后不切 generic Provider、其他平台、scope 或 strategy。
-- Tool/错误/记录不包含 Cookie、Token、动态下载 URL、Header、响应体或本地路径。
-- 未产生 ready Asset 时不得记录为下载成功；fixture 或环境检查不得标记平台实际可用。
-- experimental 平台在 Registry / 原生搜索未完成前不得冒充完整 active 平台。
-
-## Current test queue
-
-建议按最能暴露当前真实链路问题的顺序执行，不要求一次性覆盖全部平台：
-
-1. **Anna's Archive 复测**：Search 已真实返回候选；0049 已修复 Inspect 误访问合成详情页导致的 403/AUTH_REQUIRED，当前优先确认 Inspect → Prepare 是否恢复。
-2. **Shuge**：Search 已能得到公开存储 `/d/` 文件候选，Inspect 与 `shuge -> generic-direct@1.0.0` 路由已接入；等待真实 Search → Inspect → Prepare → Start → Asset。
-3. **Yixi / 一席**：真实样本 `speech_id=1435`《教育就是生长》已确认 `play_detail` 返回标清/高清公开 MP4；0051 已接入 Search 解析最高可用 MP4、YixiInspector 与 `yixi -> generic-direct@1.0.0` 路由。优先用该样本跑真实闭环。
-4. **Zjer / 之江汇（experimental）**：真实样本 `courseCateId=34941` 已确认课程详情返回课时 `videoId`、MP4 与带过期签名的媒体 URL；0052 已接入 direct-course Search、ZjerInspector 与 `zjer-video@1.0.0`。当前先用 `34941` 跑真实闭环，关键词原生搜索尚未宣称支持。
-5. **Bilibili**：active `bilibili-video@1.0.0`，Windows ffmpeg 合并依赖已具备；等待真实视频下载闭环。
-6. **SmartEdu**：PDF、direct MP4、MP3、M4A active route 已完成工程接入；等待真实闭环。
-7. **Douyin**：active `douyin-video@1.0.0`；需要可用登录态时应显式暴露认证事实。
-8. **Ximalaya**：active `ximalaya-audio@1.0.0`；重点验证具体 track 绑定，不允许 album 静默变成第一首。
-
-Generic Web materialize 可作为网页资源独立验收，但不要求与平台下载队列绑定在同一次测试中。
-
-## Result record template
-
-用户反馈只需保留定位问题所需的非敏感事实：
+没有：
 
 ```text
-Date/time:
-Platform:
-User request:
-Reached stage: Search / Inspect / Prepare / Start / Job / Asset / Archive
-Observed status or error code:
-Expected behavior:
-Actual behavior:
-Sensitive values removed: yes/no
+Flow
+ResultSet lineage
+Presentation
+Selection
+Prepare
+confirmation token
+Start
+Asset/Archive 状态链
 ```
 
-不要要求用户重复跑与问题无关的 doctor/probe 或全量环境检查。优先根据实际失败阶段定位。
+## 重点观察
 
-## Steps
+当前最重要的问题来自 2026-08-16 的真实使用：OpenClaw 在一个任务中频繁 compaction/中断，无法完成完整工作。
 
-- [x] completed：历史真实 OpenClaw 调查和失败记录已保留在 Git 历史与归档计划中。
-- [x] completed：2026-08-12 明确真实验收由用户执行，Coding Agent 停止代跑 OpenClaw。
-- [x] completed：2026-08-14 用户反馈 Anna's Archive Inspect 全量失败；已定位并按归档计划 [`0049`](archive/0049-annas-metadata-inspection.md) 修复。
-- [x] completed：2026-08-14 用户提供一席 1435 的真实 `play_detail` 响应；0051 已按实际静态公开 MP4 数据模型接入可测试获取链。
-- [x] completed：2026-08-15 用户提供之江汇 34941 的真实课程详情和 signed MP4 数据；0052 已按“稳定课时 ID + Start 时刷新签名 URL”接入 experimental 获取链。
-- [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Zjer/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
-- [x] completed：2026-08-15 用户反馈抖音搜索「停云小阁」登录后持续失败；当时 Agent 实际走了 `document.cookie` / 大对象模型转述路径，导致 httpOnly Cookie 缺失和重存截断。0053 曾以“自建 CDP 捕获”修复；2026-08-16 复核 OpenClaw 官方源码确认原生 browser cookies 已使用 Playwright `BrowserContext.cookies()` 获取完整 Cookie，因此自建 CDP 方案被撤销并归档。当前正确链路恢复为 OpenClaw 原生 browser cookies → `resource_session_save`；保留空名 Cookie 丢弃修复。
-- [x] completed：2026-08-15 用户“拉取停云小阁全部视频清单”任务中 browse_creator 缺 creator_id 来源，Agent 读源码撑爆上下文触发 compaction；按 [`0054`](0054-douyin-creator-id-exposure.md) 在搜索/inspect 元数据暴露 `creator_sec_uid` 并写明工具来源；真实链路验证 inspect→sec_uid→browse_creator 返回账号视频列表。
-- [ ] pending：对后续真实失败建立独立修复计划并记录复测结果。
-- [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
+因此每次测试优先记录：
+
+```text
+User request:
+Platform:
+Search completed: yes/no
+Inspect needed/completed: yes/no
+Download requested: yes/no
+Job terminal status:
+Actual files:
+Compaction happened: yes/no
+Task interrupted: yes/no
+Observed error:
+```
+
+不要为了记录完整而要求用户提供内部 ID、digest、Plan、Outcome 等已删除状态。
+
+## 当前平台队列
+
+按用户想测的资源直接选平台，不要求固定顺序：
+
+1. **Douyin**：重点复测“搜索停云小阁 → 获取 creator_id → Browse Creator 全部视频”，观察上下文是否还会因为 Tool Result/源码恢复而爆炸；需要登录时真实返回认证问题。
+2. **Bilibili**：搜索/Inspect/DASH 下载/ffmpeg 合并。
+3. **SmartEdu**：PDF、MP4、MP3/M4A。
+4. **Ximalaya**：具体 track 下载，不把 album 静默换成第一首。
+5. **Shuge**：公开文档搜索与直接下载。
+6. **Yixi**：可继续使用 `speech_id=1435`《教育就是生长》样本验证公开 MP4。
+7. **Zjer**：可继续使用 `courseCateId=34941` 验证 experimental 课程视频。
+8. **Anna's Archive**：复测此前元数据 Inspect 修复后的真实电子书链。
+9. **Generic Web**：单独验证网页搜索、Inspect 和 HTML 保存质量。
+
+## 必须保持的真实边界
+
+- Agent 只有在用户已经明确说要下载时才调用 `resource_download`；
+- 不再为了确认再创建后端 Plan/token；
+- 下载前 Service fresh Inspect；
+- 选中的实际 Downloader 失败时返回真实失败，不 silent fallback；
+- AUTH_REQUIRED / unavailable / policy blocked 如实返回；
+- 没有真实文件不得报告成功。
+
+## Coding Agent 工作方式
+
+- 不代替用户做 OpenClaw 用户验收；
+- 不主动重启用户 Windows gateway；
+- 不为每次失败先加新架构或新状态；
+- 优先根据真实失败定位搜索脚本、Inspector 或 Downloader；
+- 一个小修只跑相关测试；
+- 不让已删除的旧 Contract/Flow 测试迫使实现恢复旧架构。
+
+## 已知真实事故
+
+### Douyin 登录与上下文爆炸
+
+2026-08-15 曾出现两类问题：
+
+1. Agent 错用 page `document.cookie`，拿不到 httpOnly Cookie；随后又把大 Cookie 对象经模型转述，导致输出截断。后续确认 OpenClaw 原生 browser cookies 本身能通过 Playwright context 获取完整 Cookie，自建 CDP 方案已撤销。
+2. “拉取停云小阁全部视频清单”时缺 creator_id 来源，Agent 转而读多个大型源码/Contract，输入上下文被推高并触发 compaction。0054 已让真实搜索/Inspect 返回 creator handle。
+
+本轮 MCP 简化进一步删除了 Flow/Contract/Registry 状态体系，目标之一就是避免 Agent 为恢复内部协议再去读源码。
+
+### Anna's Archive Inspect
+
+2026-08-14 Search 能返回候选，但 Inspector 误访问合成 Anna 详情页并将 403 判为 AUTH_REQUIRED。0049 已改成合法 MD5 元数据 Inspect；仍需真实复测下载。
+
+更详细的历史定位保留在 Git 历史和 `.agent/plans/archive/`，本计划不复制整套旧架构说明。
 
 ## Completion criteria
 
-- 至少一个已接入平台由用户在 Windows OpenClaw 中完成真实下载并得到正确 ready Asset；
-- 所有副作用经过用户明确确认；
-- 失败没有被 fallback 或伪造成功掩盖；
-- 用户报告的问题已进入独立工程修复计划并完成必要复测。
+至少完成以下两件事：
 
-## Current result
+1. 一个真实平台在 Windows OpenClaw 中从自然语言搜索走到实际下载文件；
+2. 一个此前容易中断的较长任务（优先 Douyin creator browse 场景）能完成，或能明确定位剩余中断来自哪里。
 
-### 2026-08-15 — 抖音：登录后搜索持续失败（事故已定位；0053 自建 CDP 方案后续撤销）
-
-```text
-Date/time: 2026-08-15 15:00–15:33 (UTC+8)
-Platform: douyin
-User request: 在抖音上搜索停云小阁这个用户
-Reached stage: Search AUTH_REQUIRED → 登录引导 → 用户扫码登录成功 → 保存 → 重存反复中断
-Observed status or error code: 保存后搜索仍 AUTH_REQUIRED；重存每次 output 顶格 4096，
-  terminalError=non_deliverable_terminal_turn
-Expected behavior: 登录且保存后搜索应恢复
-Actual behavior: 当时 Agent 选择了 page-context document.cookie 捕获，拿不到 httpOnly
-  登录 Cookie；随后把完整 Cookie 大对象经模型转述给 save，又被 maxTokens 截断。
-Sensitive values removed: yes
-```
-
-当日曾按 [`0053`](archive/0053-browser-cookie-capture-chain.md) 增加 session-manager 自建 CDP `Storage.getCookies` 捕获工具，并人工验证可恢复抖音搜索。
-
-2026-08-16 重新阅读 OpenClaw 官方实现后确认：OpenClaw 原生 browser cookies 本来就通过 Playwright `page.context().cookies()` 获取浏览器上下文 Cookie，包含 httpOnly；0053 把“Agent 当时选错 document.cookie”误判成了“OpenClaw 缺完整 Cookie 能力”。因此自建 CDP/WebSocket、`resource_session_capture_browser`、专用错误码和契约均撤销。当前使用既有简单链：
-
-```text
-OpenClaw browser cookies
-→ resource_session_save
-→ SessionStore 平台提取 / 最小化 / 保存
-→ status / probe / search
-```
-
-真实样本暴露的空名/非法名 Cookie 仍按垃圾条目丢弃计数，不再让整批保存失败。抖音登录链应按当前路径由用户再次实际复测，不用旧 0053 的离线/人工 CDP 结果冒充当前路径已通过。
-
-### 2026-08-14 — Anna's Archive 电子书：Inspect 全量失败（已修复，待复测）
-
-```text
-Date/time: 2026-08-14
-Platform: annas-archive（Libgen-backed）
-User request: 下载《毛选》类电子书
-Reached stage: Search 正常返回 13 个候选；Inspect 全部失败，Prepare 被拒
-Observed status or error code: 检查提示“需要授权”（AUTH_REQUIRED，检查结果未通过）
-Expected behavior: 匿名 Libgen 通道应可检查并进入下载准备
-Actual behavior: Inspect 对合成详情页 annas-archive.gl/md5/<md5> 发起 GET，
-  该站点风控返回 403，被归类为 AUTH_REQUIRED，13 个候选全部阻塞；
-  而真实下载通道（libgen.bz / libgen.gl 匿名 md5）从未被检查环节使用
-Sensitive values removed: yes
-```
-
-定位：检查通道与获取通道错位。`AnnasArchiveInspector` 继承
-`PlatformBoundedInspector` 的 bounded GET，检查对象是搜索适配器合成的
-`annas-archive.gl/md5/<md5>` 身份页；该页既非数据源（Libgen 镜像）也非下载
-通道（Libgen 镜像），其风控否决了整条链路。
-
-修复：归档计划 [`0049`](archive/0049-annas-metadata-inspection.md)。合法 md5 资源的检查改为
-纯元数据通道（`inspection.method=platform_metadata`），零网络请求；planner
-命中 `annas-archive@1.0.0 / direct_file`。下载失败继续在 Job 层按项结构化
-暴露。Level 2 定向验证通过；等待用户复测真实链路。
-
-SmartEdu、Douyin、Ximalaya、Bilibili、Anna's Archive、Shuge 与 Yixi 均已有工程获取路线；Zjer 已有 experimental 获取路线。是否真实 production-ready 仍以本计划中的用户 OpenClaw 结果为准。
+如果仍然失败，下一步根据实际 Search/Inspect/Download 错误修具体能力，不再恢复通用工作流状态机。

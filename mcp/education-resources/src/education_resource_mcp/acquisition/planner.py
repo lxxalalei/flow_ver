@@ -1,11 +1,4 @@
-"""Small provider planner for acquisition.
-
-The planner answers one business question: given a fresh inspected
-Representation, which exact registered Provider should execute it?  It does
-not persist readiness/eligibility snapshots and does not create authority
-hashes.  A Plan stores the selected route; Start revalidates the current
-Representation and exact Provider registration before a Job is created.
-"""
+"""Choose one concrete downloader for a freshly inspected resource."""
 
 from __future__ import annotations
 
@@ -13,8 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..inspection import representation_evidence_is_fresh, source_fingerprint
-from .models import AcquisitionStrategy, ACQUISITION_SCOPES
+from .models import AcquisitionStrategy
 from .router import AcquisitionRouter
 
 
@@ -47,7 +39,6 @@ class ProviderSpec:
     role: str
     strategy: AcquisitionStrategy
     provider_id: str
-    provider_version: str
     containers: frozenset[str] = frozenset()
     resource_types: frozenset[str] = frozenset()
 
@@ -57,19 +48,18 @@ class ProviderSpec:
         representation: Mapping[str, Any],
         scope: str,
     ) -> bool:
-        platform = str(resource.get("platform") or "generic")
-        if platform != self.platform_id or scope != self.scope:
+        if str(resource.get("platform") or "generic") != self.platform_id:
+            return False
+        if scope != self.scope:
             return False
         if str(representation.get("kind") or "") != self.representation_kind:
             return False
-        if _representation_role(representation) != self.role:
+        if _role(representation) != self.role:
             return False
         container = str(representation.get("container") or "").strip().lower()
         if self.containers and container and container not in self.containers:
             return False
-        resource_type = str(
-            resource.get("resource_type") or resource.get("type") or "other"
-        )
+        resource_type = str(resource.get("resource_type") or "other")
         if self.resource_types and resource_type not in self.resource_types:
             return False
         return bool(representation.get("materializable", True))
@@ -77,196 +67,92 @@ class ProviderSpec:
 
 DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ProviderSpec(
-        platform_id="smartedu",
-        scope="primary_resource",
-        representation_kind="document",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="smartedu-resource",
-        provider_version="1.0.0",
-        containers=frozenset({"pdf"}),
-        resource_types=frozenset({"book", "course", "document", "other"}),
+        "smartedu", "primary_resource", "document", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
+        frozenset({"pdf"}), frozenset({"book", "course", "document", "other"}),
     ),
     ProviderSpec(
-        platform_id="smartedu",
-        scope="primary_resource",
-        representation_kind="video",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="smartedu-resource",
-        provider_version="1.0.0",
-        containers=frozenset({"mp4"}),
-        resource_types=frozenset({"course", "video"}),
+        "smartedu", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
+        frozenset({"mp4"}), frozenset({"course", "video"}),
     ),
     ProviderSpec(
-        platform_id="smartedu",
-        scope="primary_resource",
-        representation_kind="audio",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="smartedu-resource",
-        provider_version="1.0.0",
-        containers=frozenset({"mp3", "m4a"}),
-        resource_types=frozenset({"audio", "course"}),
+        "smartedu", "primary_resource", "audio", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
+        frozenset({"mp3", "m4a"}), frozenset({"audio", "course"}),
     ),
     ProviderSpec(
-        platform_id="douyin",
-        scope="primary_resource",
-        representation_kind="video",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="douyin-video",
-        provider_version="1.0.0",
-        containers=frozenset({"mp4"}),
-        resource_types=frozenset({"video"}),
+        "douyin", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "douyin-video",
+        frozenset({"mp4"}), frozenset({"video"}),
     ),
     ProviderSpec(
-        platform_id="ximalaya",
-        scope="primary_resource",
-        representation_kind="audio",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="ximalaya-audio",
-        provider_version="1.0.0",
-        containers=frozenset({"mp3", "m4a"}),
-        resource_types=frozenset({"audio"}),
+        "ximalaya", "primary_resource", "audio", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "ximalaya-audio",
+        frozenset({"mp3", "m4a"}), frozenset({"audio"}),
     ),
     ProviderSpec(
-        platform_id="bilibili",
-        scope="primary_resource",
-        representation_kind="video",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="bilibili-video",
-        provider_version="1.0.0",
-        containers=frozenset({"mp4"}),
-        resource_types=frozenset({"video"}),
+        "bilibili", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "bilibili-video",
+        frozenset({"mp4"}), frozenset({"video"}),
     ),
     ProviderSpec(
-        platform_id="yixi",
-        scope="primary_resource",
-        representation_kind="video",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="generic-direct",
-        provider_version="1.0.0",
-        containers=frozenset({"mp4"}),
-        resource_types=frozenset({"video"}),
+        "yixi", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
+        frozenset({"mp4"}), frozenset({"video"}),
     ),
     ProviderSpec(
-        platform_id="zjer",
-        scope="primary_resource",
-        representation_kind="video",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="zjer-video",
-        provider_version="1.0.0",
-        containers=frozenset({"mp4"}),
-        resource_types=frozenset({"video"}),
+        "zjer", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "zjer-video",
+        frozenset({"mp4"}), frozenset({"video"}),
     ),
     ProviderSpec(
-        platform_id="annas-archive",
-        scope="primary_resource",
-        representation_kind="document",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="annas-archive",
-        provider_version="1.0.0",
-        containers=frozenset(),
-        resource_types=frozenset({"book", "document"}),
+        "annas-archive", "primary_resource", "document", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "annas-archive",
+        frozenset(), frozenset({"book", "document"}),
     ),
     ProviderSpec(
-        platform_id="shuge",
-        scope="primary_resource",
-        representation_kind="document",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="generic-direct",
-        provider_version="1.0.0",
-        containers=_DOCUMENT_CONTAINERS,
-        resource_types=frozenset({"book", "document", "other"}),
+        "shuge", "primary_resource", "document", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
+        _DOCUMENT_CONTAINERS, frozenset({"book", "document", "other"}),
     ),
     ProviderSpec(
-        platform_id="generic",
-        scope="primary_resource",
-        representation_kind="document",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="generic-direct",
-        provider_version="1.0.0",
-        containers=_DOCUMENT_CONTAINERS,
-        resource_types=frozenset(
-            {"article", "book", "course", "dataset", "document", "other"}
-        ),
+        "generic", "primary_resource", "document", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
+        _DOCUMENT_CONTAINERS,
+        frozenset({"article", "book", "course", "dataset", "document", "other"}),
     ),
     ProviderSpec(
-        platform_id="generic",
-        scope="primary_resource",
-        representation_kind="video",
-        role="primary",
-        strategy=AcquisitionStrategy.DIRECT_FILE,
-        provider_id="generic-direct",
-        provider_version="1.0.0",
-        containers=frozenset({"mp4"}),
-        resource_types=frozenset({"course", "video"}),
-    ),
-    # When the page itself is the selected article/resource, materialised HTML
-    # is the primary resource. A navigation/preview page remains landing_page.
-    ProviderSpec(
-        platform_id="generic",
-        scope="primary_resource",
-        representation_kind="webpage",
-        role="primary",
-        strategy=AcquisitionStrategy.WEB_MATERIALIZE,
-        provider_id="generic-web-materializer",
-        provider_version="1.0.0",
-        containers=frozenset({"html"}),
-        resource_types=frozenset(
-            {"article", "course", "dataset", "document", "other"}
-        ),
+        "generic", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
+        frozenset({"mp4"}), frozenset({"course", "video"}),
     ),
     ProviderSpec(
-        platform_id="generic",
-        scope="landing_page",
-        representation_kind="webpage",
-        role="landing",
-        strategy=AcquisitionStrategy.WEB_MATERIALIZE,
-        provider_id="generic-web-materializer",
-        provider_version="1.0.0",
-        containers=frozenset({"html"}),
+        "generic", "primary_resource", "webpage", "primary",
+        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
+        frozenset({"html"}),
+        frozenset({"article", "course", "dataset", "document", "other"}),
+    ),
+    ProviderSpec(
+        "generic", "landing_page", "webpage", "landing",
+        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
+        frozenset({"html"}), frozenset(),
     ),
 )
 
 
-def _fingerprint_key(value: Any) -> str:
-    text = str(value or "")
-    return text[7:] if text.startswith("sha256:") else text
-
-
-def _resolved_mapping(resolution: Mapping[str, Any]) -> dict[str, Any]:
-    nested = resolution.get("resolved_resource")
-    if not isinstance(nested, Mapping):
-        nested = resolution.get("resolved")
-    if isinstance(nested, Mapping):
-        return dict(nested)
-    return dict(resolution)
-
-
-def _representation_role(representation: Mapping[str, Any]) -> str:
+def _role(representation: Mapping[str, Any]) -> str:
     role = str(representation.get("role") or "").strip().lower()
-    if role in {"primary", "landing", "metadata", "attachment", "companion"}:
+    if role:
         return role
-    kind = str(representation.get("kind") or "").strip().lower()
-    if kind == "metadata":
-        return "metadata"
-    return "landing" if kind == "webpage" else "representation"
+    return "landing" if str(representation.get("kind") or "") == "webpage" else "primary"
 
 
-def _representation_scope(representation: Mapping[str, Any]) -> str:
-    explicit = representation.get("scope")
-    if isinstance(explicit, str) and explicit in ACQUISITION_SCOPES:
-        return explicit
-    role = _representation_role(representation)
+def _scope(representation: Mapping[str, Any]) -> str:
+    scope = str(representation.get("scope") or "").strip()
+    if scope:
+        return scope
+    role = _role(representation)
     if role == "primary":
         return "primary_resource"
     if role == "landing":
@@ -276,63 +162,40 @@ def _representation_scope(representation: Mapping[str, Any]) -> str:
     return "representation"
 
 
-def _representations(resolution: Mapping[str, Any]) -> list[dict[str, Any]]:
-    resolved = _resolved_mapping(resolution)
-    values = resolved.get("representations") or []
-    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
-        raise AcquisitionPlanningError(
-            "RESOLUTION_STALE", "检查结果中的资源表示无效"
-        )
-    return [dict(item) for item in values if isinstance(item, Mapping)]
-
-
-def _selected_representation(
-    resolution: Mapping[str, Any], representation_id: str | None = None
+def _choose_representation(
+    resolution: Mapping[str, Any], preferred_container: str
 ) -> dict[str, Any]:
-    values = _representations(resolution)
-    if representation_id:
-        for item in values:
-            if item.get("representation_id") == representation_id:
-                return item
-        raise AcquisitionPlanningError(
-            "REPRESENTATION_DRIFT",
-            "已确认的资源表示已经不存在，请重新检查并准备获取",
-            {"representation_id": representation_id},
-        )
-    for key in ("selected_representation_id", "representation_id", "primary_representation_id"):
-        value = resolution.get(key)
-        if isinstance(value, str) and value:
-            return _selected_representation(resolution, value)
+    resolved = resolution.get("resolved_resource")
+    if not isinstance(resolved, Mapping):
+        resolved = resolution
+    raw = resolved.get("representations") or []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "检查结果没有可下载资源")
+    values = [
+        dict(item)
+        for item in raw
+        if isinstance(item, Mapping) and bool(item.get("materializable", True))
+    ]
+    if not values:
+        raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "资源当前没有可下载表示")
     if len(values) == 1:
         return values[0]
-    primaries = [
-        item
-        for item in values
-        if _representation_scope(item) == "primary_resource"
-        and _representation_role(item) == "primary"
-        and bool(item.get("materializable", True))
-    ]
-    if len(primaries) == 1:
-        return primaries[0]
+
+    primaries = [item for item in values if _scope(item) == "primary_resource"]
+    pool = primaries or values
+    if preferred_container != "original":
+        matching = [
+            item for item in pool
+            if str(item.get("container") or "").lower() == preferred_container.lower()
+        ]
+        if len(matching) == 1:
+            return matching[0]
+    if len(pool) == 1:
+        return pool[0]
     raise AcquisitionPlanningError(
         "REPRESENTATION_AMBIGUOUS",
-        "当前资源有多个可获取表示，需要先明确具体资源表示",
+        "资源有多个可下载格式，请指定 preferred_container",
     )
-
-
-def _comparable_representation(value: Mapping[str, Any]) -> dict[str, Any]:
-    keys = (
-        "representation_id",
-        "scope",
-        "kind",
-        "role",
-        "container",
-        "mime_type",
-        "materializable",
-        "technical_availability",
-        "requires_auth",
-    )
-    return {key: value.get(key) for key in keys if key in value}
 
 
 class AcquisitionPlanner:
@@ -344,151 +207,61 @@ class AcquisitionPlanner:
         self.router = router
         self.specs = tuple(specs)
 
-    def _resolve_spec(
+    def route(
         self,
         resource: Mapping[str, Any],
-        representation: Mapping[str, Any],
-    ) -> ProviderSpec:
-        scope = _representation_scope(representation)
+        resolution: Mapping[str, Any],
+        *,
+        preferred_container: str = "original",
+    ) -> dict[str, Any]:
+        representation = _choose_representation(resolution, preferred_container)
         availability = str(representation.get("technical_availability") or "available")
         if availability == "auth_required":
-            raise AcquisitionPlanningError(
-                "AUTH_REQUIRED", "该资源当前需要有效登录会话"
-            )
+            raise AcquisitionPlanningError("AUTH_REQUIRED", "该资源需要有效登录会话")
         if availability in {"unavailable", "policy_blocked"}:
             raise AcquisitionPlanningError(
                 "POLICY_DENIED" if availability == "policy_blocked" else "RESOURCE_UNAVAILABLE",
-                "该资源当前不可获取",
+                "该资源当前不可下载",
             )
+
+        scope = _scope(representation)
         for spec in self.specs:
-            if spec.matches(resource, representation, scope):
-                registration = self.router.provider_registry.get(
-                    (spec.provider_id, spec.provider_version)
+            if not spec.matches(resource, representation, scope):
+                continue
+            registration = self.router.provider_registry.get(spec.provider_id)
+            if registration is None:
+                raise AcquisitionPlanningError(
+                    "PROVIDER_UNAVAILABLE",
+                    f"下载器 {spec.provider_id} 当前未部署",
+                    retryable=True,
                 )
-                if registration is None:
-                    raise AcquisitionPlanningError(
-                        "PROVIDER_UNAVAILABLE",
-                        "计划使用的获取提供方当前未部署",
-                        {"provider_id": spec.provider_id},
-                        retryable=True,
-                    )
-                if spec.strategy not in registration.strategies or scope not in registration.scopes:
-                    raise AcquisitionPlanningError(
-                        "PROVIDER_SCOPE_MISMATCH",
-                        "计划使用的获取提供方不支持当前资源范围或策略",
-                        {"provider_id": spec.provider_id, "scope": scope},
-                    )
-                return spec
+            if spec.strategy not in registration.strategies or scope not in registration.scopes:
+                continue
+            representation_id = str(representation.get("representation_id") or "")
+            if not representation_id:
+                raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "资源表示缺少 ID")
+            container = str(representation.get("container") or "").strip().lower()
+            return {
+                "strategy": spec.strategy.kind,
+                "provider_id": spec.provider_id,
+                "scope": scope,
+                "representation_id": representation_id,
+                "container": (
+                    container
+                    if spec.platform_id == "smartedu" and container
+                    else preferred_container
+                ),
+            }
+
         raise AcquisitionPlanningError(
             "CAPABILITY_NOT_DECLARED",
-            "当前资源表示没有可执行的获取方式",
+            "当前资源没有可用下载器",
             {
                 "platform": str(resource.get("platform") or "generic"),
                 "kind": str(representation.get("kind") or ""),
                 "scope": scope,
             },
         )
-
-    def plan_selection(
-        self,
-        resources: Sequence[Mapping[str, Any]],
-        resolutions: Sequence[Mapping[str, Any]],
-        *,
-        preferred_container: str,
-    ) -> list[dict[str, Any]]:
-        if len(resources) != len(resolutions):
-            raise AcquisitionPlanningError(
-                "RESOLUTION_STALE", "资源与检查结果数量不一致"
-            )
-        items: list[dict[str, Any]] = []
-        for position, (resource, resolution) in enumerate(
-            zip(resources, resolutions, strict=True)
-        ):
-            representation = _selected_representation(resolution)
-            if not representation_evidence_is_fresh(representation):
-                raise AcquisitionPlanningError(
-                    "RESOLUTION_STALE",
-                    "资源表示证据已过期，请重新检查",
-                    {"resource_id": resource.get("resource_id")},
-                )
-            representation_id = representation.get("representation_id")
-            if not isinstance(representation_id, str) or not representation_id:
-                raise AcquisitionPlanningError(
-                    "RESOLUTION_STALE", "资源表示缺少服务端 ID"
-                )
-            spec = self._resolve_spec(resource, representation)
-            snapshot = dict(representation)
-            representation_container = str(
-                representation.get("container") or ""
-            ).strip().lower()
-            snapshot["selected_container"] = (
-                representation_container
-                if str(resource.get("platform") or "generic") == "smartedu"
-                and representation_container
-                else preferred_container
-            )
-            items.append(
-                {
-                    "position": position,
-                    "resource_id": str(resource["resource_id"]),
-                    "resolution_id": resolution.get("resolution_id"),
-                    "representation_id": representation_id,
-                    "planned_scope": _representation_scope(representation),
-                    "strategy": spec.strategy.kind,
-                    "provider_id": spec.provider_id,
-                    "provider_version": spec.provider_version,
-                    "source_fingerprint": _fingerprint_key(source_fingerprint(resource)),
-                    "representation": snapshot,
-                }
-            )
-        return items
-
-    def revalidate_plan_item(
-        self,
-        plan_item: Mapping[str, Any],
-        resource: Mapping[str, Any],
-        resolution: Mapping[str, Any],
-    ) -> None:
-        representation_id = str(plan_item.get("representation_id") or "")
-        current = _selected_representation(resolution, representation_id)
-        if not representation_evidence_is_fresh(current):
-            raise AcquisitionPlanningError(
-                "RESOLUTION_STALE", "资源表示证据已过期，请重新检查并准备获取"
-            )
-        stored = plan_item.get("representation")
-        if not isinstance(stored, Mapping):
-            raise AcquisitionPlanningError(
-                "PLAN_BINDING_CONFLICT", "下载计划缺少资源表示"
-            )
-        if _comparable_representation(stored) != _comparable_representation(current):
-            raise AcquisitionPlanningError(
-                "REPRESENTATION_DRIFT",
-                "资源表示已经变化，请重新检查并准备获取",
-            )
-        if _fingerprint_key(plan_item.get("source_fingerprint")) != _fingerprint_key(
-            source_fingerprint(resource)
-        ):
-            raise AcquisitionPlanningError(
-                "RESOLUTION_STALE", "资源身份已经变化，请重新搜索并检查"
-            )
-        spec = self._resolve_spec(resource, current)
-        expected = (
-            str(plan_item.get("planned_scope") or ""),
-            str(plan_item.get("strategy") or ""),
-            str(plan_item.get("provider_id") or ""),
-            str(plan_item.get("provider_version") or ""),
-        )
-        actual = (
-            _representation_scope(current),
-            spec.strategy.kind,
-            spec.provider_id,
-            spec.provider_version,
-        )
-        if expected != actual:
-            raise AcquisitionPlanningError(
-                "PLAN_BINDING_CONFLICT",
-                "资源表示或 Provider 路由已经变化，请重新准备获取",
-            )
 
 
 __all__ = [
