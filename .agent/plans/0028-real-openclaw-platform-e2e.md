@@ -90,6 +90,7 @@ Sensitive values removed: yes/no
 - [x] completed：2026-08-15 用户提供之江汇 34941 的真实课程详情和 signed MP4 数据；0052 已按“稳定课时 ID + Start 时刷新签名 URL”接入 experimental 获取链。
 - [ ] in_progress：用户复测 Anna's Archive，并按队列继续选择 Shuge/Yixi/Zjer/Bilibili/SmartEdu 等至少一个平台完成真实闭环。
 - [x] completed：2026-08-15 用户反馈抖音搜索「停云小阁」登录后持续失败；已定位两层原因（document.cookie 读不到 httpOnly 凭证 + 模型转述 cookie 被 maxTokens 截断），按 [`0053`](0053-browser-cookie-capture-chain.md) 修复捕获链；当日人工经 CDP 重存完整会话并验证搜索恢复。
+- [x] completed：2026-08-15 用户"拉取停云小阁全部视频清单"任务中 browse_creator 缺 creator_id 来源，Agent 读源码撑爆上下文触发 compaction；按 [`0054`](0054-douyin-creator-id-exposure.md) 在搜索/inspect 元数据暴露 `creator_sec_uid` 并写明工具来源；真实链路验证 inspect→sec_uid→browse_creator 返回账号视频列表。
 - [ ] pending：对后续真实失败建立独立修复计划并记录复测结果。
 - [ ] pending：至少一个平台完成用户选择、确认、下载并产生正确 ready Asset 后记录成功证据。
 
