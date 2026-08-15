@@ -94,7 +94,13 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         task_version: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """Browse a creator's content list when the platform supports it."""
+        """Browse a creator's content list when the platform supports it.
+
+        ``creator_id`` is the platform-native creator handle, not a display
+        name: for douyin it is the ``sec_uid`` (``MS4wLjAB...``) or a full
+        ``/user/`` profile URL. Get it from search/inspect candidate metadata
+        field ``creator_sec_uid`` — never guess or search by nickname.
+        """
         return _invoke(
             lambda: resource_service.browse_creator(
                 flow_id,

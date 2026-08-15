@@ -192,7 +192,9 @@ class DouyinSearchAdapter:
             if val is not None:
                 signals[key] = val
 
-        author = (aweme.get("author") or {}).get("nickname")
+        author_info = aweme.get("author") or {}
+        author = author_info.get("nickname")
+        sec_uid = str(author_info.get("sec_uid") or "").strip()
         create_time = _to_int(aweme.get("create_time"))
         published_at: str | None = None
         if create_time and create_time > 0:
@@ -205,6 +207,7 @@ class DouyinSearchAdapter:
             resource_type="视频",
             summary=title[:120] if len(title) > 40 else None,
             author=author,
+            creator_sec_uid=sec_uid or None,
             published_at=published_at,
             download_feasibility="中",
             platform_signals=signals or None,

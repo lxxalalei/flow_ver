@@ -43,7 +43,10 @@ def _detail_body(aweme_id: str = "7123456789", *, has_video: bool = True) -> str
         "aweme_detail": {
             "aweme_id": aweme_id,
             "desc": "测试视频",
-            "author": {"nickname": "测试作者"},
+            "author": {
+                "nickname": "测试作者",
+                "sec_uid": "MS4wLjABAAAAtest_inspect_sec_uid",
+            },
             "statistics": {"play_count": 1000, "digg_count": 200, "comment_count": 50},
         }
     }
@@ -88,6 +91,30 @@ class DouyinInspectorTests(unittest.TestCase):
         self.assertEqual("available", primary["technical_availability"])
         self.assertTrue(primary["materializable"])
         self.assertEqual("video/mp4", primary["mime_type"])
+        # The platform-native creator handle rides along in inspect metadata
+        # so resource_browse_creator can be called without extra discovery.
+        self.assertEqual(
+            "MS4wLjABAAAAtest_inspect_sec_uid",
+            resolved["metadata"]["creator_sec_uid"],
+        )
+
+    def test_missing_sec_uid_is_omitted_not_fatal(self) -> None:
+        import json
+
+        body = json.loads(_detail_body())
+        del body["aweme_detail"]["author"]["sec_uid"]
+        inspector = DouyinInspector(
+            session_store=_FakeSessionStore(),
+            detail_transport=lambda req: _FakeResponse(json.dumps(body)),
+            sign_func=lambda qs, ua: "fake_a_bogus",
+        )
+        result = inspector.inspect(self._resource())
+        payload = result.to_mapping()
+
+        self.assertEqual("resolved", payload["resolution_status"])
+        self.assertNotIn(
+            "creator_sec_uid", payload["resolved_resource"]["metadata"]
+        )
 
     def test_auth_required_without_session(self) -> None:
         inspector = DouyinInspector(

@@ -114,7 +114,7 @@
     },
     {
       "name": "resource_browse_creator",
-      "description": "Browse a creator's full content list from social-media platforms that expose a supported creator-search adapter.",
+      "description": "Browse a creator's content list when the platform supports it. creator_id is the platform-native handle (douyin sec_uid or /user/ URL), taken from search/inspect candidate metadata creator_sec_uid.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,

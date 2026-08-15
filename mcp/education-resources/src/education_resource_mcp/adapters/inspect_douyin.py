@@ -335,6 +335,11 @@ class DouyinInspector:
         aweme_id = str(aweme_detail.get("aweme_id") or "")
         if aweme_id:
             metadata["aweme_id"] = aweme_id
+        # Expose the platform-native creator handle so resource_browse_creator
+        # can be called directly from inspect metadata (no source spelunking).
+        sec_uid = str((aweme_detail.get("author") or {}).get("sec_uid") or "").strip()
+        if sec_uid:
+            metadata["creator_sec_uid"] = sec_uid
         stats = aweme_detail.get("statistics") or {}
         for key, raw in (
             ("play_count", stats.get("play_count")),

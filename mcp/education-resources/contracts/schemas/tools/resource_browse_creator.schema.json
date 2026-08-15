@@ -41,7 +41,8 @@
         "creator_id": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 512
+          "maxLength": 512,
+          "description": "Platform-native creator handle, not a display name. For douyin: the sec_uid (MS4wLjAB...) or a full /user/ profile URL. Source: search/inspect candidate metadata field creator_sec_uid."
         },
         "limit": {
           "type": "integer",

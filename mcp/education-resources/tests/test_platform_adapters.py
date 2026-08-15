@@ -239,7 +239,10 @@ class DouyinAdapterTests(unittest.TestCase):
                                 "comment_count": 88,
                                 "play_count": 120000,
                             },
-                            "author": {"nickname": "教育小课堂"},
+                            "author": {
+                                "nickname": "教育小课堂",
+                                "sec_uid": "MS4wLjABAAAAtest_sec_uid_0001",
+                            },
                             "create_time": 1700000000,
                         }
                     }
@@ -262,6 +265,11 @@ class DouyinAdapterTests(unittest.TestCase):
         self.assertEqual(r["metadata"]["platform_signals"]["likes"], 5200)
         self.assertEqual(r["metadata"]["platform_signals"]["plays"], 120000)
         self.assertEqual(r["metadata"]["author"], "教育小课堂")
+        # creator_sec_uid is exposed so resource_browse_creator works without
+        # the agent hunting for the platform-native handle elsewhere.
+        self.assertEqual(
+            r["metadata"]["creator_sec_uid"], "MS4wLjABAAAAtest_sec_uid_0001"
+        )
 
     def test_api_error_status_code(self) -> None:
         with tempfile.TemporaryDirectory() as d:

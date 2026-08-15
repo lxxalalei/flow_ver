@@ -328,6 +328,7 @@ def make_resource(
     resource_type: str = "其他",
     summary: str | None = None,
     author: str | None = None,
+    creator_sec_uid: str | None = None,
     published_at: str | None = None,
     language: str | None = None,
     download_feasibility: str | None = None,
@@ -338,11 +339,16 @@ def make_resource(
     consumes.
 
     Only *platform*, *title* and *source_url* are required; the rest are
-    folded into ``metadata`` when present.
+    folded into ``metadata`` when present.  ``creator_sec_uid`` is the
+    platform-native creator handle accepted by ``resource_browse_creator``
+    (douyin ``sec_uid``); adapters should pass it whenever the platform
+    response carries it so agents never need to hunt for it elsewhere.
     """
     metadata: dict[str, Any] = {"platform_signals": platform_signals or {}}
     if author is not None:
         metadata["author"] = author
+    if creator_sec_uid:
+        metadata["creator_sec_uid"] = creator_sec_uid
     if published_at is not None:
         metadata["published_at"] = published_at
     if language is not None:
