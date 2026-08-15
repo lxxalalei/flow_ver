@@ -15,7 +15,7 @@ Main Agent 负责：需求理解、必要澄清、搜索角度、来源选择、
 
 MCP 负责：Flow、ResultSet、Presentation、Selection、Resolution/Representation、Plan、Job、Asset、Archive 以及所有服务端状态校验和副作用。
 
-只使用 MCP 实际返回的 ID、状态、Provider、可访问性、下载和归档事实；不要猜测或补造。**不要把 MCP 的状态模型变成自己的思考模型。**
+只使用 MCP 实际返回的资源/Plan/Job/Asset 句柄和业务事实；不要猜测或补造。**不要把 MCP 的内部状态模型变成自己的思考模型，也不要充当数据库事务协调器。**
 
 ## 2. 搜索前先理解真正需求
 
@@ -114,20 +114,28 @@ Search 提供候选线索。只有某个事实会改变推荐、计数或获取�
 - 标题/摘要不足以判断是否值得推荐；
 - 下载准备需要 fresh Resolution/Representation。
 
+Public Inspect 只返回决策所需的 availability、Representation、creator_id（存在时）、warnings/failures 等；不要为了找 fingerprint、inspector version、resolution digest 或内部 route 去读源码。
+
 不要为了“流程完整” Inspect 全部候选。
 
 ## 8. 最小 MCP choreography
 
 把这些当后端操作，不要变成用户可见的流程说明。
 
-- 新资源目标：`resource_flow_start`；继续旧任务但 flow 不确定：`resource_flow_list` / `resource_flow_status`，不猜 ID。
-- 搜索：根据语义判断组织 `search_tasks[]` 调 `resource_search`；补搜继续当前 Flow，ResultSet 细节见 [`references/retrieval.md`](references/retrieval.md)。
-- 展示：只展示真正审查过的有序子集；随后 `resource_presentation_save` 记录**实际展示顺序**。
-- 选择：用户选择后 `resource_selection_save`；不能选择未实际展示的候选。
-- 下载：必要时 Inspect → `resource_download_prepare` → 向用户说明实际计划 → **用户明确确认当前计划后** `resource_download_start` → `resource_job_status` / cancel。进入下载阶段再读 [`references/acquisition.md`](references/acquisition.md)。
+- 新资源目标：`resource_flow_start`；继续旧任务但 `flow_id` 不确定：`resource_flow_list` / `resource_flow_status`。
+- 搜索：组织 `search_tasks[]` 调 `resource_search`。补搜只改 `mode=extend`；**不提交 `task_version` / `base_result_set_id`**。
+- 展示：只展示真正审查过的有序子集；随后 `resource_presentation_save(displayed_resource_ids=[...])`。**不提交 `result_set_id`**。
+- 选择：用户按编号选择后调用 `resource_selection_save(selected_positions=[...])`。**不提交 `presentation_id` / `presented_version`**。
+- 下载准备：必要时 Inspect → `resource_download_prepare(options?)`。**不提交 `selection_version` / `selection_digest` / Presentation binding**。
+- 确认：向用户说明 Prepare 实际返回、且会影响决定的资源/格式/风险；用户明确确认后，用返回的 `plan_id + confirmation_token` 调 `resource_download_start`。
+- Job：已有 `job_id` 时直接 `resource_job_status`；只依据 compact progress/assets/failures 判断结果，不要求 Outcome/execution route 重放。
 - 归档/资料库：按需读 [`references/library.md`](references/library.md)。
 
-资源候选、可访问性、下载和归档事实只使用 `education-resources` 的业务 `resource_*` 工具。不要用 web/browser/curl/exec/其他 MCP 建第二条资源发现或获取数据面。
+Public MCP 之外的 ResultSet lineage、Presentation/Selection version、digest、Resolution evidence、Provider execution route 都由服务端持有。**不要缓存、转述或从旧文本恢复这些内部字段。**
+
+`resource_flow_status` 是 compact recovery summary，不是全量状态转储。已有当前上下文时不要反复调用；context compaction 后只恢复下一步需要的资源引用/Plan/Job/Asset 句柄。
+
+资源候选、可访问性、下载和归档事实只使用 `education-resources` 的业务 `resource_*` 工具。不要用 web/browser/curl/exec/其他 MCP 建第二条资源发现或获取数据面，也不要读项目源码来恢复某个业务句柄。
 
 ## 9. Few-shot
 

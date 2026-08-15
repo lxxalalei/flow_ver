@@ -3,137 +3,69 @@
   "$id": "https://quanxiao.example/contracts/education-resource/schemas/tools/resource_presentation_save.schema.json",
   "title": "resource_presentation_save contract",
   "oneOf": [
-    {
-      "$ref": "#/$defs/input"
-    },
-    {
-      "$ref": "#/$defs/output"
-    }
+    {"$ref": "#/$defs/input"},
+    {"$ref": "#/$defs/output"}
   ],
   "$defs": {
     "input": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "contract_version",
-        "flow_id",
-        "result_set_id",
-        "idempotency_key",
-        "displayed_resource_ids"
-      ],
+      "required": ["contract_version", "flow_id", "idempotency_key", "displayed_resource_ids"],
       "properties": {
-        "contract_version": {
-          "$ref": "../common.schema.json#/$defs/contract_version"
-        },
-        "flow_id": {
-          "$ref": "../common.schema.json#/$defs/flow_id"
-        },
-        "result_set_id": {
-          "$ref": "../common.schema.json#/$defs/result_set_id"
-        },
-        "idempotency_key": {
-          "$ref": "../common.schema.json#/$defs/idempotency_key"
-        },
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "idempotency_key": {"$ref": "../common.schema.json#/$defs/idempotency_key"},
         "displayed_resource_ids": {
-          "type": "array",
-          "maxItems": 50,
-          "uniqueItems": true,
-          "items": {
-            "$ref": "../common.schema.json#/$defs/resource_id"
-          }
+          "type": "array", "maxItems": 50, "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/resource_id"},
+          "description": "Exact resource IDs and order actually shown. The server binds them to the current ResultSet."
         }
       }
     },
     "success": {
+      "description": "Internal domain-service success shape retained for service-level fixture validation.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "contract_version",
-        "ok",
-        "flow_id",
-        "stage",
-        "result_set_id",
-        "presentation_id",
-        "presented_version",
-        "items",
-        "empty",
-        "created_at"
+        "contract_version", "ok", "flow_id", "stage", "result_set_id",
+        "presentation_id", "presented_version", "items", "empty", "created_at"
       ],
       "properties": {
-        "contract_version": {
-          "$ref": "../common.schema.json#/$defs/contract_version"
-        },
-        "ok": {
-          "const": true
-        },
-        "flow_id": {
-          "$ref": "../common.schema.json#/$defs/flow_id"
-        },
-        "stage": {
-          "type": "string",
-          "const": "presented"
-        },
-        "result_set_id": {
-          "$ref": "../common.schema.json#/$defs/result_set_id"
-        },
-        "presentation_id": {
-          "$ref": "../common.schema.json#/$defs/presentation_id"
-        },
-        "presented_version": {
-          "type": "integer",
-          "minimum": 1
-        },
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "stage": {"type": "string", "const": "presented"},
+        "result_set_id": {"$ref": "../common.schema.json#/$defs/result_set_id"},
+        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
+        "presented_version": {"type": "integer", "minimum": 1},
         "items": {
-          "type": "array",
-          "maxItems": 50,
-          "items": {
-            "$ref": "../common.schema.json#/$defs/displayed_item"
-          }
+          "type": "array", "maxItems": 50,
+          "items": {"$ref": "../common.schema.json#/$defs/displayed_item"}
         },
-        "empty": {
-          "type": "boolean"
+        "empty": {"type": "boolean"},
+        "created_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+      }
+    },
+    "public_success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "flow_id", "stage", "items", "empty"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "stage": {"type": "string", "const": "presented"},
+        "items": {
+          "type": "array", "maxItems": 50,
+          "items": {"$ref": "../common.schema.json#/$defs/displayed_item"}
         },
-        "created_at": {
-          "$ref": "../common.schema.json#/$defs/timestamp"
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "empty": {
-                "const": true
-              }
-            },
-            "required": [
-              "empty"
-            ]
-          },
-          "then": {
-            "properties": {
-              "items": {
-                "maxItems": 0
-              }
-            }
-          },
-          "else": {
-            "properties": {
-              "items": {
-                "minItems": 1
-              }
-            }
-          }
-        }
-      ]
+        "empty": {"type": "boolean"}
+      }
     },
     "output": {
       "oneOf": [
-        {
-          "$ref": "#/$defs/success"
-        },
-        {
-          "$ref": "../common.schema.json#/$defs/error_result"
-        }
+        {"$ref": "#/$defs/public_success"},
+        {"$ref": "../common.schema.json#/$defs/error_result"}
       ]
     }
   }

@@ -16,191 +16,166 @@
         "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"}
       }
     },
-    "result_set_snapshot": {
+    "success": {
+      "description": "Internal domain-service status shape retained for service-level fixture validation. Public MCP emits public_success.",
       "type": "object",
-      "additionalProperties": false,
       "required": [
-        "task_version", "search_run_id", "result_set_id", "result_version",
-        "status", "platform_runs", "candidates", "failures", "has_more", "created_at"
+        "contract_version", "ok", "flow_id", "stage", "task",
+        "current_result_set", "current_presentation", "current_selection",
+        "current_plan", "current_job", "current_resolutions", "allowed_next_actions"
       ],
       "properties": {
-        "task_version": {"type": "integer", "minimum": 1},
-        "search_run_id": {"$ref": "../common.schema.json#/$defs/search_run_id"},
-        "result_set_id": {"$ref": "../common.schema.json#/$defs/result_set_id"},
-        "result_version": {"type": "integer", "minimum": 1},
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"}
+      },
+      "additionalProperties": true
+    },
+    "candidate_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_id", "platform", "title", "resource_type"],
+      "properties": {
+        "resource_id": {"$ref": "../common.schema.json#/$defs/resource_id"},
+        "platform": {"$ref": "../common.schema.json#/$defs/platform_id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 512},
+        "resource_type": {"$ref": "../common.schema.json#/$defs/resource_type"}
+      }
+    },
+    "result_set_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "round", "candidate_count", "candidate_refs", "candidate_refs_complete"],
+      "properties": {
         "status": {"$ref": "../common.schema.json#/$defs/result_set_status"},
-        "platform_runs": {
-          "type": "array", "maxItems": 16,
-          "items": {"$ref": "resource_search.schema.json#/$defs/platform_run"}
-        },
-        "candidates": {
-          "type": "array", "maxItems": 50,
-          "items": {"$ref": "../common.schema.json#/$defs/resource_candidate"}
-        },
-        "failures": {
-          "type": "array", "maxItems": 32,
-          "items": {"$ref": "../common.schema.json#/$defs/item_failure"}
-        },
-        "has_more": {"type": "boolean"},
-        "created_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
-        "mode": {"$ref": "resource_search.schema.json#/$defs/search_mode"},
-        "base_result_set_id": {"$ref": "../common.schema.json#/$defs/result_set_id"},
         "round": {"type": "integer", "minimum": 1},
-        "provenance": {"$ref": "resource_search.schema.json#/$defs/provenance"},
-        "coverage": {"$ref": "resource_search.schema.json#/$defs/coverage"}
-      }
-    },
-    "presentation_snapshot": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "result_set_id", "presentation_id", "presented_version", "items", "empty", "created_at"
-      ],
-      "properties": {
-        "result_set_id": {"$ref": "../common.schema.json#/$defs/result_set_id"},
-        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
-        "presented_version": {"type": "integer", "minimum": 1},
-        "items": {
-          "type": "array", "maxItems": 50,
-          "items": {"$ref": "../common.schema.json#/$defs/displayed_item"}
+        "candidate_count": {"type": "integer", "minimum": 0},
+        "candidate_refs": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {"$ref": "#/$defs/candidate_ref"}
         },
-        "empty": {"type": "boolean"},
-        "created_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+        "candidate_refs_complete": {
+          "type": "boolean",
+          "description": "False means the durable ResultSet contains more candidates than the compact recovery summary exposes."
+        }
       }
     },
-    "selection_snapshot": {
+    "presented_item": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "stage", "presentation_id", "presented_version", "selection_version",
-        "selection_digest", "selected_positions", "selected_resource_ids", "cancelled", "updated_at"
-      ],
+      "required": ["display_position", "resource_id"],
+      "properties": {
+        "display_position": {"type": "integer", "minimum": 1, "maximum": 50},
+        "resource_id": {"$ref": "../common.schema.json#/$defs/resource_id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "presentation_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "empty"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {"$ref": "#/$defs/presented_item"}
+        },
+        "empty": {"type": "boolean"}
+      }
+    },
+    "selection_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "selected_positions", "selected_resource_ids"],
       "properties": {
         "stage": {"type": "string", "enum": ["selected", "cancelled"]},
-        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
-        "presented_version": {"type": "integer", "minimum": 1},
-        "selection_version": {"type": "integer", "minimum": 1},
-        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
         "selected_positions": {
-          "type": "array", "maxItems": 50, "uniqueItems": true,
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
           "items": {"type": "integer", "minimum": 1, "maximum": 50}
         },
         "selected_resource_ids": {
-          "type": "array", "maxItems": 50, "uniqueItems": true,
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
           "items": {"$ref": "../common.schema.json#/$defs/resource_id"}
-        },
-        "cancelled": {"type": "boolean"},
-        "updated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+        }
       }
     },
-    "plan_snapshot": {
+    "plan_summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "plan_id", "presentation_id", "presented_version", "selection_version",
-        "selection_digest", "plan_digest", "status", "expires_at", "confirmation_required", "created_at"
-      ],
+      "required": ["plan_id", "status", "expires_at", "confirmation_required"],
       "properties": {
         "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
-        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
-        "presented_version": {"type": "integer", "minimum": 1},
-        "selection_version": {"type": "integer", "minimum": 1},
-        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
-        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
         "status": {"type": "string", "enum": ["prepared", "consumed", "expired", "invalidated"]},
         "expires_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
-        "confirmation_required": {"type": "boolean"},
-        "created_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+        "confirmation_required": {"type": "boolean"}
       }
     },
-    "job_snapshot": {
+    "job_summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "job_id", "plan_id", "presentation_id", "presented_version", "selection_version",
-        "selection_digest", "plan_digest", "status", "progress_percent", "asset_ids",
-        "failures", "created_at", "updated_at"
-      ],
+      "required": ["job_id", "status", "progress_percent", "asset_ids", "failures"],
       "properties": {
         "job_id": {"$ref": "../common.schema.json#/$defs/job_id"},
-        "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
-        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
-        "presented_version": {"type": "integer", "minimum": 1},
-        "selection_version": {"type": "integer", "minimum": 1},
-        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
-        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
         "status": {"$ref": "../common.schema.json#/$defs/job_status"},
         "completion": {"$ref": "../common.schema.json#/$defs/bundle_completion"},
         "progress_percent": {"type": "integer", "minimum": 0, "maximum": 100},
         "asset_ids": {
-          "type": "array", "maxItems": 50, "uniqueItems": true,
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
           "items": {"$ref": "../common.schema.json#/$defs/asset_id"}
         },
-        "bundle_ids": {
-          "type": "array", "maxItems": 50, "uniqueItems": true,
-          "items": {"$ref": "../common.schema.json#/$defs/bundle_id"}
-        },
         "failures": {
-          "type": "array", "maxItems": 32,
+          "type": "array",
+          "maxItems": 32,
           "items": {"$ref": "../common.schema.json#/$defs/item_failure"}
-        },
-        "created_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
-        "updated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+        }
       }
     },
-    "current_resolution": {
+    "public_success": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "flow_id", "resource_id", "resolution_id", "resolution_status",
-        "resolved_resource", "inspection", "failures"
-      ],
-      "properties": {
-        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
-        "resource_id": {"$ref": "../common.schema.json#/$defs/resource_id"},
-        "resolution_id": {"$ref": "../common.schema.json#/$defs/resolution_id"},
-        "resolution_status": {"type": "string", "enum": ["resolved", "partial", "unresolved"]},
-        "resolved_resource": {"$ref": "resource_inspect.schema.json#/$defs/resolved_resource"},
-        "inspection": {"$ref": "resource_inspect.schema.json#/$defs/inspection"},
-        "failures": {"$ref": "resource_inspect.schema.json#/$defs/success/properties/failures"}
-      }
-    },
-    "success": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "contract_version", "ok", "flow_id", "task_version", "task", "stage",
-        "allowed_next_actions", "created_at", "updated_at", "current_result_set",
-        "current_presentation", "current_selection", "current_plan", "current_job", "current_resolutions"
+        "contract_version", "ok", "flow_id", "stage", "task",
+        "current_result_set", "current_presentation", "current_selection",
+        "current_plan", "current_job", "inspected_resource_ids", "allowed_next_actions"
       ],
       "properties": {
         "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
         "ok": {"const": true},
         "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
-        "task_version": {"type": "integer", "minimum": 1},
-        "task": {"$ref": "../common.schema.json#/$defs/persisted_flow_task"},
         "stage": {"$ref": "../common.schema.json#/$defs/flow_stage"},
+        "task": {"$ref": "../common.schema.json#/$defs/persisted_flow_task"},
         "current_result_set": {
-          "oneOf": [{"$ref": "#/$defs/result_set_snapshot"}, {"type": "null"}]
+          "oneOf": [{"$ref": "#/$defs/result_set_summary"}, {"type": "null"}]
         },
         "current_presentation": {
-          "oneOf": [{"$ref": "#/$defs/presentation_snapshot"}, {"type": "null"}]
+          "oneOf": [{"$ref": "#/$defs/presentation_summary"}, {"type": "null"}]
         },
         "current_selection": {
-          "oneOf": [{"$ref": "#/$defs/selection_snapshot"}, {"type": "null"}]
+          "oneOf": [{"$ref": "#/$defs/selection_summary"}, {"type": "null"}]
         },
         "current_plan": {
-          "oneOf": [{"$ref": "#/$defs/plan_snapshot"}, {"type": "null"}]
+          "oneOf": [{"$ref": "#/$defs/plan_summary"}, {"type": "null"}]
         },
         "current_job": {
-          "oneOf": [{"$ref": "#/$defs/job_snapshot"}, {"type": "null"}]
+          "oneOf": [{"$ref": "#/$defs/job_summary"}, {"type": "null"}]
         },
-        "current_resolutions": {
-          "type": "array", "maxItems": 50,
-          "items": {"$ref": "#/$defs/current_resolution"}
+        "inspected_resource_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/resource_id"}
         },
         "allowed_next_actions": {
-          "type": "array", "maxItems": 12, "uniqueItems": true,
+          "type": "array",
+          "maxItems": 12,
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
@@ -210,14 +185,12 @@
               "resource_job_cancel", "resource_archive", "resource_library_search"
             ]
           }
-        },
-        "created_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
-        "updated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+        }
       }
     },
     "output": {
       "oneOf": [
-        {"$ref": "#/$defs/success"},
+        {"$ref": "#/$defs/public_success"},
         {"$ref": "../common.schema.json#/$defs/error_result"}
       ]
     }

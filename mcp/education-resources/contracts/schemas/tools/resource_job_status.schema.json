@@ -28,68 +28,47 @@
         "message": {"type": "string", "minLength": 1, "maxLength": 512}
       }
     },
-    "route": {
+    "public_asset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope", "strategy", "provider"],
+      "required": ["asset_id", "resource_id", "media_type", "size_bytes"],
       "properties": {
-        "scope": {"$ref": "../common.schema.json#/$defs/capability_scope"},
-        "strategy": {"$ref": "../common.schema.json#/$defs/capability_strategy"},
-        "provider": {"$ref": "../common.schema.json#/$defs/provider_ref"}
-      }
-    },
-    "execution_route": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["scope", "strategy", "provider", "representation_id", "revalidated_at"],
-      "properties": {
-        "scope": {"$ref": "../common.schema.json#/$defs/capability_scope"},
-        "strategy": {"$ref": "../common.schema.json#/$defs/capability_strategy"},
-        "provider": {"$ref": "../common.schema.json#/$defs/provider_ref"},
-        "representation_id": {"$ref": "../common.schema.json#/$defs/representation_id"},
-        "revalidated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
-      }
-    },
-    "outcome_projection": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["outcome_id", "resource_id", "status", "planned", "started_at"],
-      "properties": {
-        "outcome_id": {"$ref": "../common.schema.json#/$defs/actual_outcome_id"},
+        "asset_id": {"$ref": "../common.schema.json#/$defs/asset_id"},
         "resource_id": {"$ref": "../common.schema.json#/$defs/resource_id"},
-        "status": {"$ref": "../common.schema.json#/$defs/outcome_status"},
-        "planned": {"$ref": "#/$defs/route"},
-        "execution": {"$ref": "#/$defs/execution_route"},
-        "actual": {"$ref": "#/$defs/route"},
+        "media_type": {"type": "string", "minLength": 1, "maxLength": 127},
+        "size_bytes": {"type": "integer", "minimum": 0},
         "bundle_id": {"$ref": "../common.schema.json#/$defs/bundle_id"},
-        "asset_ids": {
-          "type": "array",
-          "maxItems": 50,
-          "items": {"$ref": "../common.schema.json#/$defs/asset_id"}
-        },
-        "failure": {"$ref": "../common.schema.json#/$defs/item_failure"},
-        "started_at": {"$ref": "../common.schema.json#/$defs/timestamp"},
-        "completed_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+        "role": {"$ref": "../common.schema.json#/$defs/asset_role"},
+        "order": {"$ref": "../common.schema.json#/$defs/bundle_order"},
+        "bundle_completion": {"$ref": "../common.schema.json#/$defs/bundle_completion"}
       }
     },
     "success": {
+      "description": "Internal domain-service job shape retained for service-level fixture validation. Public MCP emits public_success.",
       "type": "object",
-      "additionalProperties": false,
       "required": [
-        "contract_version", "ok", "flow_id", "plan_id", "presentation_id",
-        "presented_version", "selection_version", "selection_digest", "plan_digest",
-        "job_id", "status", "progress", "assets", "failures", "updated_at"
+        "contract_version", "ok", "flow_id", "job_id", "status",
+        "progress", "assets", "failures"
       ],
       "properties": {
         "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
         "ok": {"const": true},
         "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
-        "plan_id": {"$ref": "../common.schema.json#/$defs/plan_id"},
-        "presentation_id": {"$ref": "../common.schema.json#/$defs/presentation_id"},
-        "presented_version": {"type": "integer", "minimum": 1},
-        "selection_version": {"type": "integer", "minimum": 1},
-        "selection_digest": {"$ref": "../common.schema.json#/$defs/selection_digest"},
-        "plan_digest": {"$ref": "../common.schema.json#/$defs/plan_digest"},
+        "job_id": {"$ref": "../common.schema.json#/$defs/job_id"}
+      },
+      "additionalProperties": true
+    },
+    "public_success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version", "ok", "flow_id", "job_id", "status",
+        "progress", "assets", "failures"
+      ],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
         "job_id": {"$ref": "../common.schema.json#/$defs/job_id"},
         "status": {"$ref": "../common.schema.json#/$defs/job_status"},
         "completion": {"$ref": "../common.schema.json#/$defs/bundle_completion"},
@@ -97,24 +76,19 @@
         "assets": {
           "type": "array",
           "maxItems": 50,
-          "items": {"$ref": "../common.schema.json#/$defs/asset_summary"}
+          "items": {"$ref": "#/$defs/public_asset"}
         },
         "failures": {
           "type": "array",
           "maxItems": 50,
           "items": {"$ref": "../common.schema.json#/$defs/item_failure"}
         },
-        "outcomes": {
-          "type": "array",
-          "maxItems": 50,
-          "items": {"$ref": "#/$defs/outcome_projection"}
-        },
         "updated_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
       }
     },
     "output": {
       "oneOf": [
-        {"$ref": "#/$defs/success"},
+        {"$ref": "#/$defs/public_success"},
         {"$ref": "../common.schema.json#/$defs/error_result"}
       ]
     }

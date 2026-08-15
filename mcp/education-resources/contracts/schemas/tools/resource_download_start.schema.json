@@ -23,6 +23,7 @@
       }
     },
     "success": {
+      "description": "Internal domain-service success shape retained for service-level fixture validation.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -45,9 +46,22 @@
         "queued_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
       }
     },
+    "public_success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ok", "flow_id", "job_id", "status", "queued_at"],
+      "properties": {
+        "contract_version": {"$ref": "../common.schema.json#/$defs/contract_version"},
+        "ok": {"const": true},
+        "flow_id": {"$ref": "../common.schema.json#/$defs/flow_id"},
+        "job_id": {"$ref": "../common.schema.json#/$defs/job_id"},
+        "status": {"type": "string", "const": "queued"},
+        "queued_at": {"$ref": "../common.schema.json#/$defs/timestamp"}
+      }
+    },
     "output": {
       "oneOf": [
-        {"$ref": "#/$defs/success"},
+        {"$ref": "#/$defs/public_success"},
         {"$ref": "../common.schema.json#/$defs/error_result"}
       ]
     }

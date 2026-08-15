@@ -22,13 +22,48 @@ FlowTask
   -> Archive
 ```
 
-- Search 和 creator browse 只产生候选 ResultSet；只有 Skill 实际展示后保存的 Presentation 才能被选择。
-- `resource_inspect` 产生/刷新 Resolution 与 Representation。显式 evidence 过期时必须重新 Inspect；Prepare/Start 不把旧 evidence 当当前事实。
+这些对象是**服务端业务事实**，不是要求 Agent 逐层搬运的公共协议对象。
+
+- Search 和 creator browse 产生候选 ResultSet；只有 Skill 实际展示后保存的 Presentation 才能被选择。
+- `resource_inspect` 产生/刷新完整 Resolution 与 Representation；Public Tool 只暴露会改变用户/Agent 决策的 availability、Representation 与失败事实。
 - `resource_download_prepare` 基于当前 Selection + fresh Representation 选择明确的 `scope / strategy / provider`，只准备计划，不下载。
 - 下载必须经过 `prepare -> 用户明确确认 -> start`。Start 再次读取当前 Resolution，确认 Representation 和 exact Provider route 没有漂移，然后创建 Job。
 - Router 只执行 Plan 指定的 `(provider_id, provider_version)`，失败不会静默换 generic Provider。
 - Job 是异步的；状态、取消、Outcome、Asset 和 Archive 由 MCP 服务端产生，模型不能伪造这些业务 ID 或执行结果。
-- `coverage` 与 Resolution 是服务端事实，不能替代 Skill 的 SemanticReview、Gap 或 StopDecision。检索语义边界见 [`docs/RETRIEVAL_AUTHORITY.md`](../../docs/RETRIEVAL_AUTHORITY.md)。
+- 检索结果是否“够好”、还缺什么、要不要继续搜，由 Skill/Main Agent 根据用户目标判断，不由 ResultSet 状态机替代。
+
+## 0055 Public MCP Surface Simplification
+
+OpenClaw 不再需要在相邻 Tool 调用之间搬运大批内部版本和摘要字段。完整状态仍由 Service/Store 保存并校验，Public MCP 只暴露下一步所需事实。
+
+当前主要调用形态：
+
+```text
+resource_search(flow_id, search_tasks, mode?, filters?, limit?)
+  -> compact candidates + failures
+
+resource_presentation_save(flow_id, displayed_resource_ids)
+  -> server binds current ResultSet
+
+resource_selection_save(flow_id, selected_positions)
+  -> server binds current Presentation/version
+
+resource_inspect(flow_id, resource_id)
+  -> compact availability + representations + failures
+
+resource_download_prepare(flow_id, options?)
+  -> server binds current Selection/Presentation/digest
+
+resource_download_start(flow_id, plan_id, confirmation_token)
+  -> Job
+
+resource_job_status(flow_id, job_id)
+  -> compact progress + ready assets + failures
+```
+
+`resource_flow_status` 现在是**紧凑恢复摘要**，不是全量状态转储。它不会重新发送完整 ResultSet、Resolution evidence、selection/plan digest 或 execution route；只有在上下文丢失、flow 状态不确定时才需要调用。
+
+普通 Search 默认 `limit=8`，候选摘要最多公开 600 字并用 `summary_complete` 标明是否完整；Creator Browse 保留请求范围内候选清单，但不回灌逐条长摘要。被移出 Agent-facing 输入/输出的内部字段并没有从数据库或一致性校验中删除。详细兼容边界见 [`contracts/compatibility.md`](contracts/compatibility.md)。
 
 ## 0037 获取简化
 
@@ -60,8 +95,8 @@ server.py
 ```text
 contracts/                  # 当前公共 Tool/Schema/平台/分类契约
 src/education_resource_mcp/
-├── server.py               # stdio MCP 入口
-├── service.py              # 领域服务（按 exact Provider 批次派发并收口 Job/Asset）
+├── server.py               # stdio MCP 入口 + thin public projection/binding
+├── service.py              # 领域服务（完整业务事实、校验、Job/Asset 收口）
 ├── storage.py              # SQLite 状态权威（Flow/Plan/Job/Asset/Library）
 ├── adapters/               # 平台 Search/Inspect/Provider Adapter
 ├── retrieval/              # 候选归一化、身份与去重
@@ -117,31 +152,19 @@ SQLite、Job 临时目录、Cookie/Token 和浏览器档案不得放入源码目
 
 优先跑与改动直接相关的定向测试；不要因为一个小改动默认重复执行整个仓库的耗时测试。
 
+0055 的无运行时依赖静态门禁：
+
 ```bash
 cd mcp/education-resources
-.venv/bin/python -m compileall -q src
-.venv/bin/python -m pytest -q tests/test_acquisition_simplification_0037.py
+python -m unittest tests.test_public_surface_simplification_0055
 ```
 
-需要验证更大范围时再显式运行：
+安装 MCP 运行依赖后，再按需运行 contract/stdio 定向测试。需要验证更大范围时才显式运行：
 
 ```bash
 EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh all
 EDUCATION_RESOURCE_MCP_PYTHON=.venv/bin/python ./scripts/run-tests.sh e2e
 ```
-
-需要真实网络验证生产代码本身（不经 MCP 子进程与业务链）时：
-
-```bash
-.venv/Scripts/python scripts/live_search_download_demo.py --query "恐龙科普 图文" --limit 10 --download-count 2
-```
-
-该脚本直接驱动 `GenericWebSearchProvider`（duckduckgo/baidu/bing 真实引擎）与
-`AcquisitionRouter` 的 generic 注册（`generic-direct` / `generic-web-materializer`），
-run 产物写入 `.openclaw-test/<run-dir>/`（已 gitignore）。它用于采集真实能力证据
-（0041/0029）和改动后的实弹自检；结果依赖真实引擎与网络，不作为回归门。
-
-0037 已在隔离 GitHub Actions 中实际通过：包安装、active package compileall、全部 JSON 契约解析以及 0037 定向测试。旧 capability-authority 专项测试需要按新业务行为重写或移出 Active 测试面，不能用它们强迫实现恢复已废弃状态链。
 
 离线 E2E/单测不能把平台标为 production-ready。真实 Agent、真实网络、合法会话和人工确认验收仍由 [0028 执行计划](../../.agent/plans/0028-real-openclaw-platform-e2e.md) 跟踪。
 
@@ -152,4 +175,4 @@ run 产物写入 `.openclaw-test/<run-dir>/`（已 gitignore）。它用于采�
 - [开发路线](../../docs/DEVELOPMENT_PLAN.md)
 - [检索权威边界](../../docs/RETRIEVAL_AUTHORITY.md)
 - [`contracts/` 契约总览](contracts/README.md)
-- [0037 获取状态链简化](../../.agent/plans/0037-acquisition-state-simplification.md)
+- [0055 Public MCP Surface Simplification](../../.agent/plans/archive/0055-public-mcp-surface-simplification.md)

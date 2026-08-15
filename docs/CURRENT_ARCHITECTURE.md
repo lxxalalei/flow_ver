@@ -1,6 +1,6 @@
 # 当前架构
 
-> 快照日期：2026-08-14  
+> 快照日期：2026-08-16  
 > 目标：只描述当前 active 运行事实。历史设计、已废弃 authority/readiness 链和被替代的并发方案请查 `.agent/plans/archive/`。
 
 ## 1. Active 边界
@@ -37,7 +37,7 @@ education-resources MCP
 Search Adapter / Inspector / exact Provider
 ```
 
-核心原则：**模型不以 MCP 状态机作为思考模型。** Skill 先判断用户真正需要什么资源；MCP 负责保存事实、校验状态并执行受控副作用。
+核心原则：**模型不以 MCP 状态机作为思考模型，也不充当数据库事务协调器。** Skill 先判断用户真正需要什么资源；MCP 负责保存事实、校验状态并执行受控副作用。
 
 ## 3. 用户主链
 
@@ -105,6 +105,39 @@ FlowTask
 - Plan 固定 exact Provider 路线；Start 重新核验当前资源事实。
 - Archive 只接受服务端 ready `asset_id`。
 
+### 4.1 Public MCP Surface
+
+完整业务状态继续由 `ResourceService / Store` 持有，但公共 MCP 不再一比一暴露这些内部对象，也不要求 Agent 在相邻 Tool 调用之间搬运数据库绑定字段。
+
+当前公共调用边界：
+
+```text
+resource_search
+  input:  flow_id + search_tasks + mode/filters/limit
+  server: bind current ResultSet for extend
+  output: compact candidates + failure summary
+
+resource_presentation_save
+  input:  flow_id + displayed_resource_ids
+  server: bind current ResultSet
+
+resource_selection_save
+  input:  flow_id + selected_positions
+  server: bind current Presentation/version
+
+resource_download_prepare
+  input:  flow_id + optional options
+  server: bind current Selection/Presentation/digest
+
+resource_download_start
+  input:  flow_id + plan_id + confirmation_token
+  server: revalidate stored Plan/Selection/Representation/provider route
+```
+
+因此 Agent 不再搬运 Search 的 `task_version/base_result_set_id`、Presentation 的 `result_set_id`、Selection 的 `presentation_id/presented_version`、Prepare 的 `selection_version/selection_digest` 等内部事务字段。服务端仍保留并使用这些事实进行原有一致性校验。
+
+`resource_flow_status` 是紧凑恢复摘要，不是完整 Flow dump；`resource_inspect` 不重复公开 inspector/version/fingerprint/evidence/digest；`resource_job_status` 只公开状态、进度、ready Asset handle 与失败摘要，不重放 execution route / Outcome 内部投影。
+
 ## 5. Search 与 Inspect
 
 ### Search
@@ -115,6 +148,8 @@ MCP Search 负责：
 - 返回真实 Candidate/ResultSet；
 - 多轮搜索时保持服务端 ResultSet 事实；
 - 去重和平台事实不由模型伪造。
+
+Public Search 默认每个 Adapter/query 的 `limit=8`，普通研究型任务优先使用小预算；需要明确广泛枚举时可以提高。Public candidate 保留本轮候选可达性，但摘要最多公开 600 字，并用 `summary_complete` 明确是否为 excerpt；完整 ResultSet 和原始摘要继续保存在服务端。Creator Browse 为枚举型任务，保持请求范围内条目可达，但不把逐条长摘要重新灌入 Agent 上下文。
 
 Skill/Main Agent 负责：
 
@@ -311,6 +346,8 @@ migration 1–7 保留旧库升级路径；migration 8 引入当前 acquisition 
 
 为主。历史 Capability Authority / Readiness / Eligibility / 多层 digest 不是当前下载执行链的业务状态权威。
 
+对 Agent 的恢复只使用紧凑 `resource_flow_status`；完整 ResultSet/Resolution/Job 内部事实继续留在 Store，不通过恢复调用反复重新注入模型上下文。
+
 ## 12. 安全与真实性边界
 
 必须保持：
@@ -347,8 +384,8 @@ migration 1–7 保留旧库升级路径；migration 8 引入当前 acquisition 
 
 工程主链已经从“继续搭架构”进入“真实验收与质量收口”：
 
-1. **0028 — Real OpenClaw / real platform E2E**：in_progress；真实用户验收是当前最重要的事实来源。
+1. **0028 — Real OpenClaw / real platform E2E**：in_progress；真实用户验收是当前最重要的事实来源，0055 公共表面瘦身后的中断/compaction 改善也在真实 OpenClaw 中继续验证。
 2. **0029 — Semantic retrieval benchmark / release gate**：pending；需要以 semantic-first Skill 的决策质量为核心，不复活旧状态机。
 3. **0041 — Web content extraction benchmark**：pending；独立评估网页正文抽取与结构保留。
 
-已完成的平台接入、Shuge、Anna Inspect、Skill 重构和下载调度历史均归档，不再作为顶层“进行中”任务。
+已完成的平台接入、Shuge、Anna Inspect、Skill 重构、下载调度和 Public MCP Surface Simplification 历史均归档，不再作为顶层“进行中”任务。

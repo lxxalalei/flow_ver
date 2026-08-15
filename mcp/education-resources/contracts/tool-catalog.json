@@ -15,7 +15,7 @@
     },
     {
       "name": "resource_flow_status",
-      "description": "Read the recoverable authoritative Flow control-plane snapshot without confirmation secrets.",
+      "description": "Read a compact recovery summary of the current Flow without replaying full candidates, resolutions, digests, or execution routes.",
       "side_effect": "none",
       "requires_flow_id": true,
       "idempotency_required": false,
@@ -33,7 +33,7 @@
     },
     {
       "name": "resource_search",
-      "description": "Search across multiple platforms in parallel, then persist an immutable ResultSet that is not yet a Presentation; requests may replace or extend a base ResultSet.",
+      "description": "Search one or more sources and return compact review candidates. Extend mode binds to the current server-owned ResultSet; clients do not carry ResultSet/task versions.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
@@ -42,7 +42,7 @@
     },
     {
       "name": "resource_presentation_save",
-      "description": "Persist the exact ordered subset actually displayed from one ResultSet, including an intentionally empty Presentation.",
+      "description": "Persist the exact ordered resources actually displayed from the current ResultSet; clients submit only displayed resource IDs.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
@@ -51,7 +51,7 @@
     },
     {
       "name": "resource_selection_save",
-      "description": "Save explicit user choices by positions from the current authoritative Presentation.",
+      "description": "Save explicit user choices by positions from the current server-owned Presentation; clients do not carry Presentation versions.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
@@ -60,7 +60,7 @@
     },
     {
       "name": "resource_download_prepare",
-      "description": "Create an expiring Plan from the current Selection and inspected Representation, binding only the exact strategy and Provider the user is asked to confirm.",
+      "description": "Create an expiring Plan from the current Selection and inspected Representations. Selection/Presentation bindings are resolved server-side.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
@@ -78,7 +78,7 @@
     },
     {
       "name": "resource_job_status",
-      "description": "Read Job progress, per-resource execution routes, outcomes, assets, and failures.",
+      "description": "Read compact Job status, progress, ready asset handles, and failure summaries without execution-route internals.",
       "side_effect": "none",
       "requires_flow_id": true,
       "idempotency_required": false,
@@ -114,7 +114,7 @@
     },
     {
       "name": "resource_browse_creator",
-      "description": "Browse a creator's content list when the platform supports it. creator_id is the platform-native handle (douyin sec_uid or /user/ URL), taken from search/inspect candidate metadata creator_sec_uid.",
+      "description": "Browse a creator content list using a platform-native creator_id, and return compact candidates. Use resource.creator_id from Inspect when available.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
@@ -123,7 +123,7 @@
     },
     {
       "name": "resource_inspect",
-      "description": "Inspect one existing Flow resource through a server-selected bounded inspection profile without accepting a URL or local path.",
+      "description": "Inspect one existing Flow resource and expose decision-relevant availability/representation facts without internal evidence fingerprints or inspector machinery.",
       "side_effect": "state_write",
       "requires_flow_id": true,
       "idempotency_required": true,
