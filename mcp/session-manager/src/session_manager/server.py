@@ -8,11 +8,12 @@ from typing import Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
 
+from .browser_capture import BrowserUnavailableError, CdpProtocolError, fetch_browser_cookies
 from .store import SessionError, SessionStore
 
 
 CONTRACT_VERSION = "1.0.0"
-SERVICE_VERSION = "0.4.0"
+SERVICE_VERSION = "0.4.1"
 
 
 def _ok(data: dict[str, Any]) -> dict[str, Any]:
@@ -42,6 +43,10 @@ def _invoke(
         return _ok(function())
     except SessionError as exc:
         return _failure(exc.code, str(exc), **identifiers)
+    except BrowserUnavailableError as exc:
+        return _failure("BROWSER_UNAVAILABLE", str(exc), retriable=True, **identifiers)
+    except CdpProtocolError as exc:
+        return _failure("BROWSER_CDP_ERROR", str(exc), **identifiers)
     except ValueError as exc:
         return _failure("INVALID_ARGUMENT", str(exc), **identifiers)
     except Exception:  # pragma: no cover - defensive protocol boundary
@@ -72,9 +77,14 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
             "First call resource_session_status or resource_session_login_guide. "
             "When login is required, open login_url with the host browser and ask "
             "the user to log in themselves. Wait for explicit confirmation before "
-            "capturing browser cookies and same-origin storage. Pass the broad "
-            "browser capture directly to resource_session_save; the MCP performs "
-            "authoritative platform extraction and minimal persistence. Then check status. "
+            "capturing. For cookie platforms prefer resource_session_capture_browser: "
+            "it reads the full browser cookie store server-side (including httpOnly "
+            "cookies) and never routes credential bytes through the conversation. "
+            "Only if that tool reports BROWSER_UNAVAILABLE and the browser cannot be "
+            "started, fall back to a browser-context cookie read passed to "
+            "resource_session_save; never use document.cookie, which cannot see "
+            "httpOnly login cookies. Storage platforms still capture same-origin "
+            "storage through resource_session_save. Then check status. "
             "Never request, accept, or autofill accounts, passwords, CAPTCHA, SMS codes, "
             "or MFA. If the user voluntarily supplies a legally obtained canonical Cookie "
             "or Token and explicitly names the supported platform, purpose, and permission "
@@ -111,6 +121,30 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
         return _invoke(
             lambda: session_store.login_guide(platform), platform=platform
         )
+
+    @server.tool(structured_output=True)
+    def resource_session_capture_browser(
+        contract_version: Literal["1.0.0"],
+        platform: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Capture cookies server-side from the managed browser and save them.
+
+        Reads the OpenClaw-managed browser's full cookie store over the local
+        CDP endpoint (``Storage.getCookies``, includes httpOnly cookies) and
+        hands the broad capture straight to the store.  Credential values never
+        enter the conversation; the response only carries counts.  Call it after
+        the user confirmed login in the opened browser.  ``BROWSER_UNAVAILABLE``
+        means the managed browser is not running: open it and retry.
+        """
+        def capture() -> dict[str, Any]:
+            cookies = fetch_browser_cookies()
+            result = session_store.save(
+                platform, {"cookies": cookies}, idempotency_key=idempotency_key
+            )
+            return {**result, "captured_cookie_count": len(cookies)}
+
+        return _invoke(capture, platform=platform)
 
     @server.tool(structured_output=True)
     def resource_session_save(

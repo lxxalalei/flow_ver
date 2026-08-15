@@ -19,6 +19,7 @@ CONTRACTS_ROOT = SERVICE_ROOT / "contracts" / "v1"
 EXPECTED_TOOLS = {
     "resource_session_status",
     "resource_session_login_guide",
+    "resource_session_capture_browser",
     "resource_session_save",
     "resource_session_delete",
 }
@@ -77,7 +78,7 @@ class McpStdioTests(unittest.TestCase):
                     async with ClientSession(read_stream, write_stream) as session:
                         initialized = await session.initialize()
                         self.assertEqual(initialized.server_info.name, "session-manager")
-                        self.assertEqual(initialized.server_info.version, "0.4.0")
+                        self.assertEqual(initialized.server_info.version, "0.4.1")
                         self.assertIn(
                             "explicitly names the supported platform",
                             initialized.instructions or "",

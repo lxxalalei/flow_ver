@@ -24,6 +24,7 @@ JSONSCHEMA_AVAILABLE = importlib.util.find_spec("jsonschema") is not None
 EXPECTED_TOOLS = {
     "resource_session_status",
     "resource_session_login_guide",
+    "resource_session_capture_browser",
     "resource_session_save",
     "resource_session_delete",
 }
@@ -39,6 +40,8 @@ EXPECTED_ERROR_CODES = {
     "IDEMPOTENCY_STALE",
     "UNSAFE_DATA_PATH",
     "SECURE_STORAGE_UNAVAILABLE",
+    "BROWSER_UNAVAILABLE",
+    "BROWSER_CDP_ERROR",
     "INTERNAL_ERROR",
 }
 
@@ -75,7 +78,7 @@ class ContractCatalogTests(unittest.TestCase):
         catalog = json.loads(
             (CONTRACTS_ROOT / "tool-catalog.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(catalog["catalog_version"], "1.1.0")
+        self.assertEqual(catalog["catalog_version"], "1.2.0")
         self.assertEqual(catalog["contract_version"], "1.0.0")
         self.assertEqual(catalog["server_id"], "session-manager")
         self.assertEqual({tool["name"] for tool in catalog["tools"]}, EXPECTED_TOOLS)

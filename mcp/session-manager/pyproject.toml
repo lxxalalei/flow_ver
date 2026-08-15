@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openclaw-session-manager"
-version = "0.4.0"
+version = "0.4.1"
 description = "Standalone OpenClaw MCP for guided browser login and secure local session storage"
 readme = "README.md"
 requires-python = ">=3.12"

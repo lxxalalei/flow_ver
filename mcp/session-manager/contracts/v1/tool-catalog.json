@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://quanxiao.example/contracts/session-manager/v1/tool-catalog.json",
-  "catalog_version": "1.1.0",
+  "catalog_version": "1.2.0",
   "contract_version": "1.0.0",
   "server_id": "session-manager",
   "tools": [
@@ -20,6 +20,14 @@
       "idempotency_supported": false,
       "input_schema": "schemas/tools/resource_session_login_guide.schema.json#/$defs/input",
       "output_schema": "schemas/tools/resource_session_login_guide.schema.json#/$defs/output"
+    },
+    {
+      "name": "resource_session_capture_browser",
+      "description": "Read the managed browser's full cookie store over the local CDP endpoint (httpOnly included), extract platform credentials server-side, and persist them without exposing values to the caller.",
+      "side_effect": "local_state_write",
+      "idempotency_supported": true,
+      "input_schema": "schemas/tools/resource_session_capture_browser.schema.json#/$defs/input",
+      "output_schema": "schemas/tools/resource_session_capture_browser.schema.json#/$defs/output"
     },
     {
       "name": "resource_session_save",

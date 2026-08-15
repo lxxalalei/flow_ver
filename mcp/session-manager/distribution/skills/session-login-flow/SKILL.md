@@ -11,7 +11,8 @@ persistence. The MCP cannot operate the browser; this Skill coordinates the host
 ## Required capabilities
 
 - Status: `resource_session_status`
-- Login/capture/save: status + `resource_session_login_guide` + `resource_session_save`
+- Login/capture/save: status + `resource_session_login_guide` + `resource_session_capture_browser`
+  (cookie platforms) or `resource_session_save` (storage capture / direct import)
 - Re-login/delete: also `resource_session_delete`
 - Browser: open URLs, read the controlled browser context's cookies, read the active official
   origin's `localStorage` and `sessionStorage`, and report the active URL/origin
@@ -60,13 +61,22 @@ Only continue after the explicit confirmation.
 1. Verify the active tab is on the expected platform. Match the normalized hostname by DNS label
    boundary against the login host or returned `cookie_domains`; never accept a raw suffix such as
    `evilsmartedu.cn`. If unrelated, reopen the official URL, require a new “已登录”, and stop.
-2. Read **all cookies the controlled browser cookie capability returns** for its current browser
-   context. Do not prefilter names or domains in the Agent. Browser-specific metadata may remain in
-   the submitted Cookie objects; the MCP removes it.
+2. **Cookie platforms: call `resource_session_capture_browser` once.** It reads the managed
+   browser's full cookie store server-side over the local CDP endpoint — including the httpOnly
+   login cookies (for example Douyin's `sessionid`) that any page-context read misses — filters
+   junk, and saves in one call. Credential values never pass through the conversation, so large
+   captures cannot be truncated by model output limits. Generate a unique `idempotency_key`.
+   - `BROWSER_UNAVAILABLE` is retriable: open/start the managed browser and call it again.
+   - `SESSION_EMPTY` after capture: the login likely did not finish; one clean re-login, then
+     one fresh capture.
+   - Only if the managed browser's CDP endpoint is genuinely unavailable, fall back to reading
+     **all cookies the controlled browser cookie capability returns** (never `document.cookie`,
+     which cannot see httpOnly cookies) and submit them via `resource_session_save`.
 3. If `capture_method=browser_storage`, also read every key/value currently visible in the active
    official page's `localStorage` and `sessionStorage`. Record `location.origin` as
    `storage_origin`. Do not parse SmartEdu dynamic keys or JSON in the Skill.
-4. Send one immediate `resource_session_save` call:
+4. For the storage capture (or the cookie fallback), send one immediate
+   `resource_session_save` call:
 
    Cookie flow:
 
@@ -111,9 +121,12 @@ looping indefinitely.
 
 ## Credential boundary and secure storage
 
-Raw browser values currently pass through Agent/MCP tool arguments. Keep them out of narration and
-all other calls, but do not claim model/tool-channel isolation. Stronger isolation requires a future
-host Plugin that returns an opaque `capture_id`.
+`resource_session_capture_browser` keeps cookie-platform credentials inside the MCP process: the
+browser store is read over the local CDP endpoint and saved server-side, so values do not pass
+through Agent/MCP tool arguments and cannot be truncated by model output limits. Only the storage
+capture and the cookie fallback still relay raw browser values through tool arguments; keep them
+out of narration and all other calls, and do not claim model/tool-channel isolation for those
+paths.
 
 At rest, the MCP owns protection. A natively running Windows MCP uses current-user DPAPI; a WSL MCP
 uses the POSIX backend even when OpenClaw itself runs on Windows. Never downgrade to plaintext when

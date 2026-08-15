@@ -432,6 +432,39 @@ class WindowsDpapiTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, "SESSION_PAYLOAD_TOO_LARGE")
             self.assertFalse((store.sessions_dir / "bilibili.json").exists())
 
+    def test_empty_or_malformed_cookie_names_are_discarded_not_fatal(self) -> None:
+        # 真实事故样本：CDP Storage.getCookies 会返回 name 为空的垃圾条目；
+        # 它们必须被丢弃计数，而不是让整次保存 SESSION_PAYLOAD_INVALID。
+        with _home_temp_directory() as temp_dir:
+            store = SessionStore(Path(temp_dir) / "data")
+            result = store.save(
+                "bilibili",
+                {
+                    "cookies": [
+                        _cookie(name="SESSDATA"),
+                        _cookie(name="", value="junk"),
+                        _cookie(name="bad name!", value="junk"),
+                    ]
+                },
+            )
+
+            self.assertEqual(result["stored_credential_count"], 1)
+            self.assertEqual(result["discarded_credential_count"], 2)
+            session_data = store.get_session_data("bilibili")
+            assert session_data is not None
+            names = [cookie["name"] for cookie in session_data["cookies"]]
+            self.assertEqual(names, ["SESSDATA"])
+
+    def test_save_with_only_nameless_cookies_still_fails_empty(self) -> None:
+        with _home_temp_directory() as temp_dir:
+            store = SessionStore(Path(temp_dir) / "data")
+
+            with self.assertRaises(SessionError) as caught:
+                store.save("bilibili", {"cookies": [_cookie(name="")]})
+
+            self.assertEqual(caught.exception.code, "SESSION_EMPTY")
+            self.assertFalse((store.sessions_dir / "bilibili.json").exists())
+
 
 class CookieDomainFilteringTests(unittest.TestCase):
     def test_only_exact_or_subdomain_cookies_are_persisted(self) -> None:

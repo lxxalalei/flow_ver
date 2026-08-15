@@ -4,8 +4,15 @@
 
 ```text
 status → guide → open official login URL → ask for “已登录” → END TURN
-user says “已登录” → verify official tab → broad browser capture → immediate save → status/probe
+user says “已登录” → verify official tab → capture (see below) → immediate save → status/probe
 ```
+
+For cookie platforms the capture step is one `resource_session_capture_browser` call: the MCP reads
+the managed browser's full cookie store over the local CDP endpoint (httpOnly included) and saves it
+server-side, so credential values never transit the conversation and cannot be truncated by model
+output limits. The relayed broad capture below remains for storage platforms and as the cookie
+fallback when the managed browser's CDP endpoint is genuinely unavailable (then use the browser
+cookie capability — never `document.cookie`, which cannot see httpOnly login cookies).
 
 Browser observations never replace the explicit confirmation. Each platform in a multi-platform run
 has its own confirmation gate.

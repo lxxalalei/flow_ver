@@ -855,14 +855,15 @@ class SessionStore:
                 )
             name = cookie.get("name")
             value = cookie.get("value")
+            # 空名/非法名 cookie 是浏览器捕获序列化的常见垃圾（真实样本：CDP
+            # Storage.getCookies 会返回 name 为空的条目）。它们不是凭据，
+            # 按越域条目同样丢弃计数，而不是让整次保存失败。
             if not isinstance(name, str) or not name or len(name) > MAX_COOKIE_NAME:
-                raise SessionError(
-                    "SESSION_PAYLOAD_INVALID", f"cookies[{index}].name 非法"
-                )
+                discarded += 1
+                continue
             if not _COOKIE_NAME_RE.fullmatch(name):
-                raise SessionError(
-                    "SESSION_PAYLOAD_INVALID", f"cookies[{index}].name 含非法字符"
-                )
+                discarded += 1
+                continue
             if not isinstance(value, str) or len(value) > MAX_COOKIE_VALUE:
                 raise SessionError(
                     "SESSION_PAYLOAD_INVALID", f"cookies[{index}].value 非法或过长"
