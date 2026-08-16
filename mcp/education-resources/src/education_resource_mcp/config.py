@@ -10,6 +10,7 @@ from pathlib import Path
 DEFAULT_DATA_DIR = (
     Path.home() / ".local" / "share" / "quanxiao" / "education-resource-mcp-data"
 )
+DEFAULT_LIBRARY_DIR = Path.home() / "Documents" / "学习资料库"
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -39,7 +40,7 @@ class Settings:
 
     @property
     def library_root(self) -> Path:
-        return (self.library_dir or (self.data_dir / "学习资料库")).expanduser().resolve()
+        return (self.library_dir or DEFAULT_LIBRARY_DIR).expanduser().resolve()
 
     @classmethod
     def from_env(cls) -> "Settings":

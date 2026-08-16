@@ -137,16 +137,22 @@ Provider 失败不会被伪装成成功；需要登录时返回真实 `AUTH_REQU
 $EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/
 ```
 
-归档后移动到：
+归档后移动到用户系统自带的“文档/Documents”目录下：
 
 ```text
-$EDUCATION_RESOURCE_MCP_LIBRARY_DIR
+~/Documents/学习资料库/
 ```
 
-如果未配置，默认：
+Windows 通常对应：
 
 ```text
-$EDUCATION_RESOURCE_MCP_DATA_DIR/学习资料库/
+C:\Users\<用户名>\Documents\学习资料库\
+```
+
+如需自定义，可设置：
+
+```text
+EDUCATION_RESOURCE_MCP_LIBRARY_DIR
 ```
 
 目录结构：
@@ -188,6 +194,12 @@ EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR
 
 ```text
 ~/.local/share/quanxiao/education-resource-mcp-data
+```
+
+默认归档目录：
+
+```text
+~/Documents/学习资料库
 ```
 
 ## 安装与启动

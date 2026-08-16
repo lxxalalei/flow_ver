@@ -155,10 +155,16 @@ resource_archive(
 
 Main Agent 负责根据资源语义决定领域和主题；MCP 只把该 Job 已成功下载的真实文件移动到资料库。
 
-默认资料库根目录：
+默认资料库根目录使用当前系统用户的“文档/Documents”目录：
 
 ```text
-$EDUCATION_RESOURCE_MCP_DATA_DIR/学习资料库/
+~/Documents/学习资料库/
+```
+
+Windows 通常对应：
+
+```text
+C:\Users\<用户名>\Documents\学习资料库\
 ```
 
 可通过：
