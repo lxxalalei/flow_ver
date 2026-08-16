@@ -36,11 +36,16 @@ class ZhihuInspector(_PlatformWebInspector):
         if not any(item.get("kind") == "webpage" for item in representations):
             metadata = payload["resolved_resource"].get("metadata", {})
             container = "article" if metadata.get("article_id") else "webpage"
+            # For Zhihu the page IS the resource (answer/article text), so the
+            # webpage is the primary representation and can be materialized
+            # into an archived page via the web materializer (0057 M0).
             self._append_representation(
                 resource,
                 payload,
                 kind="webpage",
                 container=container,
+                role="primary",
+                scope="primary_resource",
             )
         return payload
 

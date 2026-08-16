@@ -138,6 +138,19 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
         frozenset({"html"}), frozenset(),
     ),
+    # Zhihu answers/articles: the page itself is the resource, so a Zhihu
+    # webpage materializes into an archived page like generic web pages do
+    # (0057 M0).
+    ProviderSpec(
+        "zhihu", "primary_resource", "webpage", "primary",
+        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
+        frozenset({"article", "webpage", "html"}), frozenset(),
+    ),
+    ProviderSpec(
+        "zhihu", "landing_page", "webpage", "landing",
+        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
+        frozenset({"article", "webpage", "html"}), frozenset(),
+    ),
 )
 
 

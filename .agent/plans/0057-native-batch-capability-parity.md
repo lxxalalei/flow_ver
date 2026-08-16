@@ -47,22 +47,29 @@ C:\Users\admin\.claude\skills\mediacrawler-platforms\MediaCrawler\media_platform
   - `resource_batch_collect`：platform + mode（`time_range_search` / `creator_full` / `catalog_expand`）+ 模式参数；作为 detached job 执行；返回 `batch_id` + 状态。
   - `resource_batch_read`：batch_id + offset/limit 分页读结果文件；仍不把全量灌进对话。
 - 新增 batch worker（复用 jobs/ 目录布局、job.json 状态、JobSpawner、cancel.flag）。
-- adapters 增强：
-  - bilibili：时间范围全量搜索（逐日分页，参考 pubtime_begin/end）、UP 主资料（wbi 签名复用现有 wbi.py）、画质选择接入 `preferred_container`；
-  - douyin：`publish_time` 过滤参数、图集下载（现有 DouyinDownloader 扩展 images 类型）、创作者资料并入 browse_creator 返回；
-  - zhihu：搜索过滤参数（时间/类型/排序）、回答/文章详情富化（inspect_zhihu 扩展）；
-  - smartedu：分类 tabs 搜索参数、同步课堂目录展开（fork smartedu client 参考移植）、token 获取与现有 sessions 对齐。
-- search task schema 增加可选过滤字段（typed，进 tools/list schema——沿用 1ee8eda 的教训：结构必须可见、错误必须响亮）。
+- adapters 增强（按 2026-08-16 范围收口）：
+  - **zhihu：planner spec 允许 zhihu 文章/回答路由到 generic-web-materializer（网页物化即正文下载，快赢）**；
+  - smartedu：分类 tabs 搜索参数、同步课堂目录展开（fork smartedu client 参考移植）、token 获取与现有 sessions 对齐；
+  - douyin：图集下载（DouyinDownloader 扩展 images 类型）、创作者资料并入 browse_creator 返回；
+  - douyin/bilibili 的 search_creator 分页循环接入 cancel_event（批量取消检查点）。
+- 明确不做（用户决策 2026-08-16）：bili/dy 搜索排序与发布时间过滤（爬虫向，本 MCP 目标是资料收集）；bili 画质维持现状（已请求 DASH 最高含 4K、取最高带宽流，登录态下即 1080P+）。
+- 失败分类自诊断（横切）：错误码区分 RISK_CONTROL / AUTH_REQUIRED / PARAM_INVALID / PLATFORM_CHANGED，消息自带下一步建议。
 - 文档：README 工具清单、SKILL.md 增补批量模式使用边界。
+
+## 上下文预算硬上限（invariants，构造保证）
+
+- `resource_batch_collect` 返回体 ≤ 2KB（路径/条数/头部样本）。
+- `resource_batch_read` 单次默认 ≤ 20 条、上限 50 条。
+- 错误消息 ≤ 500 字符，超出的诊断信息落 worker.log / 文件，不进对话。
 
 ## Milestones（各自独立可交付）
 
-- M1 批量基座：batch job 目录/状态/worker + `resource_batch_collect` / `resource_batch_read` 两工具 + 定向测试（fake provider 全链路）。
-- M2 bilibili：时间范围全量、UP 资料、画质选择（真实平台验收）。
-- M3 douyin：publish_time、图集下载、创作者资料。
-- M4 zhihu：过滤参数、详情富化。
-- M5 smartedu：tabs、目录展开、token 对齐。
-- M6 退役：skill 从 Claude skills 目录移除（用户确认后）、文档收口。
+- M0 zhihu 物化路由（快赢：planner spec + 测试）。
+- M1 批量基座：batch job 目录/状态/worker + `resource_batch_collect` / `resource_batch_read` 两工具 + creator_full 模式 + 定向测试（fake provider 全链路）。
+- M2 smartedu：tabs、目录展开、token 对齐。
+- M3 douyin：图集下载、创作者资料。
+- M4 批量模式扩展：time_range_search / catalog_expand 接入基座（翻页全量）。
+- M5 退役：skill 从 Claude skills 目录移除（用户确认后）、文档收口。
 
 ## Acceptance criteria
 
