@@ -89,8 +89,44 @@ C:\Users\admin\.claude\skills\mediacrawler-platforms\MediaCrawler\media_platform
 
 ## Milestone checkpoint
 
-待实现后填写。
+```text
+Original goal still unchanged?: yes（skill 仅参考，能力原生化，完成后无关联）
+Non-goals still respected?: yes（无 MediaCrawler 运行时依赖；无代理池/多存储格式/Playwright 登录）
+Business invariants still true?: yes（批量 O(1) 摘要 + 分页读；exact 路由/AUTH_REQUIRED 不变；复用 0056 job 语义）
+New abstraction introduced?: no（batch 是 0056 job 的一种 kind，复用目录/spawner/恢复/cancel）
+New source of truth introduced?: no（results.jsonl 即批量结果事实）
+Fallback added?: no（失败如实 NETWORK_BLOCKED/FEATURE_NOT_SUPPORTED）
+Context budget respected?: batch_collect 返回 ~100 字符；batch_read 默认 20 条；工具定义 9 个共 6.3K 字符
+Actual user flow affected?: 新增批量模式 + zhihu 可物化下载；既有工具签名不变
+Scope drift detected?: no（排序/时间过滤按用户决策砍除）
+```
 
-## 实施结果 / 验证 / 结果
+## 实施结果
 
-待实现后填写。
+### M0 zhihu 物化路由（ca1d3a5）
+
+- `inspect_zhihu.py`：网页表示升格为 `primary/primary_resource`（对知乎，页面即资源本体）。
+- `planner.py`：新增 zhihu `primary_resource`/`landing_page` webpage → `generic-web-materializer` 两条 spec（containers: article/webpage/html）。
+
+### M1 批量基座（09b1a93）
+
+- `batch.py`：`run_batch_collect(directory, service=None)`——creator_full 模式，全量写 `results.jsonl`，job.json 终态含文件清单与条数；DOMAIN 错误/崩溃如实落 failures，绝不停留 running。
+- `job_worker.py`：按 request.json 的 `kind` 分派（`batch_collect` → batch runner；缺省 → 原下载循环）。
+- `service.py`：`batch_collect`（mode 白名单/creator_id 必填/max_items 1..1000 响亮校验）+ `batch_read`（分页 ≤50、拒绝非批量任务）。
+- `server.py`：`resource_batch_collect` / `resource_batch_read` 两工具（工具面 7→9），instructions 增补批量引导。
+- 取消链路：douyin/bilibili `search_creator` 分页循环接入 `cancel_event`；`MultiPlatformSearchProvider.search_creator` 透传。
+- 文档：README 9 工具 + 批量两节；SKILL.md §8 创作者内容增补批量口径。
+
+## 验证
+
+| Validation | Result | What it proves | What it does NOT prove |
+| --- | --- | --- | --- |
+| `test_zhihu_materialize_routing.py` 3 项 | 全过 | zhihu primary webpage 精确路由到 materializer；检查器追加的表示 scope/role/container 正确 | 真实知乎页面物化质量（登录墙） |
+| `test_batch_base.py` 4 项 | 全过 | 全链路（collect→run→status→分页读 complete 语义）；响亮参数校验；下载任务被 batch_read 拒绝；无 creator 能力平台如实 FEATURE_NOT_SUPPORTED | 跨进程 spawn（由 0057 复用 0056 的 spawn 机制，0056 已测） |
+| 全量 pytest | 51 失败 = 既有基线，零新回归 | 未破坏既有行为 | — |
+| stdio 真实 MCP | 9 工具；batch_collect 空参返回 INVALID_ARGUMENT | 公共表面与 schema 校验端到端有效 | — |
+| 真实平台冒烟（bilibili UP 434377496，max_items=30） | 无 Cookie：0.3s 如实 `NETWORK_BLOCKED/HTTP 412`；挂 session-manager 库：**0.8s succeeded 30 条**，标题/作者/URL 落 results.jsonl | 真实 API 链路 + 共享登录态直接复用 + 错误分类诚实 | douyin 真实枚举；数百条长跑的中断/恢复 |
+
+## 结果
+
+M0/M1 完成：zhihu 可物化下载、批量基座上线（9 工具）、真实 B站枚举冒烟通过且复用同一登录库。后续里程碑（M2 smartedu、M3 douyin 图集/资料、M4 time_range/catalog_expand）按计划推进；部署（gateway stop → sync → restart）待用户确认时机。
