@@ -19,6 +19,7 @@
 - [0052-zjer-course-video-acquisition.md](../0052-zjer-course-video-acquisition.md) — in_progress，之江汇 experimental 课程视频获取链
 - [0054-douyin-creator-id-exposure.md](../0054-douyin-creator-id-exposure.md) — in_progress，抖音 creator_id 来源与 browse_creator 验收
 - [0056-download-job-subprocess-durability.md](../0056-download-job-subprocess-durability.md) — in_progress，下载 Job 子进程化 + 文件状态持久
+- [0057-native-batch-capability-parity.md](../0057-native-batch-capability-parity.md) — in_progress，四平台批量能力原生化（skill 仅参考，完成后退役）
 
 ## 归档索引
 
