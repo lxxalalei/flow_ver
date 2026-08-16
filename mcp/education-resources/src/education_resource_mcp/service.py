@@ -105,6 +105,9 @@ def _normalize_search_tasks(
                 "INVALID_ARGUMENT",
                 f"search_tasks 项缺少 platform；{_SEARCH_TASK_EXAMPLE}",
             )
+        # adapter registry ids use hyphens (annas-archive); callers keep
+        # guessing underscores (feedback #1) — normalize instead of failing.
+        platform = platform.replace("_", "-")
         raw_queries = task.get("queries")
         if not isinstance(raw_queries, list) or not raw_queries:
             raise DomainError(
@@ -224,9 +227,11 @@ class ResourceService:
         self.planner = AcquisitionPlanner(self.acquisition_router)
         self.job_runner = job_runner or JobSpawner(max_workers=self.settings.max_workers)
         self._resources: dict[str, dict[str, Any]] = {}
+        self._resource_cache = self.settings.data_dir / "resources.jsonl"
         self._lock = threading.RLock()
         if recover_jobs:
             self._recover_interrupted_jobs()
+            self._load_resource_cache()
 
     def shutdown(self) -> None:
         self.job_runner.shutdown(wait=False)
@@ -310,8 +315,48 @@ class ResourceService:
             resource["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
             with self._lock:
                 self._resources[resource_id] = resource
+            self._append_resource_cache(resource)
             candidates.append(self._public_resource(resource, include_summary=include_summary))
         return candidates
+
+    _RESOURCE_CACHE_LIMIT = 1000
+
+    def _load_resource_cache(self) -> None:
+        """Reload recent search handles so an MCP restart doesn't strand
+        in-flight conversations (feedback #7); a bounded cache, not state."""
+
+        try:
+            lines = self._resource_cache.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        for line in lines[-self._RESOURCE_CACHE_LIMIT :]:
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict) and data.get("resource_id"):
+                self._resources.setdefault(str(data["resource_id"]), data)
+
+    def _append_resource_cache(self, resource: dict[str, Any]) -> None:
+        try:
+            if self._resource_cache.exists():
+                lines = self._resource_cache.read_text(encoding="utf-8").splitlines()
+                if len(lines) >= self._RESOURCE_CACHE_LIMIT * 2:
+                    with self._lock:
+                        recent = list(self._resources.values())[
+                            -self._RESOURCE_CACHE_LIMIT :
+                        ]
+                    self._resource_cache.write_text(
+                        "\n".join(
+                            json.dumps(item, ensure_ascii=False) for item in recent
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+            with self._resource_cache.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(resource, ensure_ascii=False) + "\n")
+        except OSError:
+            LOGGER.warning("could not persist resource cache", exc_info=True)
 
     @staticmethod
     def _public_resource(
@@ -332,6 +377,13 @@ class ResourceService:
         for field in ("author", "language", "published_at", "duration_seconds"):
             if metadata.get(field) not in (None, ""):
                 result[field] = metadata[field]
+        creator_id = (
+            metadata.get("creator_sec_uid")
+            or metadata.get("creator_id")
+            or metadata.get("creator_mid")
+        )
+        if creator_id not in (None, ""):
+            result["creator_id"] = str(creator_id)
         return result
 
     @staticmethod
@@ -391,7 +443,11 @@ class ResourceService:
             if resolved.get(field) not in (None, ""):
                 resource[field] = resolved[field]
         metadata = resolved.get("metadata") or {}
-        creator_id = metadata.get("creator_sec_uid") or metadata.get("creator_id")
+        creator_id = (
+            metadata.get("creator_sec_uid")
+            or metadata.get("creator_id")
+            or metadata.get("creator_mid")
+        )
         if creator_id:
             resource["creator_id"] = str(creator_id)
         for raw in resolved.get("representations") or []:
@@ -744,6 +800,11 @@ class ResourceService:
                 "size_bytes": artifact.byte_size,
                 "role": artifact.role,
                 "primary": artifact.primary,
+                # provenance for the archive manifest (feedback #5)
+                "platform": resource.get("platform"),
+                "source_url": resource.get("source_url"),
+                "title": resource.get("title"),
+                "author": (resource.get("metadata") or {}).get("author"),
             }
             for artifact in acquisition.bundle.artifacts
             if artifact.path.is_file()

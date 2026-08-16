@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from importlib.resources import files as package_files
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
@@ -186,6 +187,29 @@ def archive_downloaded_files(
             }
         )
         archived.append(archived_item)
+
+    if archived:
+        # provenance sidecar: one JSON line per archived file, no database
+        record = {
+            "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "domain_id": domain_id,
+            "topic": topic,
+            "files": [
+                {
+                    key: item.get(key)
+                    for key in (
+                        "resource_id", "platform", "source_url", "title", "author",
+                        "filename", "path", "media_type", "size_bytes",
+                    )
+                }
+                for item in archived
+            ],
+        }
+        try:
+            with (root / "manifest.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError:
+            pass  # archival itself succeeded; provenance is best-effort
 
     return archived, failures
 

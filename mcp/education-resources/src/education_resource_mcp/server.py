@@ -15,7 +15,11 @@ class SearchTask(BaseModel):
     """One platform plus its search phrases for resource_search."""
 
     platform: str = Field(
-        description="平台 id，如 bilibili、douyin、smartedu、ximalaya、generic"
+        description=(
+            "平台 id：bilibili、douyin、zhihu、smartedu、ximalaya、cctv、yixi、"
+            "kepu、baiduwenku、runoob、nlc、open163、annas-archive、weibo、"
+            "wechat、shuge、zjer、generic（下划线会自动归一为连字符）"
+        )
     )
     queries: list[str] = Field(
         min_length=1,

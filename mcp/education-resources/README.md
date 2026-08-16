@@ -142,7 +142,9 @@ $EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/<job_id>/
 - worker 已死且未到终态的 Job 会被如实标记为 `interrupted`（重新发起下载即可，不支持断点续传）；
 - 终态 Job 的 `resource_archive` 跨重启依然可用。
 
-`resource_id` 仍不做进程重启恢复，重启后重新搜索。不恢复 SQLite/Flow 状态机；0056 只把 Job 状态落在上述文件里。
+`resource_id` 句柄会以 `resources.jsonl` 缓存最近 1000 条并在启动时载回——MCP 重启后正在进行的会话仍可继续 inspect/download，不必重搜。不恢复 SQLite/Flow 状态机；0056 只把 Job 状态落在上述文件里。
+
+归档会在资料库根目录追加 `manifest.jsonl`（每次归档一行：来源平台/URL/标题/作者/时间/最终路径），作为零数据库的溯源清单。
 
 ## 下载路由
 

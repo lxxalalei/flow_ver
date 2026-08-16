@@ -47,6 +47,7 @@ def make_resource(
     summary: str | None = None,
     author: str | None = None,
     creator_sec_uid: str | None = None,
+    creator_mid: str | None = None,
     published_at: str | None = None,
     language: str | None = None,
     download_feasibility: str | None = None,
@@ -57,6 +58,8 @@ def make_resource(
         metadata["author"] = author
     if creator_sec_uid:
         metadata["creator_sec_uid"] = creator_sec_uid
+    if creator_mid:
+        metadata["creator_mid"] = creator_mid
     if published_at is not None:
         metadata["published_at"] = published_at
     if language is not None:

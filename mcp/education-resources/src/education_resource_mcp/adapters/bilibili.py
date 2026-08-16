@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -60,6 +61,33 @@ class BilibiliSearchAdapter:
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
+        # nav probe state (login freshness + wbi key cache)
+        self._nav_logged_in: bool | None = None
+        self._wbi_cache: tuple[float, str, str] | None = None
+
+    _WBI_CACHE_SECONDS = 600.0
+
+    def _session_check(self, cookie: str) -> dict[str, Any] | None:
+        """AUTH_REQUIRED when a stored bilibili session has gone dead.
+
+        Guest requests (no cookie) stay allowed — B站 search works logged
+        out; an expired cookie used to surface as a silent empty result
+        (2026-08-16 feedback #3).
+        """
+
+        if not cookie:
+            return None
+        try:
+            self._wbi_keys(cookie)  # also refreshes _nav_logged_in
+        except _AdapterError:
+            return None  # probe failures surface through the search itself
+        if self._nav_logged_in is False:
+            return adapter_error(
+                "AUTH_REQUIRED",
+                "B站登录态已失效，请重新登录（session-login-flow）后再搜索",
+                False,
+            )
+        return None
 
     # -- internal helpers ------------------------------------------------
 
@@ -100,10 +128,15 @@ class BilibiliSearchAdapter:
         return value
 
     def _wbi_keys(self, cookie: str) -> tuple[str, str]:
+        if self._wbi_cache is not None:
+            checked_at, img_key, sub_key = self._wbi_cache
+            if time.monotonic() - checked_at < self._WBI_CACHE_SECONDS:
+                return img_key, sub_key
         nav = self._request_json(
             NAV_URL, referer="https://www.bilibili.com/", cookie=cookie
         )
         data = nav.get("data") or {}
+        self._nav_logged_in = bool(data.get("isLogin"))
         wbi = data.get("wbi_img") or {}
         img_url = str(wbi.get("img_url") or "")
         sub_url = str(wbi.get("sub_url") or "")
@@ -111,6 +144,7 @@ class BilibiliSearchAdapter:
             raise _AdapterError("PARTIAL_FAILURE", "B站未返回 WBI 密钥", True)
         img_key = img_url.rsplit("/", 1)[-1].split(".", 1)[0]
         sub_key = sub_url.rsplit("/", 1)[-1].split(".", 1)[0]
+        self._wbi_cache = (time.monotonic(), img_key, sub_key)
         return img_key, sub_key
 
     @staticmethod
@@ -147,6 +181,7 @@ class BilibiliSearchAdapter:
             resource_type="视频",
             summary=description or None,
             author=item.get("author"),
+            creator_mid=str(item["mid"]) if item.get("mid") else None,
             published_at=published_at,
             download_feasibility="中",
             platform_signals=signals or None,
@@ -161,6 +196,10 @@ class BilibiliSearchAdapter:
         # a session may improve personalization and avoid rate limits.
         session_data = self.session_store.get_session_data("bilibili")
         cookie = SessionStore._cookie_header(session_data) if session_data else ""
+
+        auth_error = self._session_check(cookie)
+        if auth_error:
+            return [], auth_error
 
         try:
             img_key, sub_key = self._wbi_keys(cookie)
@@ -222,6 +261,9 @@ class BilibiliSearchAdapter:
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         session_data = self.session_store.get_session_data("bilibili")
         cookie = SessionStore._cookie_header(session_data) if session_data else ""
+        auth_error = self._session_check(cookie)
+        if auth_error:
+            return [], auth_error
         try:
             img_key, sub_key = self._wbi_keys(cookie)
         except _AdapterError as exc:
@@ -251,10 +293,16 @@ class BilibiliSearchAdapter:
                     if "created" in item and "pubdate" not in item:
                         item = {**item, "pubdate": item["created"]}
                     normalized = self._normalize_item(item)
-                    if normalized:
-                        results.append(normalized)
-                        if len(results) >= limit:
-                            break
+                    if not normalized:
+                        continue
+                    author_mid = str(
+                        (normalized.get("metadata") or {}).get("creator_mid") or ""
+                    )
+                    if author_mid and author_mid != str(creator_id).strip():
+                        continue  # 合作/互投内容：B站空间接口会混入他人投稿
+                    results.append(normalized)
+                    if len(results) >= limit:
+                        break
                 if len(vlist) < ps:
                     break
                 pn += 1

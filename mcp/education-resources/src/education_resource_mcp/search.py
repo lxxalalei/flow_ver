@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -75,14 +76,25 @@ class GenericWebSearchProvider:
             return list(self._CJK_ENGINES)
         return list(self._DEFAULT_ENGINES)
 
+    @staticmethod
+    def _tuned_query(query: str) -> str:
+        """Turn 书名号 into an exact phrase so long Chinese book titles stop
+        degrading to their leading concept (feedback #10)."""
+
+        def _quote(match: re.Match[str]) -> str:
+            return f'"{match.group(1)}"'
+
+        return re.sub(r"《([^《》]{2,40})》", _quote, query)
+
     def _search_single(
         self, query: str, limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Execute one *generic* query and return ``(resources, errors)``."""
+        tuned = self._tuned_query(query)
         try:
             response = generic_web.search(
-                query,
-                self._engines_for_query(query),
+                tuned,
+                self._engines_for_query(tuned),
                 limit,
                 float(self.settings.search_timeout_seconds),
             )
@@ -533,7 +545,10 @@ class MultiPlatformSearchProvider:
                     0,
                     {
                         "code": "UNKNOWN_PLATFORM",
-                        "message": f"平台 {platform} 无 adapter",
+                        "message": (
+                            f"平台 {platform} 无 adapter；"
+                            f"可用平台：{', '.join(sorted(self._adapters) + ['generic'])}"
+                        ),
                         "retryable": False,
                     },
                 )
@@ -714,6 +729,7 @@ class MultiPlatformSearchProvider:
         # Build platform_runs in the order tasks were submitted.
         platform_runs: list[dict[str, Any]] = []
         all_resources: list[dict[str, Any]] = []
+        available = sorted(self._adapters) + ["generic"]
         for platform in merged:
             if platform in unknown_platforms:
                 platform_runs.append(
@@ -727,7 +743,10 @@ class MultiPlatformSearchProvider:
                                 "failure_count": 1,
                                 "error": {
                                     "code": "PLATFORM_UNAVAILABLE",
-                                    "message": "该平台尚未接入搜索适配器",
+                                    "message": (
+                                        f"平台 {platform} 尚未接入；"
+                                        f"可用平台：{', '.join(available)}"
+                                    ),
                                     "retryable": False,
                                 },
                             }
