@@ -99,18 +99,32 @@ resource_archive(
 
 分类不确定时可留空 `domain_id`，进入 `99-待分类/其他`。没有 `archive_id`、ArchiveRecord、AssetBundle、digest 或版本状态。
 
-## 最小内部状态
+## 最小内部状态与 Job 持久化
 
-只保留两个进程内映射：
+进程内只保留一个映射：
 
 ```text
 resource_id -> Search 返回的原始候选
-job_id      -> 下载状态 / 文件 / 失败
 ```
 
-这是调用脚本所需的最小跨 Tool 状态。
+下载 Job 的状态不在进程里，而在文件：
 
-`resource_id` 和 Job 不做进程重启恢复。MCP 重启后重新搜索即可；不为这个低频情况恢复 SQLite/Flow 状态机。
+```text
+$EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/<job_id>/
+  job.json      # Job 状态唯一权威（临时文件 + 原子替换）
+  request.json  # 本 Job 的资源快照
+  worker.log    # detached worker 的输出
+  cancel.flag   # 取消意图（出现即生效）
+  ...下载产物
+```
+
+每个 Job 由一个脱离 MCP 进程生命周期的 worker 子进程执行（`job_worker.py`）。MCP 或网关重启后：
+
+- 在途 Job 继续下载，`resource_job_status` 照常返回进度和文件；
+- worker 已死且未到终态的 Job 会被如实标记为 `interrupted`（重新发起下载即可，不支持断点续传）；
+- 终态 Job 的 `resource_archive` 跨重启依然可用。
+
+`resource_id` 仍不做进程重启恢复，重启后重新搜索。不恢复 SQLite/Flow 状态机；0056 只把 Job 状态落在上述文件里。
 
 ## 下载路由
 
@@ -245,7 +259,9 @@ src/education_resource_mcp/
 ├── library-taxonomy.json  # 学习资料库目录配置
 ├── adapters/              # 平台搜索/Inspect/下载脚本
 ├── acquisition/           # Provider router + Downloader
-├── jobs.py                # 小型进程内异步 JobRunner
+├── jobs.py                # detached worker spawner（并发上限沿用 MAX_WORKERS）
+├── job_worker.py          # 下载 worker 子进程入口
+├── job_state.py           # job.json 状态文件 / 进程探活 / 取消 flag
 └── sessions.py            # 登录会话读取
 ```
 

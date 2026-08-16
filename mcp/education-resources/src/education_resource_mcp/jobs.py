@@ -1,46 +1,117 @@
-"""Small in-process job runner for local stdio development."""
+"""Bounded spawner for detached download workers (0056).
+
+Jobs used to run as threads of the MCP process and died with it.  Now each
+job is a detached worker process (see ``job_worker.spawn_worker``); this
+module only keeps at most ``max_workers`` of them alive and defers the rest,
+preserving the queueing semantics of the former in-process executor.
+"""
 
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
+import logging
+import os
+from pathlib import Path
+import queue
+import subprocess
+import sys
 import threading
-from typing import Callable
+from typing import Any, Callable
+
+LOGGER = logging.getLogger(__name__)
+
+SpawnFn = Callable[[], "subprocess.Popen | None"]
 
 
-JobCallable = Callable[[threading.Event], None]
+def spawn_worker(directory: Path) -> subprocess.Popen:
+    """Spawn a worker that outlives this process.
+
+    stdio points only at ``worker.log`` and stdin is closed, so there is no
+    pipe back to the parent: the MCP process can die without touching the
+    worker.  CREATE_BREAKAWAY_FROM_JOB detaches from a gateway job object
+    when allowed; if breakaway is denied we still spawn (a job object that
+    kills children would be caught by the gateway-restart acceptance test).
+    """
+
+    log_handle = open(directory / "worker.log", "ab", buffering=0)
+    command = [
+        sys.executable, "-m", "education_resource_mcp.job_worker", str(directory)
+    ]
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": log_handle,
+        "stderr": subprocess.STDOUT,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        base = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        breakaway = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+        try:
+            return subprocess.Popen(command, creationflags=base | breakaway, **kwargs)
+        except PermissionError:
+            return subprocess.Popen(command, creationflags=base, **kwargs)
+    return subprocess.Popen(command, start_new_session=True, **kwargs)
 
 
-class JobRunner:
+class JobSpawner:
+    """Queue jobs and spawn detached workers, at most ``max_workers`` alive."""
+
     def __init__(self, max_workers: int) -> None:
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="education-resource-job"
+        self._max = max(1, int(max_workers))
+        self._queue: queue.Queue[tuple[str, SpawnFn]] = queue.Queue()
+        self._queued: set[str] = set()
+        self._live: dict[str, subprocess.Popen] = {}
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._loop, name="education-resource-job-spawner", daemon=True
         )
-        self._lock = threading.RLock()
-        self._cancel_events: dict[str, threading.Event] = {}
-        self._futures: dict[str, Future[None]] = {}
+        self._thread.start()
 
-    def submit(self, job_id: str, function: JobCallable) -> None:
-        event = threading.Event()
+    def submit(self, job_id: str, spawn: SpawnFn) -> None:
         with self._lock:
-            if job_id in self._futures:
-                return
-            self._cancel_events[job_id] = event
-            future = self._executor.submit(function, event)
-            self._futures[job_id] = future
-            future.add_done_callback(lambda _: self._forget(job_id))
+            self._queued.add(job_id)
+        self._queue.put((job_id, spawn))
 
-    def cancel(self, job_id: str) -> bool:
-        with self._lock:
-            event = self._cancel_events.get(job_id)
-            if event is None:
-                return False
-            event.set()
-            return True
+    def is_pending(self, job_id: str) -> bool:
+        """True while the job is queued or its worker is alive (this process)."""
 
-    def _forget(self, job_id: str) -> None:
         with self._lock:
-            self._cancel_events.pop(job_id, None)
-            self._futures.pop(job_id, None)
+            if job_id in self._queued:
+                return True
+            popen = self._live.get(job_id)
+            return popen is not None and popen.poll() is None
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            with self._lock:
+                self._live = {
+                    job_id: popen
+                    for job_id, popen in self._live.items()
+                    if popen.poll() is None
+                }
+                full = len(self._live) >= self._max
+            if full:
+                self._stop.wait(0.2)
+                continue
+            try:
+                job_id, spawn = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            with self._lock:
+                self._queued.discard(job_id)
+            try:
+                popen = spawn()
+            except Exception:  # noqa: BLE001 - one bad spawn must not kill the loop
+                LOGGER.exception("spawning worker for job %s failed", job_id)
+                continue
+            if popen is None:
+                continue  # spawn fn decided the job never started
+            with self._lock:
+                self._live[job_id] = popen
 
     def shutdown(self, wait: bool = True) -> None:
-        self._executor.shutdown(wait=wait, cancel_futures=False)
+        """Stop queueing new work; already-running workers stay detached."""
+
+        self._stop.set()
+        if wait and self._thread.is_alive():
+            self._thread.join(timeout=2.0)

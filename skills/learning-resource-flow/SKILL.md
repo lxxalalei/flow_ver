@@ -167,7 +167,7 @@ resource_archive(
 
 ### MCP 重启
 
-`resource_id` 和 Job 状态是进程内状态。MCP 进程重启后旧句柄可能失效，重新搜索即可。不要为低频恢复场景构造 Flow、SQLite 状态机或源码恢复流程。
+`resource_id` 是进程内状态，MCP 重启后旧句柄失效，重新搜索即可。下载 Job 不受重启影响：Job 状态持久在 `jobs/<job_id>/job.json`，worker 独立于 MCP 进程运行，重启后 `resource_job_status` / `resource_job_cancel` / `resource_archive` 照常使用。worker 中断的非终态 Job 会如实显示 `interrupted`，重新发起下载即可（不做断点续传）。
 
 ## 9. 数据面边界
 

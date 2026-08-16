@@ -15,7 +15,7 @@ from typing import Any
 
 from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistration
 from .acquisition.models import AcquisitionStrategy
-from .acquisition.planner import AcquisitionPlanner, AcquisitionPlanningError
+from .acquisition.planner import AcquisitionPlanner
 from .acquisition.web_materializer import WebMaterializer
 from .archive import archive_downloaded_files
 from .config import Settings
@@ -23,7 +23,20 @@ from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
 from .inspection import InspectionRouter
 from .inspection_registry import default_inspection_router
-from .jobs import JobRunner
+from .job_state import (
+    CANCEL_FLAG_NAME,
+    SPAWN_GRACE_SECONDS,
+    TERMINAL_STATUSES,
+    job_dir,
+    process_alive,
+    read_job,
+    state_age_seconds,
+    terminate_process,
+    utc_now_iso,
+    write_job,
+    write_request,
+)
+from .jobs import JobSpawner, spawn_worker
 from .search import SearchProvider, canonical_http_url, default_search_provider
 from .session_bridge import create_session_store
 
@@ -46,6 +59,13 @@ _ALLOWED_RESOURCE_TYPES = {
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(16)}"
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _resource_type(value: Any) -> str:
@@ -100,7 +120,12 @@ def _provider_registrations(
 
 
 class ResourceService:
-    """Expose actual resource capabilities with minimal process-local state."""
+    """Expose actual resource capabilities with minimal process-local state.
+
+    Search handles stay process-local; download jobs live in detached worker
+    processes whose state is the ``jobs/<job_id>/job.json`` file, so jobs
+    survive an MCP/gateway restart (0056).
+    """
 
     def __init__(
         self,
@@ -110,7 +135,8 @@ class ResourceService:
         inspection_router: InspectionRouter | None = None,
         acquisition_router: AcquisitionRouter | None = None,
         download_provider: DownloadProvider | None = None,
-        job_runner: JobRunner | None = None,
+        job_runner: JobSpawner | None = None,
+        recover_jobs: bool = True,
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.settings.ensure_directories()
@@ -129,10 +155,11 @@ class ResourceService:
             )
         )
         self.planner = AcquisitionPlanner(self.acquisition_router)
-        self.job_runner = job_runner or JobRunner(max_workers=self.settings.max_workers)
+        self.job_runner = job_runner or JobSpawner(max_workers=self.settings.max_workers)
         self._resources: dict[str, dict[str, Any]] = {}
-        self._jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        if recover_jobs:
+            self._recover_interrupted_jobs()
 
     def shutdown(self) -> None:
         self.job_runner.shutdown(wait=False)
@@ -332,49 +359,72 @@ class ResourceService:
             raise DomainError("INVALID_ARGUMENT", "resource_ids 不得重复")
         resources = [self._get_resource(resource_id) for resource_id in resource_ids]
         job_id = new_id("job")
-        with self._lock:
-            self._jobs[job_id] = {
+        directory = job_dir(self.settings.jobs_dir, job_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        write_request(
+            directory,
+            {
+                "job_id": job_id,
+                "resources": resources,
+                "preferred_container": preferred_container,
+            },
+        )
+        write_job(
+            directory,
+            {
                 "job_id": job_id,
                 "status": "queued",
                 "total": len(resources),
                 "completed": 0,
                 "files": [],
                 "failures": [],
-            }
-        self.job_runner.submit(
-            job_id,
-            lambda cancel_event: self._run_download_job(
-                job_id, resources, preferred_container, cancel_event
-            ),
+                "pid": None,
+                "created_at": utc_now_iso(),
+            },
         )
+
+        def _spawn() -> "subprocess.Popen | None":
+            if (directory / CANCEL_FLAG_NAME).exists():
+                write_job(directory, {**read_job(directory), "status": "cancelled"})
+                return None
+            return spawn_worker(directory)
+
+        self.job_runner.submit(job_id, _spawn)
         return {"job_id": job_id, "status": "queued"}
 
     def job_status(self, job_id: str) -> dict[str, Any]:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise DomainError("JOB_NOT_FOUND", "任务不存在")
-            return {
-                "job_id": job_id,
-                "status": job["status"],
-                "progress": {"completed": job["completed"], "total": job["total"]},
-                "files": [dict(item) for item in job["files"]],
-                "failures": [dict(item) for item in job["failures"]],
-            }
+        directory, job = self._load_job(job_id)
+        job = self._reconcile(directory, job)
+        return {
+            "job_id": job_id,
+            "status": job.get("status"),
+            "progress": {
+                "completed": _safe_int(job.get("completed")),
+                "total": _safe_int(job.get("total")),
+            },
+            "files": [dict(item) for item in job.get("files") or []],
+            "failures": [dict(item) for item in job.get("failures") or []],
+        }
 
     def job_cancel(self, job_id: str) -> dict[str, Any]:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise DomainError("JOB_NOT_FOUND", "任务不存在")
-            if job["status"] in {"succeeded", "partial", "failed", "cancelled"}:
-                return {"job_id": job_id, "status": job["status"]}
-            job["status"] = "cancelling"
-        active = self.job_runner.cancel(job_id)
-        if not active:
-            with self._lock:
-                self._jobs[job_id]["status"] = "cancelled"
-        return {"job_id": job_id, "status": "cancelling" if active else "cancelled"}
+        directory, job = self._load_job(job_id)
+        status = str(job.get("status") or "")
+        if status in TERMINAL_STATUSES:
+            return {"job_id": job_id, "status": status}
+        flag = directory / CANCEL_FLAG_NAME
+        repeat_cancel = flag.exists()
+        flag.touch()
+        pid = job.get("pid")
+        if pid and process_alive(pid):
+            if repeat_cancel:
+                # The worker ignored the flag (or is stuck): force kill.
+                terminate_process(int(pid))
+                write_job(directory, {**read_job(directory), "status": "cancelled"})
+                return {"job_id": job_id, "status": "cancelled"}
+            return {"job_id": job_id, "status": "cancelling"}
+        # No live worker owns job.json any more; the parent may rewrite it.
+        write_job(directory, {**job, "status": "cancelled"})
+        return {"job_id": job_id, "status": "cancelled"}
 
     def archive(
         self,
@@ -385,13 +435,11 @@ class ResourceService:
     ) -> dict[str, Any]:
         """Move successful files from a finished download Job into the library."""
 
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise DomainError("JOB_NOT_FOUND", "任务不存在")
-            if job["status"] not in {"succeeded", "partial"}:
-                raise DomainError("JOB_NOT_FINISHED", "下载任务尚未产生可归档的最终文件")
-            downloaded_files = [dict(item) for item in job["files"]]
+        directory, job = self._load_job(job_id)
+        job = self._reconcile(directory, job)
+        if str(job.get("status")) not in {"succeeded", "partial"}:
+            raise DomainError("JOB_NOT_FINISHED", "下载任务尚未产生可归档的最终文件")
+        downloaded_files = [dict(item) for item in job.get("files") or []]
         if not downloaded_files:
             raise DomainError("FILE_NOT_FOUND", "下载任务没有可归档文件")
 
@@ -408,12 +456,13 @@ class ResourceService:
             if item.get("asset_id")
         }
         if archived_by_asset:
-            with self._lock:
-                current = self._jobs[job_id]
-                current["files"] = [
-                    dict(archived_by_asset.get(item.get("asset_id"), item))
-                    for item in current["files"]
-                ]
+            # Terminal status implies the worker is gone; parent owns job.json.
+            current = read_job(directory)
+            current["files"] = [
+                dict(archived_by_asset.get(item.get("asset_id"), item))
+                for item in current.get("files") or []
+            ]
+            write_job(directory, current)
 
         return {
             "job_id": job_id,
@@ -423,63 +472,53 @@ class ResourceService:
             "failures": failures,
         }
 
-    def _run_download_job(
-        self,
-        job_id: str,
-        resources: list[dict[str, Any]],
-        preferred_container: str,
-        cancel_event: threading.Event,
-    ) -> None:
-        with self._lock:
-            self._jobs[job_id]["status"] = "running"
-        for resource in resources:
-            if cancel_event.is_set():
-                with self._lock:
-                    self._jobs[job_id]["status"] = "cancelled"
-                return
-            try:
-                files = self._download_one(
-                    job_id, resource, preferred_container, cancel_event
-                )
-            except (DomainError, AcquisitionPlanningError) as exc:
-                with self._lock:
-                    self._jobs[job_id]["failures"].append(
-                        {
-                            "resource_id": resource["resource_id"],
-                            "code": str(getattr(exc, "code", "DOWNLOAD_FAILED")),
-                            "message": str(getattr(exc, "message", str(exc))),
-                            "retryable": bool(getattr(exc, "retryable", False)),
-                        }
-                    )
-            except Exception as exc:
-                LOGGER.exception("download job %s failed for one resource", job_id)
-                with self._lock:
-                    self._jobs[job_id]["failures"].append(
-                        {
-                            "resource_id": resource["resource_id"],
-                            "code": "DOWNLOAD_FAILED",
-                            "message": f"{type(exc).__name__}: {exc}",
-                            "retryable": False,
-                        }
-                    )
-            else:
-                with self._lock:
-                    self._jobs[job_id]["files"].extend(files)
-            finally:
-                with self._lock:
-                    self._jobs[job_id]["completed"] += 1
-        with self._lock:
-            job = self._jobs[job_id]
-            if job["status"] == "cancelling":
-                job["status"] = "cancelled"
-            elif job["files"] and job["failures"]:
-                job["status"] = "partial"
-            elif job["files"]:
-                job["status"] = "succeeded"
-            else:
-                job["status"] = "failed"
+    # ------------------------------------------------------------------
+    # File-backed job state (0056)
+    # ------------------------------------------------------------------
 
-    def _download_one(
+    def _load_job(self, job_id: str) -> tuple[Any, dict[str, Any]]:
+        directory = job_dir(self.settings.jobs_dir, job_id)
+        return directory, read_job(directory)
+
+    def _reconcile(self, directory: Any, job: dict[str, Any]) -> dict[str, Any]:
+        """Mark orphaned jobs interrupted; never touch a live worker's file."""
+
+        job_id = str(job.get("job_id"))
+        status = str(job.get("status") or "")
+        if status in TERMINAL_STATUSES:
+            return job
+        pid = job.get("pid")
+        if pid and process_alive(pid):
+            return job
+        if self.job_runner.is_pending(job_id):
+            return job  # still queued or spawning inside this process
+        if not pid and state_age_seconds(job) < SPAWN_GRACE_SECONDS:
+            return job  # a detached worker may be starting elsewhere
+        job = dict(job)
+        job["status"] = "interrupted"
+        try:
+            write_job(directory, job)
+        except OSError:
+            LOGGER.exception("could not mark job %s interrupted", job.get("job_id"))
+        return job
+
+    def _recover_interrupted_jobs(self) -> None:
+        """On startup, declare non-terminal jobs whose worker died."""
+
+        try:
+            entries = sorted(self.settings.jobs_dir.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if not entry.is_dir() or not (entry / "job.json").is_file():
+                continue
+            try:
+                job = read_job(entry)
+                self._reconcile(entry, job)
+            except DomainError as exc:
+                LOGGER.warning("skipping unreadable job state %s: %s", entry, exc)
+
+    def download_resource(
         self,
         job_id: str,
         resource: dict[str, Any],

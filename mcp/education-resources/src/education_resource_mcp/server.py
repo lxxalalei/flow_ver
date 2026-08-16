@@ -33,7 +33,9 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "Call resource_download only after the user has explicitly asked to download the selected resources. "
             "After a successful or partial download, classify the files and call resource_archive to move them into the learning library. "
             "Use resource_job_status for progress or resource_job_cancel to stop the job. "
-            "Resource handles are process-local; if the MCP process restarts, search again."
+            "Resource handles are process-local; if the MCP process restarts, search again. "
+            "Download jobs run in detached workers and survive an MCP restart; "
+            "job_status reports interrupted for jobs whose worker died, and re-downloading starts from scratch."
         ),
     )
 
