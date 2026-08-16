@@ -218,7 +218,7 @@ class BilibiliSearchAdapter:
 
 
     def search_creator(
-        self, creator_id: str, limit: int
+        self, creator_id: str, limit: int, cancel_event: Any = None
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         session_data = self.session_store.get_session_data("bilibili")
         cookie = SessionStore._cookie_header(session_data) if session_data else ""
@@ -230,6 +230,8 @@ class BilibiliSearchAdapter:
         pn = 1
         try:
             while len(results) < limit:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 ps = min(30, limit - len(results))
                 params = wbi_sign(
                     {"mid": creator_id, "pn": pn, "ps": ps,

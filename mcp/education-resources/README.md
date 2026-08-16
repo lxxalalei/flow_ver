@@ -26,7 +26,7 @@ MCP 不再维护：
 
 用户正常对话里的“看过哪些候选、选了第几个、是否明确要求下载、资源应该归到哪个类别”由 Agent 根据当前会话理解，不复制成数据库事务。
 
-## 7 个 Tool
+## 9 个 Tool
 
 ### `resource_search`
 
@@ -84,6 +84,24 @@ resource_job_cancel(job_id="job_...")
 ```
 
 取消当前下载任务。
+
+### `resource_batch_collect`
+
+```text
+resource_batch_collect(platform="douyin", creator_id="...", mode="creator_full", max_items=500)
+```
+
+批量枚举模式（0057）：把创作者全量作品写入 `jobs/<job_id>/results.jsonl`，
+返回体只有任务句柄和条数，全量清单不进对话。与下载 Job 同一套 detached
+worker 语义：跨 MCP/网关重启存活、可取消、崩溃如实 `interrupted`。
+
+### `resource_batch_read`
+
+```text
+resource_batch_read(job_id="job_...", offset=0, limit=20)
+```
+
+分页读取批量结果文件，单次默认 20 条、上限 50 条。
 
 ### `resource_archive`
 

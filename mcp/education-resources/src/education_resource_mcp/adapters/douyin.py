@@ -289,7 +289,7 @@ class DouyinSearchAdapter:
     # -- public API: creator homepage browse -----------------------------
 
     def search_creator(
-        self, creator_id: str, limit: int
+        self, creator_id: str, limit: int, cancel_event: Any = None
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """Browse a creator's video list (paginated, a_bogus-signed).
 
@@ -307,6 +307,8 @@ class DouyinSearchAdapter:
 
         try:
             while len(results) < limit:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 params = {
                     **_COMMON_PARAMS,
                     "sec_user_id": sec_user_id,

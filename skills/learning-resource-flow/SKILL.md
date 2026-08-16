@@ -129,6 +129,15 @@ resource_browse_creator(platform=..., creator_id=..., limit=...)
 
 用于“列出这个账号的作品”这类枚举任务。
 
+要**全量**枚举一个主页（几十到几百个作品）时，不要调大 browse 的 limit，改用批量模式：结果落盘不进对话，用分页读按需取。
+
+```text
+resource_batch_collect(platform=..., creator_id=..., mode="creator_full", max_items=...)
+resource_batch_read(job_id=..., offset=..., limit=20)
+```
+
+批量任务和下载 Job 同一套句柄：`resource_job_status` 看进度、`resource_job_cancel` 取消、重启后存活。
+
 ### 用户选择
 
 用户说“第 1、3 个”“这两个”“全部下载”时，直接根据当前对话里刚展示的候选确定对应 `resource_id`。不保存 Presentation/Selection，也不生成选择版本。

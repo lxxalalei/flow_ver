@@ -8,6 +8,7 @@ jobs because progress and cancellation are real user-facing needs.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import secrets
 import threading
@@ -537,6 +538,116 @@ class ResourceService:
             "library_root": str(self.settings.library_root),
             "files": archived,
             "failures": failures,
+        }
+
+    # ------------------------------------------------------------------
+    # Batch collection (0057 M1)
+    # ------------------------------------------------------------------
+
+    def batch_collect(
+        self,
+        platform: str,
+        *,
+        mode: str = "creator_full",
+        creator_id: str = "",
+        max_items: int = 500,
+    ) -> dict[str, Any]:
+        platform = str(platform or "").strip()
+        creator_id = str(creator_id or "").strip()
+        mode = str(mode or "").strip()
+        if mode != "creator_full":
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "当前仅支持 mode='creator_full'（创作者全量枚举）",
+            )
+        if not platform:
+            raise DomainError(
+                "INVALID_ARGUMENT", "platform 不能为空，例如 douyin / bilibili"
+            )
+        if not creator_id:
+            raise DomainError(
+                "INVALID_ARGUMENT", "creator_full 模式需要 creator_id（sec_uid / mid / 主页 URL）"
+            )
+        if (
+            not isinstance(max_items, int)
+            or isinstance(max_items, bool)
+            or not 1 <= max_items <= 1000
+        ):
+            raise DomainError("INVALID_ARGUMENT", "max_items 必须在 1..1000 之间")
+        job_id = new_id("job")
+        directory = job_dir(self.settings.jobs_dir, job_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        write_request(
+            directory,
+            {
+                "kind": "batch_collect",
+                "job_id": job_id,
+                "mode": mode,
+                "platform": platform,
+                "creator_id": creator_id,
+                "max_items": max_items,
+            },
+        )
+        write_job(
+            directory,
+            {
+                "job_id": job_id,
+                "kind": "batch_collect",
+                "mode": mode,
+                "platform": platform,
+                "status": "queued",
+                "total": 0,
+                "completed": 0,
+                "files": [],
+                "failures": [],
+                "pid": None,
+                "created_at": utc_now_iso(),
+            },
+        )
+
+        def _spawn() -> "subprocess.Popen | None":
+            if (directory / CANCEL_FLAG_NAME).exists():
+                write_job(directory, {**read_job(directory), "status": "cancelled"})
+                return None
+            return spawn_worker(directory)
+
+        self.job_runner.submit(job_id, _spawn)
+        return {"job_id": job_id, "status": "queued"}
+
+    def batch_read(
+        self, job_id: str, *, offset: int = 0, limit: int = 20
+    ) -> dict[str, Any]:
+        directory, job = self._load_job(job_id)
+        job = self._reconcile(directory, job)
+        if str(job.get("kind") or "") != "batch_collect":
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "该任务不是批量采集任务；下载任务请用 resource_job_status",
+            )
+        if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+            raise DomainError("INVALID_ARGUMENT", "offset 必须 >= 0")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise DomainError("INVALID_ARGUMENT", "limit 必须 >= 1")
+        limit = min(limit, 50)
+        path = directory / "results.jsonl"
+        items: list[dict[str, Any]] = []
+        total = _safe_int(job.get("total"))
+        if path.is_file():
+            lines = path.read_text(encoding="utf-8").splitlines()
+            total = len(lines)
+            for line in lines[offset : offset + limit]:
+                try:
+                    items.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return {
+            "job_id": job_id,
+            "kind": "batch_collect",
+            "status": job.get("status"),
+            "total": total,
+            "offset": offset,
+            "items": items,
+            "complete": offset + len(items) >= total,
         }
 
     # ------------------------------------------------------------------

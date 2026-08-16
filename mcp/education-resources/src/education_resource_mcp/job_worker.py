@@ -36,6 +36,11 @@ LOGGER = logging.getLogger(__name__)
 
 def run(directory: Path) -> int:
     request = read_request(directory)
+    if str(request.get("kind") or "") == "batch_collect":
+        from .batch import run_batch_collect
+
+        return run_batch_collect(directory)
+    job_id = str(request["job_id"])
     job_id = str(request["job_id"])
     resources = list(request.get("resources") or [])
     preferred_container = str(request.get("preferred_container") or "original")

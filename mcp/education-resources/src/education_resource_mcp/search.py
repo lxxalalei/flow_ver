@@ -516,7 +516,7 @@ class MultiPlatformSearchProvider:
         }
 
     def search_creator(
-        self, platform: str, creator_id: str, limit: int
+        self, platform: str, creator_id: str, limit: int, cancel_event: Any = None
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Browse a creator's content via the platform adapter.
 
@@ -551,7 +551,10 @@ class MultiPlatformSearchProvider:
                     },
                 )
             ]
-        resources, error = adapter.search_creator(creator_id, limit)
+        if cancel_event is None:
+            resources, error = adapter.search_creator(creator_id, limit)
+        else:
+            resources, error = adapter.search_creator(creator_id, limit, cancel_event)
         return resources, [
             self._creator_platform_run(platform, creator_id, len(resources), error)
         ]
