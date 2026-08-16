@@ -1,4 +1,4 @@
-"""Thin stdio MCP exposing search and download capabilities."""
+"""Thin stdio MCP exposing search, download and archive capabilities."""
 
 from __future__ import annotations
 
@@ -24,14 +24,15 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     server = MCPServer(
         name="education-resources",
         title="Education Resources",
-        description="Search, inspect and download learning resources",
+        description="Search, inspect, download and archive learning resources",
         version="0.3.0",
         instructions=(
             "This MCP is a capability layer, not a workflow engine. "
             "Use resource_search/resource_browse_creator to discover resources. "
             "Use resource_inspect only when details affect the decision. "
             "Call resource_download only after the user has explicitly asked to download the selected resources. "
-            "Then use resource_job_status for progress or resource_job_cancel to stop the job. "
+            "After a successful or partial download, classify the files and call resource_archive to move them into the learning library. "
+            "Use resource_job_status for progress or resource_job_cancel to stop the job. "
             "Resource handles are process-local; if the MCP process restarts, search again."
         ),
     )
@@ -93,6 +94,27 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         """Cancel a queued or running download job."""
         return _call(
             lambda: resource_service.job_cancel(job_id),
+            job_id=job_id,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_archive(
+        job_id: str,
+        domain_id: str = "",
+        topic: str = "",
+    ) -> dict[str, Any]:
+        """Move completed download files into the learning library by domain/topic.
+
+        domain_id accepts a configured domain id such as natural_science. Leave it
+        empty when classification is genuinely uncertain; the files go to 待分类.
+        topic is a free topic folder such as 天文与宇宙.
+        """
+        return _call(
+            lambda: resource_service.archive(
+                job_id,
+                domain_id=domain_id,
+                topic=topic,
+            ),
             job_id=job_id,
         )
 

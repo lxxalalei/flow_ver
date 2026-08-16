@@ -1,4 +1,4 @@
-"""Thin capability service for resource search, inspect and download.
+"""Thin capability service for resource search, inspect, download and archive.
 
 There is no Flow, ResultSet, Presentation, Selection or persisted Plan here.
 Search results live in a process-local handle map; downloads are asynchronous
@@ -17,6 +17,7 @@ from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistra
 from .acquisition.models import AcquisitionStrategy
 from .acquisition.planner import AcquisitionPlanner, AcquisitionPlanningError
 from .acquisition.web_materializer import WebMaterializer
+from .archive import archive_downloaded_files
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
@@ -99,7 +100,7 @@ def _provider_registrations(
 
 
 class ResourceService:
-    """Expose actual search/inspect/download capabilities with minimal state."""
+    """Expose actual resource capabilities with minimal process-local state."""
 
     def __init__(
         self,
@@ -374,6 +375,53 @@ class ResourceService:
             with self._lock:
                 self._jobs[job_id]["status"] = "cancelled"
         return {"job_id": job_id, "status": "cancelling" if active else "cancelled"}
+
+    def archive(
+        self,
+        job_id: str,
+        *,
+        domain_id: str = "",
+        topic: str = "",
+    ) -> dict[str, Any]:
+        """Move successful files from a finished download Job into the library."""
+
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise DomainError("JOB_NOT_FOUND", "任务不存在")
+            if job["status"] not in {"succeeded", "partial"}:
+                raise DomainError("JOB_NOT_FINISHED", "下载任务尚未产生可归档的最终文件")
+            downloaded_files = [dict(item) for item in job["files"]]
+        if not downloaded_files:
+            raise DomainError("FILE_NOT_FOUND", "下载任务没有可归档文件")
+
+        archived, failures = archive_downloaded_files(
+            downloaded_files,
+            library_root=self.settings.library_root,
+            domain_id=domain_id,
+            topic=topic,
+        )
+
+        archived_by_asset = {
+            item.get("asset_id"): item
+            for item in archived
+            if item.get("asset_id")
+        }
+        if archived_by_asset:
+            with self._lock:
+                current = self._jobs[job_id]
+                current["files"] = [
+                    dict(archived_by_asset.get(item.get("asset_id"), item))
+                    for item in current["files"]
+                ]
+
+        return {
+            "job_id": job_id,
+            "status": "succeeded" if archived and not failures else "partial",
+            "library_root": str(self.settings.library_root),
+            "files": archived,
+            "failures": failures,
+        }
 
     def _run_download_job(
         self,

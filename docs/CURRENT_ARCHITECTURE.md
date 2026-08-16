@@ -1,31 +1,31 @@
 # 当前架构
 
 > 快照日期：2026-08-16  
-> 只描述当前 active 运行事实。旧 Flow/ResultSet/Presentation/Selection/Plan/authority 设计可从 Git 历史和 `.agent/plans/archive/` 查阅。
+> 只描述当前 active 运行事实。旧 Flow/ResultSet/Presentation/Selection/Plan/authority 设计只保留在 Git 历史和归档计划中。
 
 ## 1. 当前定位
 
-`education-resources` 不再是资源工作流后端，而是一个**搜索与下载能力 MCP**。
+`education-resources` 是一个**搜索、下载、归档能力 MCP**，不是资源工作流后端。
 
 ```text
 用户自然语言
   ↓
 learning-resource-flow Skill / Main Agent
-  │  理解目标、规划搜索、判断相关性、决定补搜/Inspect、展示候选、理解用户选择
+  │  理解目标、规划搜索、判断候选、理解用户选择、决定归档分类
   ↓
 education-resources MCP
-  │  Search / Browse Creator / Inspect / Download / Job Status / Cancel
+  │  Search / Browse Creator / Inspect / Download / Job / Archive
   ↓
-平台 Search Adapter / Inspector / Downloader
+平台 Search Adapter / Inspector / Downloader + 本地资料库
 ```
 
 核心原则：
 
-> MCP 只释放脚本能力，不复制对话状态，不把正常用户行为建模成数据库事务。
+> MCP 只释放真实脚本与文件能力，不复制对话状态，不把正常用户行为建模成数据库事务。
 
 ## 2. Active Tool
 
-当前共 6 个：
+当前共 7 个：
 
 1. `resource_search`
 2. `resource_browse_creator`
@@ -33,15 +33,17 @@ education-resources MCP
 4. `resource_download`
 5. `resource_job_status`
 6. `resource_job_cancel`
+7. `resource_archive`
 
-已经移除的公共工作流 Tool：
+已经移除的工作流 Tool/状态：
 
 - Flow start/list/status
+- ResultSet lineage
 - Presentation save
 - Selection save
 - Download prepare/start
-- Archive
-- Library search
+- Plan / confirmation token
+- ArchiveRecord / AssetBundle / Library state
 
 ## 3. 最小主链
 
@@ -53,7 +55,7 @@ resource_search
 Agent 判断候选
   ├─ 关键事实不足 → resource_inspect
   ├─ 仍有明确缺口 → 再次 resource_search
-  └─ 已足够 → 在对话中展示
+  └─ 已足够 → 展示给用户
                     ↓
                   用户选择
                     ↓
@@ -69,10 +71,12 @@ Agent 判断候选
                     ↓
           resource_job_status
                     ↓
-                  files
+            Agent 判断分类
+                    ↓
+             resource_archive
+                    ↓
+                资料库文件
 ```
-
-没有 ResultSet lineage、Presentation version、Selection version、selection digest、Plan、confirmation token 或 Outcome 状态链。
 
 ## 4. 内部状态
 
@@ -85,41 +89,19 @@ job_id      -> status / progress / files / failures
 
 这些状态只为跨 Tool 调用服务。
 
-不使用 SQLite，不提供进程重启恢复。MCP 重启后资源句柄失效时重新搜索即可；下载 Job 被进程终止时按失败处理，不为了极端恢复场景重新引入 durable workflow。
+不使用 SQLite，不提供 Flow 恢复。MCP 重启后资源句柄失效时重新搜索即可；不为低频恢复场景重新引入 durable workflow。
 
 ## 5. Search
 
-`search.py` 负责：
+`search.py` 负责 Generic Web 和平台 Adapter 调度。Adapter 的真实能力由“代码是否注册并实现 `search()`”决定。
 
-- Generic Web 搜索；
-- 平台 Adapter 调度；
-- 不同平台并发、单个平台 query 顺序执行；
-- 返回实际候选和来源失败。
-
-Adapter 的真实能力由“代码是否注册并实现 `search()`”决定。
-
-已删除原先的 Retrieval authority 层：
-
-- platform registry loader；
-- Adapter descriptor/version/digest 权威校验；
-- identity profile；
-- private retrieval models；
-- 多层候选身份证明。
-
-当前 Service 只做简单业务去重：同一轮中 `(platform, canonical_url)` 相同的结果保留一次。
+已删除原 Retrieval authority 层：platform registry、descriptor/version/digest、identity profile 等。Service 只做同一轮 `(platform, canonical_url)` 的简单业务去重。
 
 ## 6. Inspect
 
-Inspect 保留，因为部分平台的搜索结果只是线索，下载前确实需要解析真实资源表示，例如：
+Inspect 用于把搜索线索解析成当前真实可用的资源表示，例如 Bilibili DASH、Douyin MP4、Ximalaya 音频、SmartEdu 文件、Generic Web 页面等。
 
-- Bilibili DASH 视频；
-- Douyin 实际 MP4；
-- Ximalaya track 音频；
-- SmartEdu 具体 PDF/音视频；
-- Shuge 文件；
-- Generic Web 正文/landing page。
-
-但 Inspect 不再持久化 Resolution、fingerprint、evidence snapshot 或 cache binding。调用一次得到当前事实即可；下载时会 fresh Inspect。
+不再持久化 Resolution、fingerprint、evidence snapshot 或 freshness binding。需要下载时重新 Inspect 一次。
 
 ## 7. Download
 
@@ -129,7 +111,7 @@ Inspect 保留，因为部分平台的搜索结果只是线索，下载前确实
 resource_download(resource_ids=[...])
 ```
 
-Service 对每个资源：
+每个资源执行：
 
 ```text
 fresh Inspect
@@ -141,22 +123,13 @@ exact registered Provider
 Downloader
 ```
 
-`AcquisitionPlanner` 现在只是一次性路由器，不创建持久 Plan。
-
-保留 exact Provider 的原因是业务需要：不同平台下载实现不同，且失败后不能偷偷换成不等价路径。它不是 authority chain。
+`AcquisitionPlanner` 只是一次性路由器，不创建持久 Plan。保留 exact Provider 是因为不同平台确实对应不同下载脚本，而不是为了 authority chain。
 
 ## 8. Job
 
-Job 是唯一保留的流程状态，因为真实下载可能耗时，用户需要：
+Job 保留，因为真实下载可能耗时，用户需要查看进度、结果、失败和取消。
 
-- 查看进度；
-- 得到最终文件；
-- 查看失败；
-- 取消任务。
-
-当前使用小型 `ThreadPoolExecutor` 进程内 JobRunner。
-
-Job 返回：
+返回只保留：
 
 ```text
 job_id
@@ -168,23 +141,63 @@ failures[]
 
 不再有 JobItem / Outcome / AssetBundle 数据库投影。
 
-## 9. 文件
+## 9. Archive
 
-下载文件直接保存到：
+归档恢复为一个**薄文件能力**：
 
 ```text
-$EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/
+resource_archive(
+  job_id=...,
+  domain_id="natural_science",
+  topic="天文与宇宙"
+)
 ```
 
-JobStatus 返回真实路径。当前没有 Archive/Library 状态层；后续如果需要“整理资料库”，应以独立、明确的文件整理能力实现，而不是恢复整个下载状态机。
+Main Agent 负责根据资源语义决定领域和主题；MCP 只把该 Job 已成功下载的真实文件移动到资料库。
+
+默认资料库根目录：
+
+```text
+$EDUCATION_RESOURCE_MCP_DATA_DIR/学习资料库/
+```
+
+可通过：
+
+```text
+EDUCATION_RESOURCE_MCP_LIBRARY_DIR
+```
+
+单独配置。
+
+目录结构：
+
+```text
+学习资料库/
+  04-自然科学/
+    天文与宇宙/
+      视频|音频|图文|其他/
+        文件
+```
+
+顶层分类来自包内 `library-taxonomy.json`。它只是目录配置，不参与搜索判断、状态流转或版本校验。
+
+没有：
+
+```text
+archive_id
+ArchiveRecord
+AssetBundle
+archive version/digest
+ready state
+```
+
+归档完成后，Job 中对应文件路径会更新为资料库最终路径，避免返回已经失效的下载临时路径。
 
 ## 10. 登录
 
-SessionStore 继续保留，因为 Bilibili、Douyin、Ximalaya 等平台真实搜索/下载会需要合法登录态。
+SessionStore 继续保留，因为部分平台真实搜索/下载需要合法登录态。`AUTH_REQUIRED` 属于平台事实，不属于资源工作流状态。
 
-登录要求属于平台事实，不属于资源工作流状态。`AUTH_REQUIRED` 必须真实返回。
-
-## 11. 当前目录
+## 11. 当前核心目录
 
 ```text
 mcp/education-resources/src/education_resource_mcp/
@@ -194,6 +207,8 @@ mcp/education-resources/src/education_resource_mcp/
 ├── search.py
 ├── inspection.py
 ├── inspection_registry.py
+├── archive.py
+├── library-taxonomy.json
 ├── jobs.py
 ├── sessions.py
 ├── session_bridge.py
@@ -201,26 +216,23 @@ mcp/education-resources/src/education_resource_mcp/
 └── acquisition/
 ```
 
-已经删除：
+已删除且不应恢复为主链：
 
 ```text
 storage.py
 models.py（旧 Flow/Contract 输入模型）
 retrieval/
 contracts/
-taxonomy.py
+taxonomy.py（旧运行时 taxonomy/校验体系）
 ```
 
 ## 12. 当前验证重点
 
-不再以“旧状态契约是否全部兼容”为目标。
+1. Search 是否返回真实可用候选；
+2. Inspect 是否得到下载需要的实际 Representation；
+3. Download 是否产生正确文件；
+4. Archive 是否把成功文件移动到正确资料库目录并返回最终路径；
+5. OpenClaw 长任务是否不再因 MCP 状态和 Tool Result 膨胀而频繁 compaction/中断；
+6. 平台真实失败是否诚实暴露。
 
-验证优先级：
-
-1. Search 脚本是否返回真实、可用候选；
-2. Inspect 是否能得到下载需要的实际 Representation；
-3. Download 是否真的产生正确文件；
-4. OpenClaw 长任务是否不再因为 MCP 状态和 Tool Result 膨胀而频繁 compaction/中断；
-5. 各平台真实失败是否诚实暴露。
-
-测试只围绕这些业务行为保留。旧 Flow、SQLite migration、Presentation、Selection、Plan/digest 的专项测试已删除，不允许它们反过来要求恢复旧架构。
+不以旧状态契约兼容为目标，也不让旧 Flow/SQLite/Plan/digest 测试迫使实现重新复杂化。

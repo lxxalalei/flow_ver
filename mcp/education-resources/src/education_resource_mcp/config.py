@@ -1,4 +1,4 @@
-"""Runtime configuration for search and download capabilities."""
+"""Runtime configuration for search, download and archive capabilities."""
 
 from __future__ import annotations
 
@@ -35,6 +35,11 @@ class Settings:
     searxng_base_url: str = ""
     prefer_searxng: bool = False
     session_manager_data_dir: Path | None = None
+    library_dir: Path | None = None
+
+    @property
+    def library_root(self) -> Path:
+        return (self.library_dir or (self.data_dir / "学习资料库")).expanduser().resolve()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +52,7 @@ class Settings:
         prefer_searxng = os.environ.get(
             "EDUCATION_RESOURCE_MCP_PREFER_SEARXNG", ""
         ).strip().lower() in {"1", "true", "yes", "on"}
+        library_dir = os.environ.get("EDUCATION_RESOURCE_MCP_LIBRARY_DIR")
         return cls(
             data_dir=data_dir,
             jobs_dir=data_dir / "jobs",
@@ -67,8 +73,10 @@ class Settings:
                 if os.environ.get("EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR")
                 else None
             ),
+            library_dir=Path(library_dir).expanduser() if library_dir else None,
         )
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
+        self.library_root.mkdir(parents=True, exist_ok=True)
