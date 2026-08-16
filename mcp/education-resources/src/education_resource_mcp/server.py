@@ -5,9 +5,23 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel, Field
 
 from .errors import DomainError
 from .service import ResourceService
+
+
+class SearchTask(BaseModel):
+    """One platform plus its search phrases for resource_search."""
+
+    platform: str = Field(
+        description="平台 id，如 bilibili、douyin、smartedu、ximalaya、generic"
+    )
+    queries: list[str] = Field(
+        min_length=1,
+        description="1-3 条真实搜索短语（像在平台搜索框里输入的完整短句），"
+        '如 ["火山喷发 原理 动画"]',
+    )
 
 
 def _call(function: Callable[[], dict[str, Any]], **ids: str) -> dict[str, Any]:
@@ -41,11 +55,19 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_search(
-        search_tasks: list[dict[str, Any]],
+        search_tasks: list[SearchTask],
         limit: int = 8,
     ) -> dict[str, Any]:
-        """Run the configured search adapters and return resource handles."""
-        return _call(lambda: resource_service.search(search_tasks, limit=limit))
+        """Run the configured search adapters and return resource handles.
+
+        Each task picks one platform and carries its queries, e.g.
+        [{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}].
+        """
+        return _call(
+            lambda: resource_service.search(
+                [task.model_dump() for task in search_tasks], limit=limit
+            )
+        )
 
     @server.tool(structured_output=True)
     def resource_browse_creator(

@@ -68,6 +68,72 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+_SEARCH_TASK_EXAMPLE = (
+    'search_tasks 结构示例：[{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}]'
+    '；queries 项也可以是 {"query": "..."}。顶层不支持 query 字段。'
+)
+
+
+def _normalize_search_tasks(
+    search_tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Validate search_tasks loudly.
+
+    A malformed task used to be dropped silently, which surfaced as a
+    successful-but-empty search and sent the agent digging through source
+    code to guess the shape.  Reject anything malformed with the expected
+    structure spelled out instead.
+    """
+
+    normalized: list[dict[str, Any]] = []
+    for task in search_tasks:
+        if not isinstance(task, dict):
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"search_tasks 的每一项必须是对象；{_SEARCH_TASK_EXAMPLE}",
+            )
+        unknown = sorted(set(task) - {"platform", "queries"})
+        if unknown:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"search_tasks 项含未知字段 {unknown}；{_SEARCH_TASK_EXAMPLE}",
+            )
+        platform = str(task.get("platform") or "").strip()
+        if not platform:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"search_tasks 项缺少 platform；{_SEARCH_TASK_EXAMPLE}",
+            )
+        raw_queries = task.get("queries")
+        if not isinstance(raw_queries, list) or not raw_queries:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"queries 必须是非空列表；{_SEARCH_TASK_EXAMPLE}",
+            )
+        queries: list[str] = []
+        for item in raw_queries:
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, dict) and set(item) <= {"query"}:
+                text = str(item.get("query") or "").strip()
+            else:
+                raise DomainError(
+                    "INVALID_ARGUMENT",
+                    f'queries 的每一项必须是搜索短语字符串或 {{"query": "..."}}；{_SEARCH_TASK_EXAMPLE}',
+                )
+            if text:
+                queries.append(text)
+        if not queries:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"queries 中没有有效搜索短语；{_SEARCH_TASK_EXAMPLE}",
+            )
+        normalized.append(
+            {"platform": platform, "queries": [{"query": text} for text in queries]}
+        )
+    return normalized
+
+
 def _resource_type(value: Any) -> str:
     text = str(value or "other").strip()
     lowered = text.lower()
@@ -174,7 +240,8 @@ class ResourceService:
             raise DomainError("INVALID_ARGUMENT", "search_tasks 不能为空")
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise DomainError("INVALID_ARGUMENT", "limit 必须大于 0")
-        raw_resources, platform_runs = self.search_provider.search(search_tasks, limit)
+        normalized = _normalize_search_tasks(search_tasks)
+        raw_resources, platform_runs = self.search_provider.search(normalized, limit)
         return {
             "candidates": self._remember_resources(raw_resources),
             "failures": self._search_failures(platform_runs),

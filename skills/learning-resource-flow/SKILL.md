@@ -107,9 +107,17 @@ Search 提供候选线索。只有某个事实会改变推荐或下载决策时�
 
 ### 搜索
 
-```text
-resource_search(search_tasks=[...], limit=...)
+```json
+resource_search({
+  "search_tasks": [
+    {"platform": "bilibili", "queries": ["火山喷发 原理 动画"]},
+    {"platform": "generic",  "queries": ["火山形成 科普 儿童图文"]}
+  ],
+  "limit": 8
+})
 ```
+
+每个 task = 一个平台 + 一组搜索短语（字符串数组）。platform 是平台 id（bilibili / douyin / smartedu / ximalaya / generic 等）。注意没有顶层 `query` 字段——搜索单独一条也是放进 `queries` 数组。
 
 返回候选后直接在当前对话里判断、比较和展示。`resource_id` 只是当前 MCP 进程里的资源句柄。补搜直接再次 Search，没有 ResultSet lineage、extend version、Flow version。
 
@@ -167,7 +175,7 @@ resource_archive(
 
 ### MCP 重启
 
-`resource_id` 是进程内状态，MCP 重启后旧句柄失效，重新搜索即可。下载 Job 不受重启影响：Job 状态持久在 `jobs/<job_id>/job.json`，worker 独立于 MCP 进程运行，重启后 `resource_job_status` / `resource_job_cancel` / `resource_archive` 照常使用。worker 中断的非终态 Job 会如实显示 `interrupted`，重新发起下载即可（不做断点续传）。
+`resource_id` 和 Job 状态是进程内状态。MCP 进程重启后旧句柄可能失效，重新搜索即可。不要为低频恢复场景构造 Flow、SQLite 状态机或源码恢复流程。
 
 ## 9. 数据面边界
 
