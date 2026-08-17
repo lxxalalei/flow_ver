@@ -141,6 +141,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         keyword: str = "",
         start_day: str = "",
         end_day: str = "",
+        specs: list[str] | None = None,
         max_items: int = 500,
     ) -> dict[str, Any]:
         """Enumerate resources in bulk into a results file (batch mode).
@@ -155,6 +156,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
           creator id (sec_uid / mid / profile URL)
         - time_range_search: a keyword's results day by day over
           [start_day, end_day] (YYYY-MM-DD), currently bilibili only
+        - catalog_expand: a SmartEdu textbook's national-lesson courses via
+          CDN JSON; specs like ["语文/一年级/上册/统编版"]
         """
         return _call(
             lambda: resource_service.batch_collect(
@@ -164,6 +167,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
                 keyword=keyword,
                 start_day=start_day,
                 end_day=end_day,
+                specs=specs,
                 max_items=max_items,
             )
         )

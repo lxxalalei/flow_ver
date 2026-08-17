@@ -626,6 +626,7 @@ class ResourceService:
         keyword: str = "",
         start_day: str = "",
         end_day: str = "",
+        specs: list[str] | None = None,
         max_items: int = 500,
     ) -> dict[str, Any]:
         platform = str(platform or "").strip()
@@ -634,6 +635,7 @@ class ResourceService:
         keyword = str(keyword or "").strip()
         start_day = str(start_day or "").strip()
         end_day = str(end_day or "").strip()
+        specs = list(specs or [])
         if mode not in BATCH_MODES:
             raise DomainError(
                 "INVALID_ARGUMENT",
@@ -669,6 +671,12 @@ class ResourceService:
                 raise DomainError("INVALID_ARGUMENT", "start_day 不能晚于 end_day")
             if (end_dt - start_dt).days > 90:
                 raise DomainError("INVALID_ARGUMENT", "单次时间范围最多 90 天")
+        if mode == "catalog_expand":
+            if not specs or not all(str(s).strip() for s in specs):
+                raise DomainError(
+                    "INVALID_ARGUMENT",
+                    "catalog_expand 需要 specs，如 语文/一年级/上册/统编版",
+                )
         if (
             not isinstance(max_items, int)
             or isinstance(max_items, bool)
@@ -689,6 +697,7 @@ class ResourceService:
                 "keyword": keyword,
                 "start_day": start_day,
                 "end_day": end_day,
+                "specs": specs,
                 "max_items": max_items,
             },
         )

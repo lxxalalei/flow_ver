@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,7 @@ from .job_state import (
 LOGGER = logging.getLogger(__name__)
 
 RESULTS_NAME = "results.jsonl"
-BATCH_MODES = frozenset({"creator_full", "time_range_search"})
+BATCH_MODES = frozenset({"creator_full", "time_range_search", "catalog_expand"})
 MAX_ITEMS_HARD_CAP = 1000
 BATCH_READ_PAGE_CAP = 50
 
@@ -45,6 +46,9 @@ def public_item(resource: dict[str, Any]) -> dict[str, Any]:
     for key in ("author", "published_at", "language", "download_feasibility"):
         if isinstance(metadata, dict) and metadata.get(key) not in (None, ""):
             item[key] = metadata[key]
+    for key in ("activity_id", "textbook"):
+        if resource.get(key) not in (None, ""):
+            item[key] = resource[key]
     return item
 
 
@@ -101,6 +105,10 @@ def run_batch_collect(directory: Path, service: Any = None) -> int:
                 str(request.get("end_day") or ""),
                 max_items,
                 cancel,
+            )
+        elif mode == "catalog_expand":
+            items = _collect_catalog_expand(
+                service, platform, list(request.get("specs") or []), cancel
             )
     except DomainError as exc:
         failures.append(
@@ -242,6 +250,54 @@ def _collect_time_range(
             retryable=True,
         )
     return collected
+
+
+def _collect_catalog_expand(
+    service: Any, platform: str, specs: list[str], cancel: Any
+) -> list[dict[str, Any]]:
+    """Enumerate a SmartEdu textbook's national-lesson courses via CDN JSON."""
+
+    if platform != "smartedu":
+        raise DomainError(
+            "FEATURE_NOT_SUPPORTED", "catalog_expand 当前仅支持 smartedu"
+        )
+    specs = [s for s in specs if str(s).strip()]
+    if not specs:
+        raise DomainError(
+            "INVALID_ARGUMENT",
+            "catalog_expand 需要 specs，如 语文/一年级/上册/统编版",
+        )
+    if cancel.is_set():
+        return []
+    adapters = getattr(service.search_provider, "_adapters", None) or {}
+    adapter = adapters.get("smartedu")
+    discover = getattr(adapter, "discover_textbook_courses", None)
+    if not callable(discover):
+        raise DomainError("FEATURE_NOT_SUPPORTED", "smartedu 适配器不支持教材发现")
+    courses = discover(specs)
+    items: list[dict[str, Any]] = []
+    for course in courses:
+        aid = str(course.get("id") or "")
+        title = str(course.get("title") or "").strip()
+        if not aid or not title:
+            continue
+        items.append(
+            public_item(
+                {
+                    "platform": "smartedu",
+                    "title": title,
+                    "resource_type": "course",
+                    "source_url": (
+                        f"https://basic.smartedu.cn/syncClassroom/classActivity"
+                        f"?activityId={urllib.parse.quote(aid)}"
+                    ),
+                    "activity_id": aid,
+                    "textbook": course.get("textbook"),
+                    "metadata": {},
+                }
+            )
+        )
+    return items
 
 
 def _first_error(platform_runs: list[dict[str, Any]]) -> dict[str, Any] | None:
