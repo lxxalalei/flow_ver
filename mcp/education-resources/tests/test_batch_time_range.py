@@ -1,4 +1,4 @@
-"""0057 M4: time_range_search batch mode (bilibili day-by-day enumeration)."""
+"""Time-range batch mode: day-by-day enumeration without arbitrary date caps."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ class _FakeBili:
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
-        self.day_count = 3  # fake catalogue spans 3 days
 
     def search(self, query, limit, *, pubtime_begin_s=0, pubtime_end_s=0):
         from datetime import datetime
@@ -38,7 +37,6 @@ class _FakeBili:
                 "end_s": pubtime_end_s,
             }
         )
-        # every day yields 2 distinct items
         return [
             {
                 "platform": "bilibili",
@@ -103,7 +101,7 @@ class TimeRangeTests(unittest.TestCase):
         run_batch_collect(directory, self.service)
         return result["job_id"]
 
-    def test_iterates_day_by_day_and_dedupes(self) -> None:
+    def test_iterates_day_by_day(self) -> None:
         job_id = self._run(
             mode="time_range_search",
             keyword="纪录片",
@@ -113,27 +111,24 @@ class TimeRangeTests(unittest.TestCase):
         )
         status = self.service.job_status(job_id)
         self.assertEqual("succeeded", status["status"])
-        # 3 days x 2 items
         self.assertEqual(6, status["progress"]["completed"])
         begins = sorted(c["begin"] for c in self.bili.calls)
         self.assertEqual(
             [date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 3)], begins
         )
-        # day window is one full day inclusive
         self.assertEqual(86399, self.bili.calls[0]["end_s"] - self.bili.calls[0]["begin_s"])
         page = self.service.batch_read(job_id, limit=20)
         self.assertEqual(6, len(page["items"]))
         self.assertTrue(page["complete"])
 
-    def test_dedup_across_days(self) -> None:
-        # same URL appears on every day → single item
+    def test_dedup_uses_url_not_title(self) -> None:
         original = self.bili.search
 
         def same_url_every_day(query, limit, *, pubtime_begin_s=0, pubtime_end_s=0):
             return [
                 {
                     "platform": "bilibili",
-                    "title": "重复",
+                    "title": "重复标题",
                     "source_url": "https://www.bilibili.com/video/BVdup",
                     "resource_type": "video",
                     "metadata": {},
@@ -154,6 +149,36 @@ class TimeRangeTests(unittest.TestCase):
         status = self.service.job_status(job_id)
         self.assertEqual(1, status["progress"]["completed"])
 
+    def test_same_title_different_urls_are_kept(self) -> None:
+        original = self.bili.search
+
+        def same_title(query, limit, *, pubtime_begin_s=0, pubtime_end_s=0):
+            from datetime import datetime
+
+            day = datetime.fromtimestamp(pubtime_begin_s).date()
+            return [
+                {
+                    "platform": "bilibili",
+                    "title": "同名作品",
+                    "source_url": f"https://www.bilibili.com/video/BV{day.day}",
+                    "resource_type": "video",
+                    "metadata": {},
+                }
+            ], None
+
+        self.bili.search = same_title
+        try:
+            job_id = self._run(
+                mode="time_range_search",
+                keyword="x",
+                start_day="2026-08-01",
+                end_day="2026-08-03",
+                max_items=10,
+            )
+        finally:
+            self.bili.search = original
+        self.assertEqual(3, self.service.job_status(job_id)["progress"]["completed"])
+
     def test_validation(self) -> None:
         for kwargs in (
             {"mode": "time_range_search", "keyword": "", "start_day": "2026-08-01", "end_day": "2026-08-02"},
@@ -163,15 +188,17 @@ class TimeRangeTests(unittest.TestCase):
             with self.assertRaises(DomainError) as ctx:
                 self.service.batch_collect("bilibili", **kwargs)
             self.assertEqual("INVALID_ARGUMENT", ctx.exception.code)
-        # >90 day window rejected
-        with self.assertRaises(DomainError):
-            self.service.batch_collect(
-                "bilibili",
-                mode="time_range_search",
-                keyword="x",
-                start_day="2026-01-01",
-                end_day="2026-12-31",
-            )
+
+        # Long ranges are accepted; the platform/end date decides completion.
+        result = self.service.batch_collect(
+            "bilibili",
+            mode="time_range_search",
+            keyword="x",
+            start_day="2026-01-01",
+            end_day="2026-12-31",
+            max_items=1,
+        )
+        self.assertEqual("queued", result["status"])
 
     def test_unsupported_platform_fails_honestly(self) -> None:
         service = _service(self.root, _Provider({}))

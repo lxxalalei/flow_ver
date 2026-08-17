@@ -1,11 +1,7 @@
 """Bilibili video search adapter.
 
-Uses Bilibili's public WBI-signed web search API.  Auth is cookie-based
-— the adapter pulls stored cookies from ``SessionStore`` at search time.
-Without a valid session the adapter returns ``AUTH_REQUIRED``.
-
-Ported from ``legacy/.../bilibili/bilibili_search.py``.  All HTTP uses
-the shared ``urlopen_with_fallback`` helper (with Windows curl fallback).
+Uses Bilibili's public WBI-signed web APIs. Keyword search is bounded by the
+caller; batch enumeration can stream pages until the platform reports the end.
 """
 
 from __future__ import annotations
@@ -14,7 +10,7 @@ import json
 import re
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request
@@ -33,6 +29,7 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137 Safari/537.36"
 )
+_SPACE_MID_RE = re.compile(r"https?://space\.bilibili\.com/(\d+)")
 
 
 def _strip_html(text: Any) -> str:
@@ -52,6 +49,12 @@ def _count_value(value: Any) -> int | str | None:
         return text
 
 
+def _parse_mid(creator_id: str) -> str:
+    value = str(creator_id or "").strip()
+    match = _SPACE_MID_RE.match(value)
+    return match.group(1) if match else value
+
+
 class BilibiliSearchAdapter:
     """Search Bilibili videos through the WBI-signed web API."""
 
@@ -61,26 +64,20 @@ class BilibiliSearchAdapter:
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
-        # nav probe state (login freshness + wbi key cache)
         self._nav_logged_in: bool | None = None
         self._wbi_cache: tuple[float, str, str] | None = None
 
     _WBI_CACHE_SECONDS = 600.0
 
     def _session_check(self, cookie: str) -> dict[str, Any] | None:
-        """AUTH_REQUIRED when a stored bilibili session has gone dead.
-
-        Guest requests (no cookie) stay allowed — B站 search works logged
-        out; an expired cookie used to surface as a silent empty result
-        (2026-08-16 feedback #3).
-        """
+        """Return AUTH_REQUIRED when a stored session has gone dead."""
 
         if not cookie:
             return None
         try:
-            self._wbi_keys(cookie)  # also refreshes _nav_logged_in
+            self._wbi_keys(cookie)
         except _AdapterError:
-            return None  # probe failures surface through the search itself
+            return None
         if self._nav_logged_in is False:
             return adapter_error(
                 "AUTH_REQUIRED",
@@ -88,8 +85,6 @@ class BilibiliSearchAdapter:
                 False,
             )
         return None
-
-    # -- internal helpers ------------------------------------------------
 
     def _request_json(
         self, url: str, *, referer: str, cookie: str
@@ -187,7 +182,68 @@ class BilibiliSearchAdapter:
             platform_signals=signals or None,
         )
 
-    # -- public API ------------------------------------------------------
+    def iter_search(
+        self,
+        query: str,
+        *,
+        pubtime_begin_s: int = 0,
+        pubtime_end_s: int = 0,
+        cancel_event: Any = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield keyword results page by page until Bilibili reports the end."""
+
+        session_data = self.session_store.get_session_data("bilibili")
+        cookie = SessionStore._cookie_header(session_data) if session_data else ""
+        auth_error = self._session_check(cookie)
+        if auth_error:
+            raise _AdapterError(
+                str(auth_error.get("code") or "AUTH_REQUIRED"),
+                str(auth_error.get("message") or "B站登录态不可用"),
+                bool(auth_error.get("retryable")),
+            )
+        img_key, sub_key = self._wbi_keys(cookie)
+        page = 1
+        page_size = 50
+        referer = f"https://search.bilibili.com/all?keyword={quote(query)}"
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            payload: dict[str, Any] = {
+                "keyword": query,
+                "page": page,
+                "page_size": page_size,
+                "search_type": "video",
+                "order": "totalrank",
+            }
+            if pubtime_begin_s:
+                payload["pubtime_begin_s"] = pubtime_begin_s
+            if pubtime_end_s:
+                payload["pubtime_end_s"] = pubtime_end_s
+            params = wbi_sign(payload, img_key, sub_key)
+            response = self._request_json(
+                f"{SEARCH_URL}?{urlencode(params)}", referer=referer, cookie=cookie
+            )
+            code = response.get("code")
+            if code != 0:
+                message = str(response.get("message") or "B站搜索失败")
+                if code in (-101, -111):
+                    raise _AdapterError("AUTH_REQUIRED", message, False)
+                if code in (-412, -352):
+                    raise _AdapterError("NETWORK_BLOCKED", message, True)
+                raise _AdapterError("PARTIAL_FAILURE", f"B站 API {code}: {message}", False)
+
+            items = ((response.get("data") or {}).get("result") or [])
+            if not items:
+                break
+            for item in items:
+                if isinstance(item, dict):
+                    normalized = self._normalize_item(item)
+                    if normalized:
+                        yield normalized
+            if len(items) < page_size:
+                break
+            page += 1
 
     def search(
         self,
@@ -197,121 +253,94 @@ class BilibiliSearchAdapter:
         pubtime_begin_s: int = 0,
         pubtime_end_s: int = 0,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        # Cookie is optional — B站 search works without login, but having
-        # a session may improve personalization and avoid rate limits.
-        session_data = self.session_store.get_session_data("bilibili")
-        cookie = SessionStore._cookie_header(session_data) if session_data else ""
-
-        auth_error = self._session_check(cookie)
-        if auth_error:
-            return [], auth_error
-
-        try:
-            img_key, sub_key = self._wbi_keys(cookie)
-        except _AdapterError as exc:
-            return [], exc.to_dict()
-
         results: list[dict[str, Any]] = []
-        page = 1
-        referer = f"https://search.bilibili.com/all?keyword={quote(query)}"
-
         try:
-            while len(results) < limit:
-                page_size = min(50, limit - len(results))
-                payload: dict[str, Any] = {
-                    "keyword": query,
-                    "page": page,
-                    "page_size": page_size,
-                    "search_type": "video",
-                    "order": "totalrank",
-                }
-                if pubtime_begin_s:
-                    payload["pubtime_begin_s"] = pubtime_begin_s
-                if pubtime_end_s:
-                    payload["pubtime_end_s"] = pubtime_end_s
-                params = wbi_sign(payload, img_key, sub_key)
-                url = f"{SEARCH_URL}?{urlencode(params)}"
-                response = self._request_json(url, referer=referer, cookie=cookie)
-
-                code = response.get("code")
-                if code != 0:
-                    message = str(response.get("message") or "B站搜索失败")
-                    if code in (-101, -111):
-                        return [], adapter_error("AUTH_REQUIRED", message, False)
-                    if code in (-412, -352):
-                        return [], adapter_error("NETWORK_BLOCKED", message, True)
-                    return [], adapter_error("PARTIAL_FAILURE", f"B站 API {code}: {message}", False)
-
-                items = ((response.get("data") or {}).get("result") or [])
-                if not items:
+            for resource in self.iter_search(
+                query,
+                pubtime_begin_s=pubtime_begin_s,
+                pubtime_end_s=pubtime_end_s,
+            ):
+                results.append(resource)
+                if len(results) >= limit:
                     break
-                for item in items:
-                    if isinstance(item, dict):
-                        normalized = self._normalize_item(item)
-                        if normalized:
-                            results.append(normalized)
-                            if len(results) >= limit:
-                                break
-                if len(items) < page_size:
-                    break
-                page += 1
         except _AdapterError as exc:
-            # If we already have partial results, return them with the error.
             return results, exc.to_dict()
-
         return results, None
 
+    def iter_creator(
+        self, creator_id: str, *, cancel_event: Any = None
+    ) -> Iterator[dict[str, Any]]:
+        """Yield a creator's videos until the space API reports the end."""
+
+        mid = _parse_mid(creator_id)
+        session_data = self.session_store.get_session_data("bilibili")
+        cookie = SessionStore._cookie_header(session_data) if session_data else ""
+        auth_error = self._session_check(cookie)
+        if auth_error:
+            raise _AdapterError(
+                str(auth_error.get("code") or "AUTH_REQUIRED"),
+                str(auth_error.get("message") or "B站登录态不可用"),
+                bool(auth_error.get("retryable")),
+            )
+        img_key, sub_key = self._wbi_keys(cookie)
+        pn = 1
+        page_size = 30
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            params = wbi_sign(
+                {
+                    "mid": mid,
+                    "pn": pn,
+                    "ps": page_size,
+                    "order": "pubdate",
+                    "search_type": "video",
+                },
+                img_key,
+                sub_key,
+            )
+            response = self._request_json(
+                f"{CREATOR_URL}?{urlencode(params)}",
+                referer=f"https://space.bilibili.com/{mid}/video",
+                cookie=cookie,
+            )
+            code = response.get("code")
+            if code not in (None, 0):
+                raise _AdapterError(
+                    "PARTIAL_FAILURE",
+                    f"B站 creator API {code}: {response.get('message', '')}",
+                    False,
+                )
+            vlist = ((response.get("data") or {}).get("list") or {}).get("vlist") or []
+            if not vlist:
+                break
+            for raw in vlist:
+                item = raw
+                if "created" in item and "pubdate" not in item:
+                    item = {**item, "pubdate": item["created"]}
+                normalized = self._normalize_item(item)
+                if not normalized:
+                    continue
+                author_mid = str(
+                    (normalized.get("metadata") or {}).get("creator_mid") or ""
+                )
+                if author_mid and author_mid != mid:
+                    continue
+                yield normalized
+            if len(vlist) < page_size:
+                break
+            pn += 1
 
     def search_creator(
         self, creator_id: str, limit: int, cancel_event: Any = None
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        session_data = self.session_store.get_session_data("bilibili")
-        cookie = SessionStore._cookie_header(session_data) if session_data else ""
-        auth_error = self._session_check(cookie)
-        if auth_error:
-            return [], auth_error
-        try:
-            img_key, sub_key = self._wbi_keys(cookie)
-        except _AdapterError as exc:
-            return [], exc.to_dict()
         results: list[dict[str, Any]] = []
-        pn = 1
         try:
-            while len(results) < limit:
-                if cancel_event is not None and cancel_event.is_set():
+            for resource in self.iter_creator(creator_id, cancel_event=cancel_event):
+                results.append(resource)
+                if len(results) >= limit:
                     break
-                ps = min(30, limit - len(results))
-                params = wbi_sign(
-                    {"mid": creator_id, "pn": pn, "ps": ps,
-                     "order": "pubdate", "search_type": "video"},
-                    img_key, sub_key)
-                url = f"{CREATOR_URL}?{urlencode(params)}"
-                response = self._request_json(
-                    url, referer=f"https://space.bilibili.com/{creator_id}/video", cookie=cookie)
-                code = response.get("code")
-                if code not in (None, 0):
-                    return [], adapter_error(
-                        "PARTIAL_FAILURE", f"B站 creator API {code}: {response.get('message', '')}", False)
-                vlist = ((response.get("data") or {}).get("list") or {}).get("vlist") or []
-                if not vlist:
-                    break
-                for item in vlist:
-                    if "created" in item and "pubdate" not in item:
-                        item = {**item, "pubdate": item["created"]}
-                    normalized = self._normalize_item(item)
-                    if not normalized:
-                        continue
-                    author_mid = str(
-                        (normalized.get("metadata") or {}).get("creator_mid") or ""
-                    )
-                    if author_mid and author_mid != str(creator_id).strip():
-                        continue  # 合作/互投内容：B站空间接口会混入他人投稿
-                    results.append(normalized)
-                    if len(results) >= limit:
-                        break
-                if len(vlist) < ps:
-                    break
-                pn += 1
         except _AdapterError as exc:
             return results, exc.to_dict()
         return results, None

@@ -1,13 +1,14 @@
 """Thin capability service for resource search, inspect, download and archive.
 
 There is no Flow, ResultSet, Presentation, Selection or persisted Plan here.
-Search results live in a process-local handle map; downloads are asynchronous
-jobs because progress and cancellation are real user-facing needs.
+Resource handles are process-local. Download and batch jobs are file-backed
+because progress, cancellation and surviving an MCP restart are real needs.
 """
 
 from __future__ import annotations
 
 import importlib
+from itertools import islice
 import json
 import logging
 import secrets
@@ -20,12 +21,12 @@ from .acquisition.models import AcquisitionStrategy
 from .acquisition.planner import AcquisitionPlanner
 from .acquisition.web_materializer import WebMaterializer
 from .archive import archive_downloaded_files
+from .batch import BATCH_MODES
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
 from .inspection import InspectionRouter
 from .inspection_registry import default_inspection_router
-from .batch import BATCH_MODES
 from .job_state import (
     CANCEL_FLAG_NAME,
     SPAWN_GRACE_SECONDS,
@@ -72,16 +73,11 @@ def _safe_int(value: Any) -> int:
 
 
 def _validate_creator_id(platform: str, creator_id: str) -> str:
-    """Reject truncated/malformed creator ids loudly.
-
-    Douyin sec_user_ids start with ``MS4wLjAB`` and are ~76 chars; a
-    truncated value used to produce a silent empty enumeration (real
-    incident 2026-08-17).  Bilibili mids are plain numeric ids.
-    """
+    """Reject clearly malformed creator ids and normalize profile URLs."""
 
     if platform == "douyin":
         if creator_id.startswith(("http://", "https://")):
-            return creator_id  # full profile URL; parsed downstream
+            return creator_id
         if not creator_id.startswith("MS4wLjAB"):
             raise DomainError(
                 "INVALID_ARGUMENT",
@@ -94,6 +90,15 @@ def _validate_creator_id(platform: str, creator_id: str) -> str:
                 "；请从搜索结果候选的 creator_id 字段直接取，不要手工复制",
             )
     elif platform == "bilibili":
+        if creator_id.startswith(("http://", "https://")):
+            parsed = urllib.parse.urlparse(creator_id)
+            mid = parsed.path.strip("/").split("/", 1)[0]
+            if parsed.hostname == "space.bilibili.com" and mid.isdigit():
+                return mid
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "B站主页 URL 应类似 https://space.bilibili.com/<mid>",
+            )
         if not creator_id.isdigit():
             raise DomainError(
                 "INVALID_ARGUMENT",
@@ -111,13 +116,7 @@ _SEARCH_TASK_EXAMPLE = (
 def _normalize_search_tasks(
     search_tasks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Validate search_tasks loudly.
-
-    A malformed task used to be dropped silently, which surfaced as a
-    successful-but-empty search and sent the agent digging through source
-    code to guess the shape.  Reject anything malformed with the expected
-    structure spelled out instead.
-    """
+    """Validate search_tasks loudly instead of silently dropping malformed tasks."""
 
     normalized: list[dict[str, Any]] = []
     for task in search_tasks:
@@ -150,8 +149,6 @@ def _normalize_search_tasks(
                 "INVALID_ARGUMENT",
                 f"search_tasks 项缺少 platform；{_SEARCH_TASK_EXAMPLE}",
             )
-        # adapter registry ids use hyphens (annas-archive); callers keep
-        # guessing underscores (feedback #1) — normalize instead of failing.
         platform = platform.replace("_", "-")
         raw_queries = task.get("queries")
         if not isinstance(raw_queries, list) or not raw_queries:
@@ -190,7 +187,9 @@ def _normalize_search_tasks(
 def _resource_type(value: Any) -> str:
     text = str(value or "other").strip()
     lowered = text.lower()
-    return _RESOURCE_TYPE_MAP.get(text, lowered if lowered in _ALLOWED_RESOURCE_TYPES else "other")
+    return _RESOURCE_TYPE_MAP.get(
+        text, lowered if lowered in _ALLOWED_RESOURCE_TYPES else "other"
+    )
 
 
 def _provider_registrations(
@@ -239,12 +238,7 @@ def _provider_registrations(
 
 
 class ResourceService:
-    """Expose actual resource capabilities with minimal process-local state.
-
-    Search handles stay process-local; download jobs live in detached worker
-    processes whose state is the ``jobs/<job_id>/job.json`` file, so jobs
-    survive an MCP/gateway restart (0056).
-    """
+    """Expose resource capabilities with only the state each capability needs."""
 
     def __init__(
         self,
@@ -276,11 +270,9 @@ class ResourceService:
         self.planner = AcquisitionPlanner(self.acquisition_router)
         self.job_runner = job_runner or JobSpawner(max_workers=self.settings.max_workers)
         self._resources: dict[str, dict[str, Any]] = {}
-        self._resource_cache = self.settings.data_dir / "resources.jsonl"
         self._lock = threading.RLock()
         if recover_jobs:
             self._recover_interrupted_jobs()
-            self._load_resource_cache()
 
     def shutdown(self) -> None:
         self.job_runner.shutdown(wait=False)
@@ -361,55 +353,19 @@ class ResourceService:
                     "platform": platform,
                     "title": title,
                     "source_url": source_url,
-                    "resource_type": _resource_type(raw.get("resource_type") or raw.get("type")),
+                    "resource_type": _resource_type(
+                        raw.get("resource_type") or raw.get("type")
+                    ),
                 }
             )
             metadata = raw.get("metadata")
             resource["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
             with self._lock:
                 self._resources[resource_id] = resource
-            self._append_resource_cache(resource)
-            candidates.append(self._public_resource(resource, include_summary=include_summary))
+            candidates.append(
+                self._public_resource(resource, include_summary=include_summary)
+            )
         return candidates
-
-    _RESOURCE_CACHE_LIMIT = 1000
-
-    def _load_resource_cache(self) -> None:
-        """Reload recent search handles so an MCP restart doesn't strand
-        in-flight conversations (feedback #7); a bounded cache, not state."""
-
-        try:
-            lines = self._resource_cache.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return
-        for line in lines[-self._RESOURCE_CACHE_LIMIT :]:
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(data, dict) and data.get("resource_id"):
-                self._resources.setdefault(str(data["resource_id"]), data)
-
-    def _append_resource_cache(self, resource: dict[str, Any]) -> None:
-        try:
-            if self._resource_cache.exists():
-                lines = self._resource_cache.read_text(encoding="utf-8").splitlines()
-                if len(lines) >= self._RESOURCE_CACHE_LIMIT * 2:
-                    with self._lock:
-                        recent = list(self._resources.values())[
-                            -self._RESOURCE_CACHE_LIMIT :
-                        ]
-                    self._resource_cache.write_text(
-                        "\n".join(
-                            json.dumps(item, ensure_ascii=False) for item in recent
-                        )
-                        + "\n",
-                        encoding="utf-8",
-                    )
-            with self._resource_cache.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(resource, ensure_ascii=False) + "\n")
-        except OSError:
-            LOGGER.warning("could not persist resource cache", exc_info=True)
 
     @staticmethod
     def _public_resource(
@@ -468,12 +424,7 @@ class ResourceService:
         return self._public_inspection(resource_id, resolution)
 
     def import_url(self, source_url: str) -> dict[str, Any]:
-        """Register an external URL as a resource handle and inspect it.
-
-        The bridge between host-side web search and the MCP pipeline: any
-        URL the agent found with its own search tool becomes a resource_id
-        that can be downloaded/archived like a search candidate.
-        """
+        """Register an external URL as a process-local resource handle and inspect it."""
 
         url = canonical_http_url(str(source_url or "").strip())
         resource_id = new_id("res")
@@ -489,7 +440,6 @@ class ResourceService:
         }
         with self._lock:
             self._resources[resource_id] = resource
-        self._append_resource_cache(resource)
 
         resolution = self._inspect_raw(resource)
         resolved = resolution.get("resolved_resource") or {}
@@ -544,9 +494,17 @@ class ResourceService:
                 {
                     key: raw[key]
                     for key in (
-                        "representation_id", "scope", "kind", "role", "container",
-                        "mime_type", "language", "estimated_size_bytes",
-                        "materializable", "requires_auth", "technical_availability",
+                        "representation_id",
+                        "scope",
+                        "kind",
+                        "role",
+                        "container",
+                        "mime_type",
+                        "language",
+                        "estimated_size_bytes",
+                        "materializable",
+                        "requires_auth",
+                        "technical_availability",
                     )
                     if raw.get(key) is not None
                 }
@@ -628,12 +586,10 @@ class ResourceService:
         pid = job.get("pid")
         if pid and process_alive(pid):
             if repeat_cancel:
-                # The worker ignored the flag (or is stuck): force kill.
                 terminate_process(int(pid))
                 write_job(directory, {**read_job(directory), "status": "cancelled"})
                 return {"job_id": job_id, "status": "cancelled"}
             return {"job_id": job_id, "status": "cancelling"}
-        # No live worker owns job.json any more; the parent may rewrite it.
         write_job(directory, {**job, "status": "cancelled"})
         return {"job_id": job_id, "status": "cancelled"}
 
@@ -662,12 +618,9 @@ class ResourceService:
         )
 
         archived_by_asset = {
-            item.get("asset_id"): item
-            for item in archived
-            if item.get("asset_id")
+            item.get("asset_id"): item for item in archived if item.get("asset_id")
         }
         if archived_by_asset:
-            # Terminal status implies the worker is gone; parent owns job.json.
             current = read_job(directory)
             current["files"] = [
                 dict(archived_by_asset.get(item.get("asset_id"), item))
@@ -684,12 +637,6 @@ class ResourceService:
         }
 
     def _creator_id_from_resource(self, resource_id: str) -> str:
-        """Resolve a candidate handle to its creator id (full, never truncated).
-
-        Lets the agent point at a search candidate directly instead of
-        hand-copying a long platform creator id (real incident 2026-08-17).
-        """
-
         resource = self._get_resource(resource_id)
         metadata = resource.get("metadata") or {}
         creator_id = (
@@ -704,10 +651,6 @@ class ResourceService:
             )
         return str(creator_id)
 
-    # ------------------------------------------------------------------
-    # Batch collection (0057 M1)
-    # ------------------------------------------------------------------
-
     def batch_collect(
         self,
         platform: str,
@@ -718,7 +661,7 @@ class ResourceService:
         start_day: str = "",
         end_day: str = "",
         specs: list[str] | None = None,
-        max_items: int = 500,
+        max_items: int | None = None,
     ) -> dict[str, Any]:
         platform = str(platform or "").strip()
         creator_id = str(creator_id or "").strip()
@@ -766,20 +709,22 @@ class ResourceService:
                 ) from None
             if start_dt > end_dt:
                 raise DomainError("INVALID_ARGUMENT", "start_day 不能晚于 end_day")
-            if (end_dt - start_dt).days > 90:
-                raise DomainError("INVALID_ARGUMENT", "单次时间范围最多 90 天")
         if mode == "catalog_expand":
             if not specs or not all(str(s).strip() for s in specs):
                 raise DomainError(
                     "INVALID_ARGUMENT",
                     "catalog_expand 需要 specs，如 语文/一年级/上册/统编版",
                 )
-        if (
+        if max_items is not None and (
             not isinstance(max_items, int)
             or isinstance(max_items, bool)
-            or not 1 <= max_items <= 1000
+            or max_items < 1
         ):
-            raise DomainError("INVALID_ARGUMENT", "max_items 必须在 1..1000 之间")
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "max_items 留空表示不截断；传入时必须是大于 0 的整数",
+            )
+
         job_id = new_id("job")
         directory = job_dir(self.settings.jobs_dir, job_id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -841,28 +786,30 @@ class ResourceService:
         limit = min(limit, 50)
         path = directory / "results.jsonl"
         items: list[dict[str, Any]] = []
-        total = _safe_int(job.get("total"))
+        page_line_count = 0
         if path.is_file():
-            lines = path.read_text(encoding="utf-8").splitlines()
-            total = len(lines)
-            for line in lines[offset : offset + limit]:
+            with path.open("r", encoding="utf-8") as handle:
+                page_lines = list(islice(handle, offset, offset + limit))
+            page_line_count = len(page_lines)
+            for line in page_lines:
                 try:
                     items.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
+        total = max(_safe_int(job.get("total")), _safe_int(job.get("completed")))
+        status = str(job.get("status") or "")
         return {
             "job_id": job_id,
             "kind": "batch_collect",
-            "status": job.get("status"),
+            "status": status,
             "total": total,
             "offset": offset,
             "items": items,
-            "complete": offset + len(items) >= total,
+            "complete": (
+                status in TERMINAL_STATUSES
+                and offset + page_line_count >= total
+            ),
         }
-
-    # ------------------------------------------------------------------
-    # File-backed job state (0056)
-    # ------------------------------------------------------------------
 
     def _load_job(self, job_id: str) -> tuple[Any, dict[str, Any]]:
         directory = job_dir(self.settings.jobs_dir, job_id)
@@ -879,9 +826,9 @@ class ResourceService:
         if pid and process_alive(pid):
             return job
         if self.job_runner.is_pending(job_id):
-            return job  # still queued or spawning inside this process
+            return job
         if not pid and state_age_seconds(job) < SPAWN_GRACE_SECONDS:
-            return job  # a detached worker may be starting elsewhere
+            return job
         job = dict(job)
         job["status"] = "interrupted"
         try:
@@ -954,7 +901,6 @@ class ResourceService:
                 "size_bytes": artifact.byte_size,
                 "role": artifact.role,
                 "primary": artifact.primary,
-                # provenance for the archive manifest (feedback #5)
                 "platform": resource.get("platform"),
                 "source_url": resource.get("source_url"),
                 "title": resource.get("title"),
@@ -973,6 +919,6 @@ class ResourceService:
             if resource is None:
                 raise DomainError(
                     "RESOURCE_NOT_FOUND",
-                    "资源句柄不存在；MCP 进程重启后请重新搜索",
+                    "资源句柄不存在；若已知原 URL 请用 resource_import_url 重新建立句柄，否则重新定位该资源",
                 )
             return dict(resource)

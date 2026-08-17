@@ -1,9 +1,4 @@
-"""Guard rails for creator_id: format validation + resource_id closed loop.
-
-Real incident 2026-08-17: a truncated douyin sec_user_id (copied from
-truncated output) produced a silent empty enumeration.  These tests pin
-the loud rejection and the machine-to-machine path.
-"""
+"""Creator-id behavior: reject real truncation and support machine-to-machine IDs."""
 
 from __future__ import annotations
 
@@ -77,7 +72,6 @@ class CreatorIdGuardTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_truncated_douyin_id_rejected_loudly(self) -> None:
-        # the exact truncated value from the 2026-08-17 incident
         with self.assertRaises(DomainError) as ctx:
             self.service.batch_collect(
                 "douyin",
@@ -100,6 +94,16 @@ class CreatorIdGuardTests(unittest.TestCase):
             )
         self.assertEqual("INVALID_ARGUMENT", ctx.exception.code)
 
+    def test_bilibili_profile_url_normalizes_to_mid(self) -> None:
+        result = self.service.batch_collect(
+            "bilibili",
+            mode="creator_full",
+            creator_id="https://space.bilibili.com/434377496",
+        )
+        self.assertEqual(
+            "434377496", _request_creator_id(self.service, result["job_id"])
+        )
+
     def test_full_douyin_id_accepted(self) -> None:
         full = "MS4wLjABAAAA0JOY3ZvG349SJEpdMnka-6PQ7ZqfOQjoVGnv7X7rcasA97VQsEw6380VFNYKNMsK"
         result = self.service.batch_collect("douyin", mode="creator_full", creator_id=full)
@@ -107,7 +111,6 @@ class CreatorIdGuardTests(unittest.TestCase):
         self.assertEqual(full, _request_creator_id(self.service, result["job_id"]))
 
     def test_resource_id_closed_loop(self) -> None:
-        # register a candidate with the full creator id
         resource_id = "res_" + "2" * 32
         full = "MS4wLjABAAAA0JOY3ZvG349SJEpdMnka-6PQ7ZqfOQjoVGnv7X7rcasA97VQsEw6380VFNYKNMsK"
         self.service._resources[resource_id] = {

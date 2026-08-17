@@ -6,10 +6,8 @@ Usage::
 
 The parent process writes ``request.json`` plus a queued ``job.json`` into the
 job directory and then spawns this module detached (see ``jobs.spawn_worker``).
-While alive the worker owns ``job.json``: it mirrors the former in-process
-download loop, updates progress after every resource, and finishes with a
-terminal status.  Everything it prints lands in ``worker.log`` next to the job
-state, so a worker that dies mid-job leaves an honest trail.
+While alive the worker owns ``job.json`` and updates progress after each
+resource. Everything it prints lands in ``worker.log`` next to the job state.
 """
 
 from __future__ import annotations
@@ -40,7 +38,6 @@ def run(directory: Path) -> int:
         from .batch import run_batch_collect
 
         return run_batch_collect(directory)
-    job_id = str(request["job_id"])
     job_id = str(request["job_id"])
     resources = list(request.get("resources") or [])
     preferred_container = str(request.get("preferred_container") or "original")
@@ -137,8 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
-        print("usage: python -m education_resource_mcp.job_worker <job_dir>",
-              file=sys.stderr)
+        print(
+            "usage: python -m education_resource_mcp.job_worker <job_dir>",
+            file=sys.stderr,
+        )
         return 2
     return run(Path(args[0]).resolve())
 

@@ -52,18 +52,18 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         version="0.3.0",
         instructions=(
             "This MCP is a capability layer, not a workflow engine. "
-            "Use resource_search/resource_browse_creator to discover resources. "
+            "Use resource_search/resource_browse_creator to discover platform resources. "
+            "Use the host web search for general web discovery, then resource_import_url for a selected URL. "
             "Use resource_inspect only when details affect the decision. "
-            "Call resource_download only after the user has explicitly asked to download the selected resources. "
-            "After a successful or partial download, classify the files and call resource_archive to move them into the learning library. "
-            "Use resource_job_status for progress or resource_job_cancel to stop the job. "
-            "For bulk enumeration (a creator's full works) use resource_batch_collect and "
-            "page with resource_batch_read instead of browse_creator with a huge limit. "
-            "For web pages found with the host's own web search, register them with "
-            "resource_import_url to turn the URL into a downloadable resource handle. "
-            "Resource handles are process-local; if the MCP process restarts, search again. "
+            "Call resource_download only after the user has explicitly asked to download selected resources. "
+            "After a successful or partial download, classify the files and call resource_archive. "
+            "Use resource_job_status for progress or resource_job_cancel to stop a job. "
+            "For a creator's complete catalogue use resource_batch_collect without max_items and page it with resource_batch_read. "
+            "Set max_items only when the user explicitly wants a bound. "
+            "Resource handles are process-local. If one is lost after restart, re-import the selected URL when known; "
+            "otherwise precisely relocate that resource instead of rerunning the whole research task. "
             "Download and batch jobs run in detached workers and survive an MCP restart; "
-            "job_status reports interrupted for jobs whose worker died, and re-downloading starts from scratch."
+            "job_status reports interrupted for jobs whose worker died."
         ),
     )
 
@@ -72,11 +72,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         search_tasks: list[SearchTask],
         limit: int = 8,
     ) -> dict[str, Any]:
-        """Run the configured search adapters and return resource handles.
-
-        Each task picks one platform and carries its queries, e.g.
-        [{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}].
-        """
+        """Run configured platform search adapters and return resource handles."""
         return _call(
             lambda: resource_service.search(
                 [task.model_dump() for task in search_tasks], limit=limit
@@ -89,7 +85,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         creator_id: str,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """List resources published by one creator when the platform supports it."""
+        """Preview resources published by one creator."""
         return _call(
             lambda: resource_service.browse_creator(
                 platform,
@@ -100,12 +96,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_import_url(source_url: str) -> dict[str, Any]:
-        """Register an external URL as a resource handle and inspect it.
-
-        The bridge from host-side web search to the MCP pipeline: URLs the
-        agent found with its own web search become resource_ids that can be
-        downloaded, materialized and archived like any search candidate.
-        """
+        """Register an external URL as a process-local resource handle and inspect it."""
         return _call(
             lambda: resource_service.import_url(source_url),
             source_url=source_url,
@@ -113,7 +104,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_inspect(resource_id: str) -> dict[str, Any]:
-        """Inspect one search result for availability and concrete representations."""
+        """Inspect one resource for availability and concrete representations."""
         return _call(
             lambda: resource_service.inspect(resource_id),
             resource_id=resource_id,
@@ -134,7 +125,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_job_status(job_id: str) -> dict[str, Any]:
-        """Return progress, downloaded files and failures for one download job."""
+        """Return progress, files and failures for one download or batch job."""
         return _call(
             lambda: resource_service.job_status(job_id),
             job_id=job_id,
@@ -142,7 +133,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_job_cancel(job_id: str) -> dict[str, Any]:
-        """Cancel a queued or running download job."""
+        """Cancel a queued or running job."""
         return _call(
             lambda: resource_service.job_cancel(job_id),
             job_id=job_id,
@@ -157,23 +148,18 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         start_day: str = "",
         end_day: str = "",
         specs: list[str] | None = None,
-        max_items: int = 500,
+        max_items: int | None = None,
     ) -> dict[str, Any]:
-        """Enumerate resources in bulk into a results file (batch mode).
+        """Enumerate a large result set into ``results.jsonl``.
 
-        Runs as a detached job that survives restarts; the response stays
-        small (job handle only) and the full list lands in results.jsonl.
-        Page through it with resource_batch_read instead of pulling the whole
-        list into the conversation.
+        Omit max_items for complete enumeration. Supply max_items only when
+        the user explicitly requests a bound. Results are streamed to disk
+        and read back with resource_batch_read.
 
         Modes:
-        - creator_full: a creator's full works; creator_id is the platform
-          creator id (sec_uid / mid / profile URL) or a resource_id of one
-          of that creator's works from a previous search (recommended)
-        - time_range_search: a keyword's results day by day over
-          [start_day, end_day] (YYYY-MM-DD), currently bilibili only
-        - catalog_expand: a SmartEdu textbook's national-lesson courses via
-          CDN JSON; specs like ["语文/一年级/上册/统编版"]
+        - creator_full: creator id, profile URL, or resource_id from one work
+        - time_range_search: Bilibili keyword over [start_day, end_day]
+        - catalog_expand: SmartEdu textbook specs
         """
         return _call(
             lambda: resource_service.batch_collect(
@@ -194,7 +180,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         offset: int = 0,
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Read one page (default 20, max 50 items) of a batch_collect job."""
+        """Read one page (default 20, max 50) without truncating the stored result set."""
         return _call(
             lambda: resource_service.batch_read(job_id, offset=offset, limit=limit),
             job_id=job_id,
@@ -206,12 +192,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         domain_id: str = "",
         topic: str = "",
     ) -> dict[str, Any]:
-        """Move completed download files into the learning library by domain/topic.
-
-        domain_id accepts a configured domain id such as natural_science. Leave it
-        empty when classification is genuinely uncertain; the files go to 待分类.
-        topic is a free topic folder such as 天文与宇宙.
-        """
+        """Move completed download files into the learning library by domain/topic."""
         return _call(
             lambda: resource_service.archive(
                 job_id,

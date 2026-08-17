@@ -1,4 +1,4 @@
-"""Fixes for the 2026-08-16 OpenClaw real-testing feedback (#1/#3/#5/#7/#8/#9/#10)."""
+"""Focused regression tests for real OpenClaw integration feedback."""
 
 from __future__ import annotations
 
@@ -43,8 +43,6 @@ class _RecordingProvider:
 
 
 class PlatformIdTests(unittest.TestCase):
-    """#1 underscore ids normalize; unknown platforms list what exists."""
-
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -78,8 +76,6 @@ class PlatformIdTests(unittest.TestCase):
 
 
 class BilibiliSessionTests(unittest.TestCase):
-    """#3 dead session reports AUTH_REQUIRED; #9 foreign works filtered."""
-
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -118,7 +114,8 @@ class BilibiliSessionTests(unittest.TestCase):
             return_value={
                 "code": 0,
                 "data": {"isLogin": False, "wbi_img": {
-                    "img_url": "https://x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png", "sub_url": "https://x/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+                    "img_url": "https://x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+                    "sub_url": "https://x/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
                 }},
             },
         ):
@@ -136,7 +133,8 @@ class BilibiliSessionTests(unittest.TestCase):
                 "data": {
                     "isLogin": False,
                     "wbi_img": {
-                        "img_url": "https://x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png", "sub_url": "https://x/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+                        "img_url": "https://x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+                        "sub_url": "https://x/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
                     },
                     "result": [],
                 },
@@ -144,14 +142,15 @@ class BilibiliSessionTests(unittest.TestCase):
         ):
             resources, error = self.adapter.search("纪录片", 5)
         self.assertEqual([], resources)
-        self.assertIsNone(error)  # guest: silent ok, no false AUTH_REQUIRED
+        self.assertIsNone(error)
 
     def test_creator_listing_filters_foreign_works(self) -> None:
         self._patch_cookie()
         nav = {
             "code": 0,
             "data": {"isLogin": True, "wbi_img": {
-                "img_url": "https://x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png", "sub_url": "https://x/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+                "img_url": "https://x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+                "sub_url": "https://x/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
             }},
         }
         creator_page = {
@@ -179,23 +178,22 @@ class BilibiliSessionTests(unittest.TestCase):
         self.assertEqual("111", resources[0]["metadata"]["creator_mid"])
 
 
-class ResourceCacheTests(unittest.TestCase):
-    """#7 resource handles survive an MCP restart via a bounded jsonl cache."""
+class ProcessLocalResourceHandleTests(unittest.TestCase):
+    """Search handles are ephemeral; durable state starts only at a real Job."""
 
-    def test_handles_reload_after_restart(self) -> None:
+    def test_handles_do_not_reload_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
 
             class _OneHit:
                 def search(self, tasks, limit):
                     return [{
-                        "platform": "bilibili", "title": "候选",
+                        "platform": "bilibili",
+                        "title": "候选",
                         "source_url": "https://www.bilibili.com/video/BV1x",
-                        "resource_type": "video", "metadata": {},
+                        "resource_type": "video",
+                        "metadata": {},
                     }], []
-
-                def search_creator(self, *a, **k):  # pragma: no cover
-                    return [], []
 
             first = ResourceService(
                 settings=_settings(root), search_provider=_OneHit()
@@ -206,17 +204,16 @@ class ResourceCacheTests(unittest.TestCase):
 
             second = ResourceService(settings=_settings(root))
             try:
-                resource = second._get_resource(resource_id)
-                self.assertEqual("候选", resource["title"])
+                with self.assertRaises(DomainError) as ctx:
+                    second._get_resource(resource_id)
+                self.assertEqual("RESOURCE_NOT_FOUND", ctx.exception.code)
+                self.assertIn("resource_import_url", ctx.exception.message)
             finally:
                 second.shutdown()
-            cache = root / "resources.jsonl"
-            self.assertTrue(cache.is_file())
+            self.assertFalse((root / "resources.jsonl").exists())
 
 
 class ArchiveManifestTests(unittest.TestCase):
-    """#5 archive appends provenance lines to the library manifest."""
-
     def test_manifest_records_source(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -251,8 +248,6 @@ class ArchiveManifestTests(unittest.TestCase):
 
 
 class QueryTuningTests(unittest.TestCase):
-    """#10 书名号 becomes an exact phrase for the generic engine."""
-
     def test_book_title_becomes_quoted_phrase(self) -> None:
         self.assertEqual(
             '"毛泽东选集" 人民出版社',

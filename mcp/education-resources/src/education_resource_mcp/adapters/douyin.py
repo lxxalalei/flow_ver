@@ -1,16 +1,7 @@
 """Douyin video search and creator adapter.
 
-Uses Douyin's web APIs with hardcoded device parameters.  Auth is cookie-
-based — the adapter pulls stored cookies from ``SessionStore`` at search
-time.
-
-Capabilities:
-  - **search**: keyword search via /general/search/ (no signature needed)
-  - **search_creator**: browse a creator's full video list via /aweme/post/
-    (requires a_bogus signature, computed via Node.js)
-
-msToken is not required (verified by A/B testing).  The search endpoint
-does not require a_bogus; the creator/post endpoint does.
+Uses Douyin's web APIs with hardcoded device parameters. Auth is cookie-based;
+creator enumeration can stream pages until the platform reports the end.
 """
 
 from __future__ import annotations
@@ -20,7 +11,7 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request
@@ -66,10 +57,7 @@ def _web_id() -> str:
 
     return "".join(_e(int(x)) if x in "018" else x for x in _e(None)).replace("-", "")[:19]
 
-# Device/environment parameters aligned with the real cookie source browser
-# (Windows Chrome 150, captured via OpenClaw's controlled browser).  The
-# creator-page API validates UA/cookie fingerprint consistency, so claiming
-# a different OS/browser than the cookies came from gets empty responses.
+
 _COMMON_PARAMS: dict[str, str] = {
     "device_platform": "webapp", "aid": "6383", "channel": "channel_pc_web",
     "version_code": "190600", "version_name": "19.6.0",
@@ -120,11 +108,7 @@ def _parse_sec_user_id(creator_id: str) -> str:
 
 
 def sign_a_bogus(query_string: str, user_agent: str) -> str:
-    """Compute a_bogus by executing douyin_sign.js through Node.js.
-
-    Shared by the search-creator and download adapters — both need to sign
-    non-search API calls (detail, post list).
-    """
+    """Compute a_bogus by executing douyin_sign.js through Node.js."""
     js_path = json.dumps(str(_SIGN_JS))
     qs_arg = json.dumps(query_string)
     ua_arg = json.dumps(user_agent)
@@ -158,8 +142,6 @@ class DouyinSearchAdapter:
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
-
-    # -- internal helpers ------------------------------------------------
 
     def _request_json(
         self, url: str, cookie: str, referer: str | None = None
@@ -248,8 +230,6 @@ class DouyinSearchAdapter:
         return SessionStore._cookie_header(session_data)
 
     def _ms_token(self) -> str:
-        """msToken from the stored session (localStorage xmst)."""
-
         try:
             session_data = self.session_store.get_session_data("douyin") or {}
         except Exception:  # noqa: BLE001 - optional parameter
@@ -258,16 +238,12 @@ class DouyinSearchAdapter:
         return str(local_storage.get("xmst") or "")
 
     def _sign_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Inject webid + msToken (required by creator-page APIs)."""
-
         signed = dict(params)
         signed["webid"] = _web_id()
         ms_token = self._ms_token()
         if ms_token:
             signed["msToken"] = ms_token
         return signed
-
-    # -- public API: keyword search --------------------------------------
 
     def search(
         self, query: str, limit: int
@@ -286,40 +262,34 @@ class DouyinSearchAdapter:
                 current_size = min(page_size, limit - len(results))
                 params = self._sign_params(
                     {
-                    **_COMMON_PARAMS,
-                    "search_channel": "aweme_general",
-                    "enable_history": "1",
-                    "keyword": query,
-                    "search_source": "tab_search",
-                    "query_correct_type": "1",
-                    "is_filter_search": "0",
-                    "from_group_id": "7378810571505847586",
-                    "offset": str(offset),
-                    "count": str(current_size),
-                    "need_filter_settings": "1",
-                    "list_type": "multi",
-                    "search_id": "",
+                        **_COMMON_PARAMS,
+                        "search_channel": "aweme_general",
+                        "enable_history": "1",
+                        "keyword": query,
+                        "search_source": "tab_search",
+                        "query_correct_type": "1",
+                        "is_filter_search": "0",
+                        "from_group_id": "7378810571505847586",
+                        "offset": str(offset),
+                        "count": str(current_size),
+                        "need_filter_settings": "1",
+                        "list_type": "multi",
+                        "search_id": "",
                     }
                 )
-                url = f"{SEARCH_URL}?{urlencode(params)}"
-                response = self._request_json(url, cookie)
-
+                response = self._request_json(f"{SEARCH_URL}?{urlencode(params)}", cookie)
                 status_code = response.get("status_code")
                 data = response.get("data")
                 if not isinstance(data, list):
                     data = []
-
                 if status_code not in (None, 0) and not data:
                     return [], adapter_error(
                         "PARTIAL_FAILURE",
-                        f"抖音 API status_code={status_code}: "
-                        f"{response.get('status_msg', '')}",
+                        f"抖音 API status_code={status_code}: {response.get('status_msg', '')}",
                         False,
                     )
-
                 if not data:
                     break
-
                 for item in data:
                     if isinstance(item, dict):
                         normalized = self._normalize_item(item)
@@ -327,74 +297,63 @@ class DouyinSearchAdapter:
                             results.append(normalized)
                             if len(results) >= limit:
                                 break
-
                 if not response.get("has_more"):
                     break
                 offset += current_size
         except _AdapterError as exc:
             return results, exc.to_dict()
-
         return results, None
 
-    # -- public API: creator homepage browse -----------------------------
+    def iter_creator(
+        self, creator_id: str, *, cancel_event: Any = None
+    ) -> Iterator[dict[str, Any]]:
+        """Yield a creator's videos until Douyin reports ``has_more = false``."""
+
+        cookie = self._get_cookie()
+        sec_user_id = _parse_sec_user_id(creator_id)
+        max_cursor = ""
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            params = self._sign_params(
+                {
+                    **_COMMON_PARAMS,
+                    "sec_user_id": sec_user_id,
+                    "count": "18",
+                    "max_cursor": max_cursor,
+                    "locate_query": "false",
+                    "publish_video_strategy_type": "2",
+                }
+            )
+            query_string = urlencode(params)
+            params["a_bogus"] = sign_a_bogus(query_string, USER_AGENT)
+            response = self._request_json(
+                f"{POST_URL}?{urlencode(params)}",
+                cookie,
+                referer=f"https://www.douyin.com/user/{sec_user_id}",
+            )
+            aweme_list = response.get("aweme_list")
+            if not isinstance(aweme_list, list) or not aweme_list:
+                break
+            for item in aweme_list:
+                if isinstance(item, dict):
+                    normalized = self._normalize_item(item)
+                    if normalized:
+                        yield normalized
+            if not response.get("has_more"):
+                break
+            max_cursor = str(response.get("max_cursor") or "")
 
     def search_creator(
         self, creator_id: str, limit: int, cancel_event: Any = None
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        """Browse a creator's video list (paginated, a_bogus-signed).
-
-        *creator_id* can be a full URL (``/user/MS4w...``) or a bare
-        ``sec_user_id``.
-        """
-        try:
-            cookie = self._get_cookie()
-        except _AdapterError as exc:
-            return [], exc.to_dict()
-
-        sec_user_id = _parse_sec_user_id(creator_id)
         results: list[dict[str, Any]] = []
-        max_cursor = ""
-
         try:
-            while len(results) < limit:
-                if cancel_event is not None and cancel_event.is_set():
+            for resource in self.iter_creator(creator_id, cancel_event=cancel_event):
+                results.append(resource)
+                if len(results) >= limit:
                     break
-                params = self._sign_params(
-                    {
-                        **_COMMON_PARAMS,
-                        "sec_user_id": sec_user_id,
-                        "count": "18",
-                        "max_cursor": max_cursor,
-                        "locate_query": "false",
-                        "publish_video_strategy_type": "2",
-                    }
-                )
-                query_string = urlencode(params)
-                params["a_bogus"] = sign_a_bogus(query_string, USER_AGENT)
-
-                url = f"{POST_URL}?{urlencode(params)}"
-                response = self._request_json(
-                    url,
-                    cookie,
-                    referer=f"https://www.douyin.com/user/{sec_user_id}",
-                )
-
-                aweme_list = response.get("aweme_list")
-                if not isinstance(aweme_list, list) or not aweme_list:
-                    break
-
-                for item in aweme_list:
-                    if isinstance(item, dict):
-                        normalized = self._normalize_item(item)
-                        if normalized:
-                            results.append(normalized)
-                            if len(results) >= limit:
-                                break
-
-                if not response.get("has_more"):
-                    break
-                max_cursor = str(response.get("max_cursor") or "")
         except _AdapterError as exc:
             return results, exc.to_dict()
-
         return results, None

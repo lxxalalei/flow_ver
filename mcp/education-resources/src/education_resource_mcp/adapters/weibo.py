@@ -1,15 +1,10 @@
-"""Weibo (微博) search adapter.
-
-Calls the public ajax/searchall JSON API with cookie auth.
-Cookie is pulled from SessionStore at search time; without a valid
-session the adapter returns AUTH_REQUIRED.
-"""
+"""Weibo (微博) search adapter."""
 
 from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import urlencode
 from urllib.request import Request
 
@@ -29,6 +24,17 @@ UA = (
 
 def _clean(text: Any) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", str(text or ""))).strip()
+
+
+class _AdapterError(Exception):
+    def __init__(self, code: str, message: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"code": self.code, "message": self.message, "retryable": self.retryable}
 
 
 class WeiboSearchAdapter:
@@ -86,33 +92,43 @@ class WeiboSearchAdapter:
                 break
         return resources, None
 
-    def search_creator(
-        self, creator_id: str, limit: int
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    def iter_creator(
+        self, creator_id: str, *, cancel_event: Any = None
+    ) -> Iterator[dict[str, Any]]:
+        """Yield creator posts page by page until Weibo has no next cursor."""
+
         session_data = self.session_store.get_session_data("weibo")
         cookie = SessionStore._cookie_header(session_data) if session_data else ""
         if not cookie:
-            return [], adapter_error("AUTH_REQUIRED", "微博创作者浏览需要登录 Cookie", False)
+            raise _AdapterError("AUTH_REQUIRED", "微博创作者浏览需要登录 Cookie", False)
+
         container_id = f"100505{creator_id}"
-        results: list[dict[str, Any]] = []
         since_id = ""
-        while len(results) < limit:
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                break
             params = urlencode({
-                "jumpfrom": "weibocom", "type": "uid",
-                "value": creator_id, "containerid": container_id,
+                "jumpfrom": "weibocom",
+                "type": "uid",
+                "value": creator_id,
+                "containerid": container_id,
                 "since_id": since_id,
             })
             request = Request(f"{CREATOR_URL}?{params}", headers={
-                "User-Agent": UA, "Accept": "application/json",
-                "Cookie": cookie, "Referer": f"https://weibo.com/u/{creator_id}",
+                "User-Agent": UA,
+                "Accept": "application/json",
+                "Cookie": cookie,
+                "Referer": f"https://weibo.com/u/{creator_id}",
             })
             try:
                 with urlopen_with_fallback(request, timeout=self.timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8", "replace"))
             except Exception as exc:
-                if results:
-                    return results, adapter_error("PARTIAL_FAILURE", str(exc)[:200], True)
-                return [], adapter_error("PARTIAL_FAILURE", f"微博创作者请求失败: {type(exc).__name__}", True)
+                raise _AdapterError(
+                    "PARTIAL_FAILURE",
+                    f"微博创作者请求失败: {type(exc).__name__}: {exc}",
+                    True,
+                ) from exc
             cards = (data.get("data") or {}).get("cards") or []
             if not cards:
                 break
@@ -125,8 +141,9 @@ class WeiboSearchAdapter:
                 if not text or not bid:
                     continue
                 user = mblog.get("user") if isinstance(mblog.get("user"), dict) else {}
-                results.append(make_resource(
-                    platform="weibo", title=text[:200],
+                yield make_resource(
+                    platform="weibo",
+                    title=text[:200],
                     source_url=f"https://weibo.com/detail/{bid}",
                     resource_type="文章",
                     author=_clean(user.get("screen_name")) or None,
@@ -135,10 +152,20 @@ class WeiboSearchAdapter:
                         "comments": mblog.get("comments_count"),
                         "likes": mblog.get("attitudes_count"),
                     },
-                ))
-                if len(results) >= limit:
-                    break
+                )
             since_id = str((data.get("data") or {}).get("cardlistInfo", {}).get("since_id") or "")
             if not since_id or since_id == "0":
                 break
+
+    def search_creator(
+        self, creator_id: str, limit: int, cancel_event: Any = None
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        results: list[dict[str, Any]] = []
+        try:
+            for resource in self.iter_creator(creator_id, cancel_event=cancel_event):
+                results.append(resource)
+                if len(results) >= limit:
+                    break
+        except _AdapterError as exc:
+            return results, exc.to_dict()
         return results, None

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 from importlib.resources import files as package_files
 import json
-from datetime import datetime, timezone
+import logging
 from pathlib import Path
 import re
 import shutil
@@ -13,6 +14,8 @@ from typing import Any
 
 from .errors import DomainError
 
+
+LOGGER = logging.getLogger(__name__)
 
 _VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 _AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
@@ -127,10 +130,7 @@ def archive_downloaded_files(
     domain_id: str = "",
     topic: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Move successful download files into the learning library.
-
-    This is intentionally a file operation, not an Archive/Asset state machine.
-    """
+    """Move successful download files into the learning library."""
 
     taxonomy = library_taxonomy()
     domain = domain_directory(domain_id)
@@ -189,7 +189,6 @@ def archive_downloaded_files(
         archived.append(archived_item)
 
     if archived:
-        # provenance sidecar: one JSON line per archived file, no database
         record = {
             "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "domain_id": domain_id,
@@ -209,7 +208,10 @@ def archive_downloaded_files(
             with (root / "manifest.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError:
-            pass  # archival itself succeeded; provenance is best-effort
+            LOGGER.warning(
+                "archive succeeded but manifest.jsonl could not be updated",
+                exc_info=True,
+            )
 
     return archived, failures
 

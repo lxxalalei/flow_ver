@@ -1,4 +1,4 @@
-"""0057 M1: batch_collect / batch_read base (file-backed, O(1) summaries)."""
+"""Batch collect/read base: file-backed results with paged conversation reads."""
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ from education_resource_mcp.service import ResourceService
 
 
 class _NoopSpawner:
-    """JobSpawner stand-in that never spawns; tests drive the runner directly."""
-
     def submit(self, job_id, spawn):  # noqa: ANN001
         pass
 
@@ -32,7 +30,7 @@ class _NoopSpawner:
 
 
 class _CreatorProvider:
-    """Offline provider enumerating a fake creator catalogue."""
+    """Offline list-returning provider used for explicit-limit compatibility."""
 
     def __init__(self, count: int = 120) -> None:
         self.count = count
@@ -99,7 +97,6 @@ class BatchCollectTests(unittest.TestCase):
         (file_entry,) = status["files"]
         self.assertEqual("results.jsonl", file_entry["filename"])
         self.assertTrue(Path(file_entry["path"]).is_file())
-        # provider received the batch budget, not a conversational limit
         self.assertEqual(("434377496", 120), self.provider.calls[-1])
 
         page1 = self.service.batch_read(job_id, offset=0, limit=20)
@@ -124,13 +121,16 @@ class BatchCollectTests(unittest.TestCase):
             lambda: self.service.batch_collect("", creator_id="x"),
             lambda: self.service.batch_collect("douyin", creator_id=""),
             lambda: self.service.batch_collect("douyin", creator_id="x", max_items=0),
-            lambda: self.service.batch_collect(
-                "douyin", creator_id="x", max_items=1001
-            ),
         ):
             with self.assertRaises(DomainError) as ctx:
                 payload()
             self.assertEqual("INVALID_ARGUMENT", ctx.exception.code)
+
+        # No system hard cap: a caller-supplied bound above 1000 is valid.
+        result = self.service.batch_collect(
+            "bilibili", creator_id="434377496", max_items=1001
+        )
+        self.assertEqual("queued", result["status"])
 
     def test_read_rejects_download_jobs_and_bad_paging(self) -> None:
         directory = self.root / "jobs" / ("job_" + "e" * 32)
