@@ -579,14 +579,22 @@ class MultiPlatformSearchProvider:
     # Per-platform worker: runs queries serially, returns one platform_run.
     # ------------------------------------------------------------------
     def _run_platform_adapter(
-        self, platform: str, adapter: PlatformSearchAdapter, queries: list[str], limit: int
+        self,
+        platform: str,
+        adapter: PlatformSearchAdapter,
+        queries: list[str],
+        limit: int,
+        tabs: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         query_runs: list[dict[str, Any]] = []
         all_resources: list[dict[str, Any]] = []
         error_count = 0
         for query in queries:
             try:
-                resources, error = adapter.search(query, limit)
+                if tabs and platform == "smartedu" and hasattr(adapter, "search"):
+                    resources, error = adapter.search(query, limit, tabs=tabs)
+                else:
+                    resources, error = adapter.search(query, limit)
             except Exception as exc:  # pragma: no cover - defensive
                 query_runs.append(
                     {
@@ -644,7 +652,8 @@ class MultiPlatformSearchProvider:
         self, search_tasks: list[dict[str, Any]], limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         # Merge tasks that share the same platform (preserve order).
-        merged: dict[str, list[str]] = {}
+        # options (tabs, …) are taken from the first task that declares them.
+        merged: dict[str, dict[str, Any]] = {}
         for task in search_tasks:
             platform = str(task.get("platform") or "")
             queries = [
@@ -654,17 +663,20 @@ class MultiPlatformSearchProvider:
             ]
             if not queries:
                 continue
+            tabs = task.get("tabs") if platform == "smartedu" else None
             if platform in merged:
-                merged[platform].extend(queries)
+                merged[platform]["queries"].extend(queries)
+                if tabs and not merged[platform].get("tabs"):
+                    merged[platform]["tabs"] = tabs
             else:
-                merged[platform] = list(queries)
+                merged[platform] = {"queries": list(queries), "tabs": tabs}
 
         if not merged:
             return [], []
 
         # Partition into adapter-backed, generic, and unknown platforms.
         adapter_platforms = {p: qs for p, qs in merged.items() if p in self._adapters}
-        generic_queries = merged.get("generic", [])
+        generic_queries = merged.get("generic", {}).get("queries", [])
         unknown_platforms = {
             p: qs for p, qs in merged.items()
             if p != "generic" and p not in self._adapters
@@ -672,8 +684,8 @@ class MultiPlatformSearchProvider:
 
         # Build the full platform list for parallel execution.
         work_items: list[tuple[str, Any]] = []
-        for pid, queries in adapter_platforms.items():
-            work_items.append((pid, ("adapter", queries)))
+        for pid, entry in adapter_platforms.items():
+            work_items.append((pid, ("adapter", entry)))
         if generic_queries:
             work_items.append(("generic", ("generic", generic_queries)))
 
@@ -683,11 +695,18 @@ class MultiPlatformSearchProvider:
         if work_items:
             with ThreadPoolExecutor(max_workers=worker_count) as pool:
                 futures: dict[Any, str] = {}
-                for platform, (kind, queries) in work_items:
+                for platform, (kind, entry) in work_items:
                     if kind == "adapter":
                         adapter = self._adapters[platform]
                         futures[
-                            pool.submit(self._run_platform_adapter, platform, adapter, queries, limit)
+                            pool.submit(
+                                self._run_platform_adapter,
+                                platform,
+                                adapter,
+                                entry.get("queries") or [],
+                                limit,
+                                entry.get("tabs") or None,
+                            )
                         ] = platform
                     else:
                         futures[
@@ -750,7 +769,7 @@ class MultiPlatformSearchProvider:
                                     "retryable": False,
                                 },
                             }
-                            for q in unknown_platforms[platform]
+                            for q in unknown_platforms[platform].get("queries", [])
                         ],
                     }
                 )
@@ -759,6 +778,14 @@ class MultiPlatformSearchProvider:
                 resources, run = results_by_platform[platform]
                 platform_runs.append(run)
                 all_resources.extend(resources)
+            elif platform == "generic":
+                platform_runs.append(
+                    {
+                        "platform": "generic",
+                        "status": "failed",
+                        "query_runs": [],
+                    }
+                )
 
         return all_resources, platform_runs
 

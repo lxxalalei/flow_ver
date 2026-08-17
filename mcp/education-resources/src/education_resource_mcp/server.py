@@ -26,6 +26,12 @@ class SearchTask(BaseModel):
         description="1-3 条真实搜索短语（像在平台搜索框里输入的完整短句），"
         '如 ["火山喷发 原理 动画"]',
     )
+    tabs: list[str] | None = Field(
+        default=None,
+        description="仅 smartedu 有效：智慧教育平台分类代码子集，如 tchMaterial（教材）/"
+        "qualityCourse（课程）/prepareLesson（备课）/sedu（德育）/specialEdu（特教）；"
+        "不传则搜全部分类",
+    )
 
 
 def _call(function: Callable[[], dict[str, Any]], **ids: str) -> dict[str, Any]:

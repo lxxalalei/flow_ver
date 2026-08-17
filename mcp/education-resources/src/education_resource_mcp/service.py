@@ -93,12 +93,24 @@ def _normalize_search_tasks(
                 "INVALID_ARGUMENT",
                 f"search_tasks 的每一项必须是对象；{_SEARCH_TASK_EXAMPLE}",
             )
-        unknown = sorted(set(task) - {"platform", "queries"})
+        unknown = sorted(set(task) - {"platform", "queries", "tabs"})
         if unknown:
             raise DomainError(
                 "INVALID_ARGUMENT",
                 f"search_tasks 项含未知字段 {unknown}；{_SEARCH_TASK_EXAMPLE}",
             )
+        tabs = task.get("tabs")
+        if tabs is not None:
+            if (
+                not isinstance(tabs, list)
+                or not tabs
+                or not all(isinstance(t, str) and t.strip() for t in tabs)
+            ):
+                raise DomainError(
+                    "INVALID_ARGUMENT",
+                    "tabs 必须是平台分类代码字符串的非空列表（当前仅 smartedu 支持）",
+                )
+            tabs = [t.strip() for t in tabs]
         platform = str(task.get("platform") or "").strip()
         if not platform:
             raise DomainError(
@@ -132,9 +144,13 @@ def _normalize_search_tasks(
                 "INVALID_ARGUMENT",
                 f"queries 中没有有效搜索短语；{_SEARCH_TASK_EXAMPLE}",
             )
-        normalized.append(
-            {"platform": platform, "queries": [{"query": text} for text in queries]}
-        )
+        task_out: dict[str, Any] = {
+            "platform": platform,
+            "queries": [{"query": text} for text in queries],
+        }
+        if tabs is not None:
+            task_out["tabs"] = tabs
+        normalized.append(task_out)
     return normalized
 
 

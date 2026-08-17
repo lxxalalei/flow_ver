@@ -386,7 +386,9 @@ class SmartEduSearchAdapter:
             headers.update(extra)
         return headers
 
-    def _build_payload(self, query: str, limit: int) -> dict[str, Any]:
+    def _build_payload(
+        self, query: str, limit: int, tabs: list[str] | None = None
+    ) -> dict[str, Any]:
         # Request more than the caller's limit because the post-filter
         # (elite_lesson only) discards the majority of raw results.
         fetch_limit = max(limit * 5, 50)
@@ -394,7 +396,7 @@ class SmartEduSearchAdapter:
             "identity": "家长",
             "identity_code": "GUARDIAN",
             "keyword": query,
-            "tab_codes": DEFAULT_TAB_CODES,
+            "tab_codes": tabs if tabs else DEFAULT_TAB_CODES,
             "cross_tenant": True,
             "duplicate_filter": True,
             "search_order": {"field": "_score", "direction": "desc"},
@@ -422,11 +424,11 @@ class SmartEduSearchAdapter:
     # -- public API ------------------------------------------------------
 
     def search(
-        self, query: str, limit: int
+        self, query: str, limit: int, tabs: list[str] | None = None
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         session_data = self.session_store.get_session_data("smartedu")
         headers = self._build_headers(session_data)
-        payload = self._build_payload(query, limit)
+        payload = self._build_payload(query, limit, tabs)
 
         data: dict[str, Any] | None = None
         for url in SEARCH_URLS:
