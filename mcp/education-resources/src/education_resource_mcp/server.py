@@ -59,6 +59,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "Use resource_job_status for progress or resource_job_cancel to stop the job. "
             "For bulk enumeration (a creator's full works) use resource_batch_collect and "
             "page with resource_batch_read instead of browse_creator with a huge limit. "
+            "For web pages found with the host's own web search, register them with "
+            "resource_import_url to turn the URL into a downloadable resource handle. "
             "Resource handles are process-local; if the MCP process restarts, search again. "
             "Download and batch jobs run in detached workers and survive an MCP restart; "
             "job_status reports interrupted for jobs whose worker died, and re-downloading starts from scratch."
@@ -94,6 +96,19 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
                 creator_id,
                 limit=limit,
             )
+        )
+
+    @server.tool(structured_output=True)
+    def resource_import_url(source_url: str) -> dict[str, Any]:
+        """Register an external URL as a resource handle and inspect it.
+
+        The bridge from host-side web search to the MCP pipeline: URLs the
+        agent found with its own web search become resource_ids that can be
+        downloaded, materialized and archived like any search candidate.
+        """
+        return _call(
+            lambda: resource_service.import_url(source_url),
+            source_url=source_url,
         )
 
     @server.tool(structured_output=True)

@@ -12,6 +12,7 @@ import json
 import logging
 import secrets
 import threading
+import urllib.parse
 from typing import Any
 
 from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistration
@@ -465,6 +466,40 @@ class ResourceService:
         resource = self._get_resource(resource_id)
         resolution = self._inspect_raw(resource)
         return self._public_inspection(resource_id, resolution)
+
+    def import_url(self, source_url: str) -> dict[str, Any]:
+        """Register an external URL as a resource handle and inspect it.
+
+        The bridge between host-side web search and the MCP pipeline: any
+        URL the agent found with its own search tool becomes a resource_id
+        that can be downloaded/archived like a search candidate.
+        """
+
+        url = canonical_http_url(str(source_url or "").strip())
+        resource_id = new_id("res")
+        resource = {
+            "resource_id": resource_id,
+            "platform": "generic",
+            "title": str(
+                urllib.parse.urlparse(url).path.rsplit("/", 1)[-1] or url
+            )[:120],
+            "source_url": url,
+            "resource_type": "网页",
+            "metadata": {},
+        }
+        with self._lock:
+            self._resources[resource_id] = resource
+        self._append_resource_cache(resource)
+
+        resolution = self._inspect_raw(resource)
+        resolved = resolution.get("resolved_resource") or {}
+        if isinstance(resolved, dict) and resolved.get("title"):
+            with self._lock:
+                self._resources[resource_id]["title"] = str(resolved["title"])
+        return {
+            "resource_id": resource_id,
+            **self._public_inspection(resource_id, resolution),
+        }
 
     def _inspect_raw(self, resource: dict[str, Any]) -> dict[str, Any]:
         payload = self.inspection_router.inspect(dict(resource)).to_mapping()
