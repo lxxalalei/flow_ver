@@ -9,6 +9,8 @@ description: 学习资源（图书、课程、视频、文章、教材、音频�
 
 `education-resources` 是能力工具箱：搜索、按创作者浏览、检查资源、下载、查看/取消下载任务、归档文件。
 
+通用网页检索的分工：**普通网页发现用宿主的 websearch 工具**（OpenClaw 自带或 anysearch）；在宿主结果里挑中目标后，用 `resource_import_url(source_url)` 把链接注册成 MCP 资源句柄，即可下载/物化/归档。MCP 的 `platform="generic"` 搜索保留，用于中文召回不足时补充搜索（多引擎并行）。
+
 ## 1. 分工
 
 Main Agent 负责：
@@ -126,6 +128,16 @@ resource_search({
 每个 task = 一个平台 + 一组搜索短语（字符串数组）。platform 是平台 id（bilibili / douyin / smartedu / ximalaya / generic 等）。注意没有顶层 `query` 字段——搜索单独一条也是放进 `queries` 数组。
 
 返回候选后直接在当前对话里判断、比较和展示。`resource_id` 只是当前 MCP 进程里的资源句柄。补搜直接再次 Search，没有 ResultSet lineage、extend version、Flow version。
+
+### 外部链接进管道
+
+宿主 websearch（或 anysearch）找到的网页链接，用 `resource_import_url` 注册成资源句柄（会立即做一次真实 inspect，返回可下性）：
+
+```text
+resource_import_url(source_url="https://...")
+```
+
+注册后可正常 `resource_inspect` / `resource_download`（网页会走物化）/ `resource_archive`。
 
 ### 创作者内容
 
