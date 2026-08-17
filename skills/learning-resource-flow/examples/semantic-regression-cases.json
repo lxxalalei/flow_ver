@@ -1,13 +1,15 @@
 {
-  "version": "5.0.0",
-  "purpose": "验证 learning-resource-flow 的语义决策质量：需求还原、澄清判断、搜索角度、来源职责、query、结果判断、Gap、停止条件、用户选择、获取意图和完整枚举。工具流程不是评分目标。",
+  "version": "5.1.0",
+  "purpose": "验证 learning-resource-flow 的语义决策质量：需求还原、澄清判断、搜索价值分解、Dispatch 设计、来源职责、query、结果判断、Coverage/Gap、停止条件、用户选择、获取意图和完整枚举。工具流程和调用数量不是评分目标。",
   "evaluation_dimensions": [
     "need_reconstruction",
     "clarification_judgment",
     "search_angle_quality",
+    "dispatch_design",
     "source_routing",
     "query_quality",
     "result_judgment",
+    "coverage_judgment",
     "gap_judgment",
     "stop_judgment",
     "selection_semantics",
@@ -82,53 +84,58 @@
     },
     {
       "name": "用户授权模型决定载体",
-      "focus": ["need_reconstruction", "search_angle_quality"],
+      "focus": ["need_reconstruction", "search_angle_quality", "dispatch_design"],
       "messages": [
         {"role": "user", "content": "想让孩子了解古埃及，形式你看着办，先看看"}
       ],
       "expected": [
         "不把视频/图文选择权重新推给用户",
-        "根据学习价值形成少量互补角度，例如文明总览和遗址文物直观观察",
+        "根据学习价值形成互补路线，例如文明总览和遗址文物直观观察",
+        "把不同价值路线转成职责不同的搜索任务，而不是直接只挑一个最顺手的平台",
         "把载体选择视为当前探索策略，不写成长期偏好"
       ],
       "forbidden": [
         "要求用户先选视频还是文章",
         "机械搜索所有已知来源",
+        "只因为视频最容易搜就把整个任务缩成视频搜索",
         "声称孩子长期偏好动画或纪录片"
       ]
     },
     {
-      "name": "火山科普形成真正互补方向",
-      "focus": ["search_angle_quality", "source_routing", "query_quality"],
+      "name": "火山科普形成互补搜索任务",
+      "focus": ["search_angle_quality", "dispatch_design", "source_routing", "query_quality"],
       "messages": [
         {"role": "user", "content": "帮孩子找一些火山科普资料，形式你看着办"}
       ],
       "expected": [
         "识别原理理解和喷发过程观察这类不同学习价值",
-        "原理方向优先专业科普/教育来源，过程观察优先有画面价值的视频来源",
+        "把原理解释派发给专业/官方 Web 或其他适合结构化解释的来源，把过程观察派发给有画面价值的视频来源",
+        "主动考虑 Host Web Search 的跨生态发现价值，而不是默认只搜视频平台",
         "query 体现来源职责，例如‘火山形成 喷发原理 科普’和‘火山喷发 原理 动画 实验演示’",
-        "首轮不为来源覆盖率额外扩散"
+        "不为了平台数量额外派发同质搜索"
       ],
       "forbidden": [
         "把‘火山、火山知识、火山科普、儿童火山科普’当成多个方向",
         "每个来源都使用同一条‘儿童火山优质资料’",
+        "只派发一个视频平台然后把几个视频当成完整答案",
         "因为来源很多就全部派发"
       ]
     },
     {
       "name": "来源必须有独特职责",
-      "focus": ["source_routing"],
+      "focus": ["dispatch_design", "source_routing"],
       "messages": [
         {"role": "user", "content": "想看懂台风是怎么形成的，最好也能直观看到过程"}
       ],
       "expected": [
         "把形成机制解释和过程可视化视为两个价值切面",
-        "只选择能提供解释或视觉过程的来源",
-        "能够说明每个来源为什么被选"
+        "分别选择适合解释和视觉过程的路线",
+        "能够说明每条搜索任务为什么存在"
       ],
       "forbidden": [
         "为了覆盖数量加入对当前目标没有独特贡献的音频、图书或练习来源",
-        "按平台列表逐个生成任务"
+        "按平台列表逐个生成任务",
+        "用一个视频平台承担所有价值而不判断解释质量"
       ]
     },
     {
@@ -285,7 +292,7 @@
     },
     {
       "name": "搜索结果多不等于已经满足目标",
-      "focus": ["result_judgment", "gap_judgment"],
+      "focus": ["result_judgment", "coverage_judgment", "gap_judgment"],
       "messages": [
         {"role": "user", "content": "想找能帮助初中生真正看懂光合作用过程的资料"},
         {"role": "assistant", "content": "首轮搜到很多结果，但大部分只是背诵知识点和题目解析，几乎没有过程图解或动态演示。"}
@@ -302,8 +309,97 @@
       ]
     },
     {
+      "name": "开放式任务不能几个视频就停",
+      "focus": ["dispatch_design", "coverage_judgment", "gap_judgment", "stop_judgment"],
+      "messages": [
+        {"role": "user", "content": "给10岁孩子找一些关于火山的学习资料，形式不限，先看看"},
+        {"role": "assistant", "content": "首轮在 Bilibili 找到4个质量不错、适龄的火山视频，其中有动画和真实喷发画面。"}
+      ],
+      "expected": [
+        "承认现有视频已经覆盖视觉观察的一部分价值",
+        "识别当前高潜候选全部集中于视频生态，不能仅凭4个好视频判断开放式任务已经完成",
+        "判断专业/官方图文是否能补稳定机制解释，活动材料或其他形态是否能补继续学习价值",
+        "至少选择一条职责明显不同且有增益预期的路线继续搜索，而不是为了凑平台数量扩散"
+      ],
+      "forbidden": [
+        "直接展示4个视频并宣称资料已经比较完整",
+        "因为视频数量够就停止",
+        "机械把所有平台都搜一遍",
+        "为了多样性加入与目标无关的音频"
+      ]
+    },
+    {
+      "name": "用户明确只要视频时单一媒介不是 Gap",
+      "focus": ["coverage_judgment", "stop_judgment"],
+      "messages": [
+        {"role": "user", "content": "就想看几个真实火山喷发的视频，不要文章和练习"},
+        {"role": "assistant", "content": "已经找到几段画面清楚、来源和内容都合适的真实喷发视频。"}
+      ],
+      "expected": [
+        "把用户明确的视频限定视为正常约束",
+        "不因为候选全是视频就制造 Coverage Gap",
+        "如果候选已经足够满足目标，可以停止并展示差异"
+      ],
+      "forbidden": [
+        "为了来源多样性强行搜索图文、PDF或音频",
+        "把单一媒介集中自动判成质量问题"
+      ]
+    },
+    {
+      "name": "开放式 Python 学习不能只给视频",
+      "focus": ["dispatch_design", "source_routing", "coverage_judgment"],
+      "messages": [
+        {"role": "user", "content": "帮初中生找一些学习 Python 的资源，形式不限，希望能真的学起来"},
+        {"role": "assistant", "content": "目前只在视频平台找到几套从零入门课程。"}
+      ],
+      "expected": [
+        "识别‘真的学起来’不仅需要讲解，还可能需要可查阅教程、代码示例和练习实践",
+        "把结构化教程/可运行示例与视频讲解作为不同职责，而不是只继续找更多视频",
+        "主动考虑 Host Web Search 或技术教程生态来补非视频学习材料"
+      ],
+      "forbidden": [
+        "把多找几套视频当成覆盖提升",
+        "完全忽略文档、教程、示例或练习路线",
+        "为了形式数量额外加入与编程学习无关的资源"
+      ]
+    },
+    {
+      "name": "开放式历史研究应考虑通用 Web 发现",
+      "focus": ["dispatch_design", "source_routing", "coverage_judgment"],
+      "messages": [
+        {"role": "user", "content": "我想系统了解丝绸之路，资料形式不限"}
+      ],
+      "expected": [
+        "把整体历史脉络、空间路线/遗址观察等视为可分工的价值路线",
+        "考虑 Host Web Search 发现博物馆、大学、专业历史页面、地图或其他长尾材料",
+        "视频可以承担直观叙事，但不因为先搜到纪录片就排除 Web 发现"
+      ],
+      "forbidden": [
+        "只搜两个纪录片就结束",
+        "把 Web Search 仅当成所有专门平台失败后的 fallback",
+        "为了所谓全面把每个已知平台都搜一遍"
+      ]
+    },
+    {
+      "name": "专门生态天然覆盖时不强制 Web",
+      "focus": ["source_routing", "coverage_judgment", "stop_judgment"],
+      "messages": [
+        {"role": "user", "content": "帮我找人教版五年级上册小数乘法的同步课堂讲解，只要课程视频"},
+        {"role": "assistant", "content": "结构化教育来源已经找到匹配版本、年级、单元的课程视频。"}
+      ],
+      "expected": [
+        "识别用户已经明确同步课堂和视频形态，结构化教育来源天然匹配",
+        "不为了通用发现规则额外强制 Host Web Search",
+        "候选满足版本与内容约束时可以停止"
+      ],
+      "forbidden": [
+        "因为新版强调 Web Search 就机械再搜网页",
+        "为了媒介多样性加入文章、练习或音频"
+      ]
+    },
+    {
       "name": "没有具体 Gap 就应该停止",
-      "focus": ["gap_judgment", "stop_judgment"],
+      "focus": ["coverage_judgment", "gap_judgment", "stop_judgment"],
       "messages": [
         {"role": "assistant", "content": "目前已有一份适合目标年龄的原理图文、一段清楚的过程动画和一份简单活动单，三者都满足用户约束。"},
         {"role": "user", "content": "先这些吧"}
