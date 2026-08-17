@@ -27,7 +27,7 @@ from .job_state import (
 LOGGER = logging.getLogger(__name__)
 
 RESULTS_NAME = "results.jsonl"
-BATCH_MODES = frozenset({"creator_full"})
+BATCH_MODES = frozenset({"creator_full", "time_range_search"})
 MAX_ITEMS_HARD_CAP = 1000
 BATCH_READ_PAGE_CAP = 50
 
@@ -88,32 +88,20 @@ def run_batch_collect(directory: Path, service: Any = None) -> int:
     failures: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
     try:
-        search_creator = getattr(service.search_provider, "search_creator", None)
-        if not callable(search_creator):
-            raise DomainError(
-                "FEATURE_NOT_SUPPORTED", f"平台 {platform} 不支持创作者枚举"
+        if mode == "creator_full":
+            items = _collect_creator_full(
+                service, platform, creator_id, max_items, cancel
             )
-        raw, platform_runs = search_creator(
-            platform, creator_id, max_items, cancel_event=cancel
-        )
-        error = None
-        for run in platform_runs or []:
-            for query_run in run.get("query_runs") or []:
-                if isinstance(query_run.get("error"), dict):
-                    error = query_run["error"]
-        if error and not raw:
-            raise DomainError(
-                str(error.get("code") or "PARTIAL_FAILURE"),
-                str(error.get("message") or "批量枚举失败"),
-                retryable=bool(error.get("retryable")),
+        elif mode == "time_range_search":
+            items = _collect_time_range(
+                service,
+                platform,
+                str(request.get("keyword") or ""),
+                str(request.get("start_day") or ""),
+                str(request.get("end_day") or ""),
+                max_items,
+                cancel,
             )
-        items = [
-            public_item(resource)
-            for resource in raw
-            if isinstance(resource, dict)
-            and resource.get("source_url")
-            and resource.get("title")
-        ]
     except DomainError as exc:
         failures.append(
             {"code": exc.code, "message": exc.message, "retryable": exc.retryable}
@@ -162,6 +150,116 @@ def run_batch_collect(directory: Path, service: Any = None) -> int:
         "batch %s finished: %s (%d items)", request.get("job_id"), final, len(items)
     )
     return 0
+
+
+def _collect_creator_full(
+    service: Any, platform: str, creator_id: str, max_items: int, cancel: Any
+) -> list[dict[str, Any]]:
+    search_creator = getattr(service.search_provider, "search_creator", None)
+    if not callable(search_creator):
+        raise DomainError(
+            "FEATURE_NOT_SUPPORTED", f"平台 {platform} 不支持创作者枚举"
+        )
+    raw, platform_runs = search_creator(platform, creator_id, max_items, cancel_event=cancel)
+    error = _first_error(platform_runs)
+    if error and not raw:
+        raise DomainError(
+            str(error.get("code") or "PARTIAL_FAILURE"),
+            str(error.get("message") or "批量枚举失败"),
+            retryable=bool(error.get("retryable")),
+        )
+    return _public_items(raw)
+
+
+def _collect_time_range(
+    service: Any,
+    platform: str,
+    keyword: str,
+    start_day: str,
+    end_day: str,
+    max_items: int,
+    cancel: Any,
+) -> list[dict[str, Any]]:
+    """Enumerate a keyword's results day by day over [start_day, end_day]."""
+
+    if platform != "bilibili":
+        raise DomainError(
+            "FEATURE_NOT_SUPPORTED", "time_range_search 当前仅支持 bilibili"
+        )
+    if not keyword:
+        raise DomainError("INVALID_ARGUMENT", "time_range_search 需要 keyword")
+    if not start_day or not end_day:
+        raise DomainError("INVALID_ARGUMENT", "time_range_search 需要 start_day/end_day (YYYY-MM-DD)")
+
+    from datetime import date, datetime, timedelta
+
+    try:
+        start = date.fromisoformat(start_day)
+        end = date.fromisoformat(end_day)
+    except ValueError as exc:
+        raise DomainError("INVALID_ARGUMENT", f"日期格式应为 YYYY-MM-DD: {exc}") from None
+    if start > end:
+        raise DomainError("INVALID_ARGUMENT", "start_day 不能晚于 end_day")
+    if (end - start).days > 90:
+        raise DomainError("INVALID_ARGUMENT", "单次时间范围最多 90 天")
+
+    adapters = getattr(service.search_provider, "_adapters", None) or {}
+    search = adapters.get("bilibili")
+    if search is None:
+        raise DomainError("FEATURE_NOT_SUPPORTED", "bilibili 适配器不可用")
+
+    collected: list[dict[str, Any]] = []
+    errors: list[str] = []
+    current = start
+    while current <= end and len(collected) < max_items:
+        if cancel.is_set():
+            break
+        begin = int(datetime.combine(current, datetime.min.time()).timestamp())
+        # whole day inclusive: [begin, begin + 1 day - 1 second]
+        end_ts = begin + 86399
+        per_day = max_items - len(collected)
+        try:
+            raw, error = search.search(
+                keyword,
+                per_day,
+                pubtime_begin_s=begin,
+                pubtime_end_s=end_ts,
+            )
+            if error:
+                errors.append(f"{current}: {error.get('code')} {error.get('message')}")
+            collected.extend(
+                item for item in _public_items(raw)
+                if item.get("title") not in {x.get("title") for x in collected}
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{current}: {type(exc).__name__}: {exc}")
+        current += timedelta(days=1)
+
+    if not collected and errors:
+        raise DomainError(
+            "PARTIAL_FAILURE",
+            "; ".join(errors[:5]),
+            retryable=True,
+        )
+    return collected
+
+
+def _first_error(platform_runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for run in platform_runs or []:
+        for query_run in run.get("query_runs") or []:
+            if isinstance(query_run.get("error"), dict):
+                return query_run["error"]
+    return None
+
+
+def _public_items(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        public_item(resource)
+        for resource in raw
+        if isinstance(resource, dict)
+        and resource.get("source_url")
+        and resource.get("title")
+    ]
 
 
 def _safe_int(value: Any, default: int) -> int:

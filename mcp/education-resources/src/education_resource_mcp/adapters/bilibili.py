@@ -190,7 +190,12 @@ class BilibiliSearchAdapter:
     # -- public API ------------------------------------------------------
 
     def search(
-        self, query: str, limit: int
+        self,
+        query: str,
+        limit: int,
+        *,
+        pubtime_begin_s: int = 0,
+        pubtime_end_s: int = 0,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         # Cookie is optional — B站 search works without login, but having
         # a session may improve personalization and avoid rate limits.
@@ -213,17 +218,18 @@ class BilibiliSearchAdapter:
         try:
             while len(results) < limit:
                 page_size = min(50, limit - len(results))
-                params = wbi_sign(
-                    {
-                        "keyword": query,
-                        "page": page,
-                        "page_size": page_size,
-                        "search_type": "video",
-                        "order": "totalrank",
-                    },
-                    img_key,
-                    sub_key,
-                )
+                payload: dict[str, Any] = {
+                    "keyword": query,
+                    "page": page,
+                    "page_size": page_size,
+                    "search_type": "video",
+                    "order": "totalrank",
+                }
+                if pubtime_begin_s:
+                    payload["pubtime_begin_s"] = pubtime_begin_s
+                if pubtime_end_s:
+                    payload["pubtime_end_s"] = pubtime_end_s
+                params = wbi_sign(payload, img_key, sub_key)
                 url = f"{SEARCH_URL}?{urlencode(params)}"
                 response = self._request_json(url, referer=referer, cookie=cookie)
 

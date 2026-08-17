@@ -24,6 +24,7 @@ from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
 from .inspection import InspectionRouter
 from .inspection_registry import default_inspection_router
+from .batch import BATCH_MODES
 from .job_state import (
     CANCEL_FLAG_NAME,
     SPAWN_GRACE_SECONDS,
@@ -622,24 +623,52 @@ class ResourceService:
         *,
         mode: str = "creator_full",
         creator_id: str = "",
+        keyword: str = "",
+        start_day: str = "",
+        end_day: str = "",
         max_items: int = 500,
     ) -> dict[str, Any]:
         platform = str(platform or "").strip()
         creator_id = str(creator_id or "").strip()
         mode = str(mode or "").strip()
-        if mode != "creator_full":
+        keyword = str(keyword or "").strip()
+        start_day = str(start_day or "").strip()
+        end_day = str(end_day or "").strip()
+        if mode not in BATCH_MODES:
             raise DomainError(
                 "INVALID_ARGUMENT",
-                "当前仅支持 mode='creator_full'（创作者全量枚举）",
+                f"未知批量模式 {mode!r}；当前支持 {sorted(BATCH_MODES)}",
             )
         if not platform:
             raise DomainError(
-                "INVALID_ARGUMENT", "platform 不能为空，例如 douyin / bilibili"
+                "INVALID_ARGUMENT", "platform 不能为空，例如 douyin / bilibili / smartedu"
             )
-        if not creator_id:
+        if mode == "creator_full" and not creator_id:
             raise DomainError(
-                "INVALID_ARGUMENT", "creator_full 模式需要 creator_id（sec_uid / mid / 主页 URL）"
+                "INVALID_ARGUMENT",
+                "creator_full 模式需要 creator_id（sec_uid / mid / 主页 URL）",
             )
+        if mode == "time_range_search":
+            if not keyword:
+                raise DomainError("INVALID_ARGUMENT", "time_range_search 需要 keyword")
+            if not start_day or not end_day:
+                raise DomainError(
+                    "INVALID_ARGUMENT",
+                    "time_range_search 需要 start_day/end_day（YYYY-MM-DD）",
+                )
+            try:
+                from datetime import date
+
+                start_dt = date.fromisoformat(start_day)
+                end_dt = date.fromisoformat(end_day)
+            except ValueError as exc:
+                raise DomainError(
+                    "INVALID_ARGUMENT", f"日期格式应为 YYYY-MM-DD: {exc}"
+                ) from None
+            if start_dt > end_dt:
+                raise DomainError("INVALID_ARGUMENT", "start_day 不能晚于 end_day")
+            if (end_dt - start_dt).days > 90:
+                raise DomainError("INVALID_ARGUMENT", "单次时间范围最多 90 天")
         if (
             not isinstance(max_items, int)
             or isinstance(max_items, bool)
@@ -657,6 +686,9 @@ class ResourceService:
                 "mode": mode,
                 "platform": platform,
                 "creator_id": creator_id,
+                "keyword": keyword,
+                "start_day": start_day,
+                "end_day": end_day,
                 "max_items": max_items,
             },
         )

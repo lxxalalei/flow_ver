@@ -136,21 +136,35 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     @server.tool(structured_output=True)
     def resource_batch_collect(
         platform: str,
-        creator_id: str,
         mode: str = "creator_full",
+        creator_id: str = "",
+        keyword: str = "",
+        start_day: str = "",
+        end_day: str = "",
         max_items: int = 500,
     ) -> dict[str, Any]:
-        """Enumerate a creator's full works into a results file (batch mode).
+        """Enumerate resources in bulk into a results file (batch mode).
 
         Runs as a detached job that survives restarts; the response stays
         small (job handle only) and the full list lands in results.jsonl.
         Page through it with resource_batch_read instead of pulling the whole
-        list into the conversation. mode currently supports 'creator_full';
-        creator_id is the platform creator id (sec_uid / mid / profile URL).
+        list into the conversation.
+
+        Modes:
+        - creator_full: a creator's full works; creator_id is the platform
+          creator id (sec_uid / mid / profile URL)
+        - time_range_search: a keyword's results day by day over
+          [start_day, end_day] (YYYY-MM-DD), currently bilibili only
         """
         return _call(
             lambda: resource_service.batch_collect(
-                platform, mode=mode, creator_id=creator_id, max_items=max_items
+                platform,
+                mode=mode,
+                creator_id=creator_id,
+                keyword=keyword,
+                start_day=start_day,
+                end_day=end_day,
+                max_items=max_items,
             )
         )
 
