@@ -32,7 +32,6 @@ class SessionBridgeTests(unittest.TestCase):
     ) -> Settings:
         return Settings(
             data_dir=data_dir,
-            database_path=data_dir / "database.sqlite",
             jobs_dir=data_dir / "jobs",
             library_dir=data_dir / "library",
             session_manager_data_dir=session_manager_data_dir,

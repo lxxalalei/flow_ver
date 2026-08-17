@@ -70,6 +70,37 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _validate_creator_id(platform: str, creator_id: str) -> str:
+    """Reject truncated/malformed creator ids loudly.
+
+    Douyin sec_user_ids start with ``MS4wLjAB`` and are ~76 chars; a
+    truncated value used to produce a silent empty enumeration (real
+    incident 2026-08-17).  Bilibili mids are plain numeric ids.
+    """
+
+    if platform == "douyin":
+        if creator_id.startswith(("http://", "https://")):
+            return creator_id  # full profile URL; parsed downstream
+        if not creator_id.startswith("MS4wLjAB"):
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "抖音 creator_id 应以 MS4wLjAB 开头（或传完整主页 URL）",
+            )
+        if len(creator_id) < 40:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"creator_id 疑似不完整（长度 {len(creator_id)}，抖音 sec_uid 通常 ~76 字符）"
+                "；请从搜索结果候选的 creator_id 字段直接取，不要手工复制",
+            )
+    elif platform == "bilibili":
+        if not creator_id.isdigit():
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "B站 creator_id 应为数字 mid（或传完整主页 URL）",
+            )
+    return creator_id
+
+
 _SEARCH_TASK_EXAMPLE = (
     'search_tasks 结构示例：[{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}]'
     '；queries 项也可以是 {"query": "..."}。顶层不支持 query 字段。'
@@ -283,6 +314,10 @@ class ResourceService:
             raise DomainError("INVALID_ARGUMENT", "platform 和 creator_id 不能为空")
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise DomainError("INVALID_ARGUMENT", "limit 必须大于 0")
+        if creator_id.startswith("res_"):
+            creator_id = self._creator_id_from_resource(creator_id)
+        else:
+            creator_id = _validate_creator_id(platform, creator_id)
         search_creator = getattr(self.search_provider, "search_creator", None)
         if not callable(search_creator):
             raise DomainError("FEATURE_NOT_SUPPORTED", "当前搜索器不支持创作者浏览")
@@ -613,6 +648,27 @@ class ResourceService:
             "failures": failures,
         }
 
+    def _creator_id_from_resource(self, resource_id: str) -> str:
+        """Resolve a candidate handle to its creator id (full, never truncated).
+
+        Lets the agent point at a search candidate directly instead of
+        hand-copying a long platform creator id (real incident 2026-08-17).
+        """
+
+        resource = self._get_resource(resource_id)
+        metadata = resource.get("metadata") or {}
+        creator_id = (
+            metadata.get("creator_sec_uid")
+            or metadata.get("creator_mid")
+            or metadata.get("creator_id")
+        )
+        if not creator_id:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                f"资源 {resource_id} 不携带创作者 id，无法用于 creator_full",
+            )
+        return str(creator_id)
+
     # ------------------------------------------------------------------
     # Batch collection (0057 M1)
     # ------------------------------------------------------------------
@@ -645,11 +701,17 @@ class ResourceService:
             raise DomainError(
                 "INVALID_ARGUMENT", "platform 不能为空，例如 douyin / bilibili / smartedu"
             )
-        if mode == "creator_full" and not creator_id:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "creator_full 模式需要 creator_id（sec_uid / mid / 主页 URL）",
-            )
+        if mode == "creator_full":
+            if not creator_id:
+                raise DomainError(
+                    "INVALID_ARGUMENT",
+                    "creator_full 模式需要 creator_id（sec_uid / mid / 主页 URL），"
+                    "或传一个属于该创作者的 resource_id",
+                )
+            if creator_id.startswith("res_"):
+                creator_id = self._creator_id_from_resource(creator_id)
+            else:
+                creator_id = _validate_creator_id(platform, creator_id)
         if mode == "time_range_search":
             if not keyword:
                 raise DomainError("INVALID_ARGUMENT", "time_range_search 需要 keyword")

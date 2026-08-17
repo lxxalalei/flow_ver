@@ -153,7 +153,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
         Modes:
         - creator_full: a creator's full works; creator_id is the platform
-          creator id (sec_uid / mid / profile URL)
+          creator id (sec_uid / mid / profile URL) or a resource_id of one
+          of that creator's works from a previous search (recommended)
         - time_range_search: a keyword's results day by day over
           [start_day, end_day] (YYYY-MM-DD), currently bilibili only
         - catalog_expand: a SmartEdu textbook's national-lesson courses via

@@ -140,7 +140,7 @@ class BatchCollectTests(unittest.TestCase):
             self.service.batch_read("job_" + "e" * 32)
         self.assertEqual("INVALID_ARGUMENT", ctx.exception.code)
 
-        result = self.service.batch_collect("bilibili", creator_id="u1", max_items=5)
+        result = self.service.batch_collect("bilibili", creator_id="12345", max_items=5)
         run_batch_collect(self.root / "jobs" / result["job_id"], self.service)
         with self.assertRaises(DomainError):
             self.service.batch_read(result["job_id"], offset=-1)
