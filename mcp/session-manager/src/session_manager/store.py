@@ -136,6 +136,7 @@ _PLATFORM_LIST = [
         "cookie",
         "browser_cookies",
         cookie_domains=("douyin.com",),
+        storage_keys=("xmst",),  # msToken lives in localStorage under "xmst"
     ),
     PlatformConfig(
         "bilibili",
@@ -827,8 +828,22 @@ class SessionStore:
             )
 
         discarded = 0
+        retained_storage: dict[str, dict[str, str]] = {}
         for source in ("local_storage", "session_storage"):
-            discarded += len(self._validate_storage_map(source, session_data.get(source)))
+            values = self._validate_storage_map(source, session_data.get(source))
+            # Some platforms (douyin msToken in "xmst") need specific storage
+            # keys on every API call; keep only what the config declares.
+            if config.storage_keys and source == "local_storage":
+                retained = {
+                    key: value
+                    for key, value in values.items()
+                    if key in config.storage_keys
+                }
+                discarded += len(values) - len(retained)
+                if retained:
+                    retained_storage[source] = retained
+            else:
+                discarded += len(values)
         raw_tokens = session_data.get("tokens")
         if raw_tokens is not None:
             if not isinstance(raw_tokens, dict):
@@ -931,8 +946,13 @@ class SessionStore:
                 "SESSION_EMPTY",
                 f"没有属于 {config.label} 域名范围的有效 Cookie，未保存",
             )
-        return {"cookies": clean}, {
-            "stored_credential_count": len(clean),
+        clean_result: dict[str, Any] = {"cookies": clean}
+        for source, values in retained_storage.items():
+            clean_result[source] = values
+        return clean_result, {
+            "stored_credential_count": len(clean) + sum(
+                len(v) for v in retained_storage.values()
+            ),
             "discarded_credential_count": discarded,
         }
 

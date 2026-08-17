@@ -34,25 +34,51 @@ from .http_client import urlopen_with_fallback
 SEARCH_URL = "https://www.douyin.com/aweme/v1/web/general/search/single/"
 POST_URL = "https://www.douyin.com/aweme/v1/web/aweme/post/"
 USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 )
 _SIGN_JS = Path(__file__).parent / "douyin_sign.js"
 _AWEME_ID_RE = re.compile(r"/video/(\d+)")
 _USER_ID_RE = re.compile(r"/user/([^/?]+)")
 
-# Hardcoded device/environment parameters — Douyin does not validate these
-# against the real browser environment (verified: searches succeed from a
-# Windows host claiming to be MacIntel / Mac OS).
+
+def _web_id() -> str:
+    """Random device id, mirrors MediaCrawler's get_web_id()."""
+
+    import random
+
+    def _e(t: int | None) -> str:
+        if t is not None:
+            return str(t ^ (int(16 * random.random()) >> (t // 4)))
+        return "".join(
+            [
+                str(int(1e7)),
+                "-",
+                str(int(1e3)),
+                "-",
+                str(int(4e3)),
+                "-",
+                str(int(8e3)),
+                "-",
+                str(int(1e11)),
+            ]
+        )
+
+    return "".join(_e(int(x)) if x in "018" else x for x in _e(None)).replace("-", "")[:19]
+
+# Device/environment parameters aligned with the real cookie source browser
+# (Windows Chrome 150, captured via OpenClaw's controlled browser).  The
+# creator-page API validates UA/cookie fingerprint consistency, so claiming
+# a different OS/browser than the cookies came from gets empty responses.
 _COMMON_PARAMS: dict[str, str] = {
     "device_platform": "webapp", "aid": "6383", "channel": "channel_pc_web",
     "version_code": "190600", "version_name": "19.6.0",
     "update_version_code": "170400", "pc_client_type": "1",
     "cookie_enabled": "true", "browser_language": "zh-CN",
-    "browser_platform": "MacIntel", "browser_name": "Chrome",
-    "browser_version": "125.0.0.0", "browser_online": "true",
-    "engine_name": "Blink", "os_name": "Mac OS", "os_version": "10.15.7",
-    "cpu_core_num": "8", "device_memory": "8", "engine_version": "109.0",
+    "browser_platform": "Win32", "browser_name": "Chrome",
+    "browser_version": "150.0.0.0", "browser_online": "true",
+    "engine_name": "Blink", "os_name": "Windows", "os_version": "10",
+    "cpu_core_num": "8", "device_memory": "8", "engine_version": "150.0",
     "platform": "PC", "screen_width": "2560", "screen_height": "1440",
     "effective_type": "4g", "round_trip_time": "50",
 }
@@ -135,10 +161,12 @@ class DouyinSearchAdapter:
 
     # -- internal helpers ------------------------------------------------
 
-    def _request_json(self, url: str, cookie: str) -> dict[str, Any]:
+    def _request_json(
+        self, url: str, cookie: str, referer: str | None = None
+    ) -> dict[str, Any]:
         headers = {
             "User-Agent": USER_AGENT,
-            "Referer": "https://www.douyin.com/",
+            "Referer": referer or "https://www.douyin.com/",
             "Accept": "application/json, text/plain, */*",
         }
         if cookie:
@@ -219,6 +247,26 @@ class DouyinSearchAdapter:
             raise _AdapterError("AUTH_REQUIRED", "未保存抖音登录态，请先在浏览器中登录抖音", False)
         return SessionStore._cookie_header(session_data)
 
+    def _ms_token(self) -> str:
+        """msToken from the stored session (localStorage xmst)."""
+
+        try:
+            session_data = self.session_store.get_session_data("douyin") or {}
+        except Exception:  # noqa: BLE001 - optional parameter
+            return ""
+        local_storage = session_data.get("local_storage") or {}
+        return str(local_storage.get("xmst") or "")
+
+    def _sign_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Inject webid + msToken (required by creator-page APIs)."""
+
+        signed = dict(params)
+        signed["webid"] = _web_id()
+        ms_token = self._ms_token()
+        if ms_token:
+            signed["msToken"] = ms_token
+        return signed
+
     # -- public API: keyword search --------------------------------------
 
     def search(
@@ -236,7 +284,8 @@ class DouyinSearchAdapter:
         try:
             while len(results) < limit:
                 current_size = min(page_size, limit - len(results))
-                params = {
+                params = self._sign_params(
+                    {
                     **_COMMON_PARAMS,
                     "search_channel": "aweme_general",
                     "enable_history": "1",
@@ -250,7 +299,8 @@ class DouyinSearchAdapter:
                     "need_filter_settings": "1",
                     "list_type": "multi",
                     "search_id": "",
-                }
+                    }
+                )
                 url = f"{SEARCH_URL}?{urlencode(params)}"
                 response = self._request_json(url, cookie)
 
@@ -309,19 +359,25 @@ class DouyinSearchAdapter:
             while len(results) < limit:
                 if cancel_event is not None and cancel_event.is_set():
                     break
-                params = {
-                    **_COMMON_PARAMS,
-                    "sec_user_id": sec_user_id,
-                    "count": "18",
-                    "max_cursor": max_cursor,
-                    "locate_query": "false",
-                    "publish_video_strategy_type": "2",
-                }
+                params = self._sign_params(
+                    {
+                        **_COMMON_PARAMS,
+                        "sec_user_id": sec_user_id,
+                        "count": "18",
+                        "max_cursor": max_cursor,
+                        "locate_query": "false",
+                        "publish_video_strategy_type": "2",
+                    }
+                )
                 query_string = urlencode(params)
                 params["a_bogus"] = sign_a_bogus(query_string, USER_AGENT)
 
                 url = f"{POST_URL}?{urlencode(params)}"
-                response = self._request_json(url, cookie)
+                response = self._request_json(
+                    url,
+                    cookie,
+                    referer=f"https://www.douyin.com/user/{sec_user_id}",
+                )
 
                 aweme_list = response.get("aweme_list")
                 if not isinstance(aweme_list, list) or not aweme_list:
