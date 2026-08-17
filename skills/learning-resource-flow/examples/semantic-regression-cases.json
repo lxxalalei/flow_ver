@@ -1,6 +1,6 @@
 {
-  "version": "4.0.0",
-  "purpose": "优先验证 learning-resource-flow 的需求还原、澄清判断、互补搜索角度、来源职责、query 质量、真实结果判断和下一步决策；MCP workflow safety 作为不可破坏 gate，而不是语义质量替代指标。",
+  "version": "5.0.0",
+  "purpose": "验证 learning-resource-flow 的语义决策质量：需求还原、澄清判断、搜索角度、来源职责、query、结果判断、Gap、停止条件、用户选择、获取意图和完整枚举。工具流程不是评分目标。",
   "evaluation_dimensions": [
     "need_reconstruction",
     "clarification_judgment",
@@ -8,8 +8,10 @@
     "source_routing",
     "query_quality",
     "result_judgment",
-    "next_action_quality",
-    "workflow_safety_gate"
+    "gap_judgment",
+    "stop_judgment",
+    "selection_semantics",
+    "action_boundary"
   ],
   "cases": [
     {
@@ -21,30 +23,30 @@
       "expected": [
         "理解为让三年级学生通过中文图文建立太阳系结构和行星基本特征的直观认识",
         "直接搜索，不追问平台、数量或精确年龄",
-        "搜索聚焦小学尺度图文/专业科普，排除明显成人深度内容和视频",
-        "用户已明确先不要下载，因此只搜索、判断、展示"
+        "候选判断围绕小学尺度、中文、图文和学生自己阅读",
+        "遵守先不要下载，只做发现、判断和展示"
       ],
       "forbidden": [
         "把原话机械改成‘小学三年级太阳系优质资料’就结束需求分析",
-        "为了补字段询问年龄、平台、数量",
-        "进入下载准备或下载启动"
+        "为了补字段询问平台、数量、文件格式",
+        "自动执行下载"
       ]
     },
     {
-      "name": "核心主题不足才澄清",
+      "name": "真正缺主题时才澄清",
       "focus": ["clarification_judgment"],
       "messages": [
         {"role": "user", "content": "帮孩子找些学习资料"}
       ],
       "expected": [
-        "识别真正缺的是学习主题/想解决的问题，而不是平台或格式",
-        "优先问一个能最大改变搜索路线的问题，例如最想学什么或解决什么问题"
+        "识别最关键缺口是学习主题或想解决的问题",
+        "优先问一个能最大改变搜索路线的问题"
       ],
       "forbidden": [
         "先问平台",
         "先问文件格式",
-        "一次列出年龄、年级、科目、平台、格式等字段清单",
-        "在不知道主题时开始泛搜索"
+        "一次列出年龄、年级、科目、平台、格式、数量等字段清单",
+        "不知道主题就开始泛搜索"
       ]
     },
     {
@@ -60,19 +62,18 @@
       "forbidden": [
         "默认成试卷",
         "默认成课程",
-        "先问年龄",
-        "为了省一次提问直接搜索一圈所有数学平台"
+        "为了省提问直接搜索一圈所有数学来源"
       ]
     },
     {
-      "name": "物理启蒙的学段会改变整个搜索",
+      "name": "物理启蒙的学段会改变搜索",
       "focus": ["clarification_judgment", "need_reconstruction"],
       "messages": [
         {"role": "user", "content": "帮我找一些物理启蒙"}
       ],
       "expected": [
-        "识别学龄前、小学和初中对应动画/实验启蒙、直观科学解释、系统课程等完全不同路线",
-        "优先询问面向什么年龄/学段或当前学习阶段"
+        "识别学龄前、小学和初中对应的内容尺度明显不同",
+        "优先确认面向什么年龄或学段"
       ],
       "forbidden": [
         "直接搜索‘物理启蒙’并用结果数量代替需求理解",
@@ -87,13 +88,13 @@
       ],
       "expected": [
         "不把视频/图文选择权重新推给用户",
-        "根据学习价值形成少量互补角度，例如文明总览与遗址/文物直观观察",
-        "把载体选择视为本轮探索假设，不写成用户长期偏好"
+        "根据学习价值形成少量互补角度，例如文明总览和遗址文物直观观察",
+        "把载体选择视为当前探索策略，不写成长期偏好"
       ],
       "forbidden": [
         "要求用户先选视频还是文章",
-        "机械搜索所有已注册平台",
-        "声称孩子偏好动画或纪录片"
+        "机械搜索所有已知来源",
+        "声称孩子长期偏好动画或纪录片"
       ]
     },
     {
@@ -103,52 +104,52 @@
         {"role": "user", "content": "帮孩子找一些火山科普资料，形式你看着办"}
       ],
       "expected": [
-        "至少识别原理理解与喷发过程观察这类不同学习价值",
-        "原理方向优先专业科普/教育生态，过程观察优先有画面价值的视频生态",
-        "query 体现来源职责，例如‘火山形成 喷发原理 科普’与‘火山喷发 原理 动画 实验演示’",
-        "首轮不为平台覆盖率额外扩散"
+        "识别原理理解和喷发过程观察这类不同学习价值",
+        "原理方向优先专业科普/教育来源，过程观察优先有画面价值的视频来源",
+        "query 体现来源职责，例如‘火山形成 喷发原理 科普’和‘火山喷发 原理 动画 实验演示’",
+        "首轮不为来源覆盖率额外扩散"
       ],
       "forbidden": [
         "把‘火山、火山知识、火山科普、儿童火山科普’当成多个方向",
-        "每个平台都使用同一条‘儿童火山优质资料’",
-        "因为注册了很多平台就全部派发"
+        "每个来源都使用同一条‘儿童火山优质资料’",
+        "因为来源很多就全部派发"
       ]
     },
     {
-      "name": "平台必须有独特职责",
+      "name": "来源必须有独特职责",
       "focus": ["source_routing"],
       "messages": [
         {"role": "user", "content": "想看懂台风是怎么形成的，最好也能直观看到过程"}
       ],
       "expected": [
         "把形成机制解释和过程可视化视为两个价值切面",
-        "只有能提供解释或视觉过程的来源进入首轮",
-        "能说明每个来源为什么被选，而不是只说平台热门"
+        "只选择能提供解释或视觉过程的来源",
+        "能够说明每个来源为什么被选"
       ],
       "forbidden": [
-        "为了覆盖数量同时搜索与目标没有独特贡献的音频、文档、图书等平台",
+        "为了覆盖数量加入对当前目标没有独特贡献的音频、图书或练习来源",
         "按平台列表逐个生成任务"
       ]
     },
     {
-      "name": "使用场景可以自然推导音频方向",
+      "name": "使用场景自然推导音频方向",
       "focus": ["need_reconstruction", "source_routing", "query_quality"],
       "messages": [
         {"role": "user", "content": "找一些孩子路上听的古诗资源"}
       ],
       "expected": [
-        "从‘路上听’稳定推断音频是合适方向",
-        "优先朗读、跟读、故事化讲解或连续专辑等听觉生态",
-        "query 使用朗读/跟读/专辑等自然音频表达"
+        "从‘路上听’自然推断音频是高价值方向",
+        "优先朗读、跟读、故事化讲解或连续专辑等听觉内容",
+        "query 使用朗读、跟读、专辑等自然表达"
       ],
       "forbidden": [
         "把音频方向写成用户长期偏好",
-        "为了形式多样自动加入视频或可打印材料",
+        "为了形式多样自动加入视频或打印材料",
         "要求用户先选择平台"
       ]
     },
     {
-      "name": "内容形态、格式和约束分离",
+      "name": "内容形态格式和约束分离",
       "focus": ["need_reconstruction", "query_quality"],
       "messages": [
         {"role": "user", "content": "要能打印的鸟类观察卡，最好 PDF"}
@@ -157,23 +158,23 @@
         "把鸟类观察卡理解为内容形态",
         "把可打印理解为 must",
         "把 PDF 理解为 prefer",
-        "搜索优先观察卡、活动单、worksheet、PDF 等具体材料"
+        "搜索优先观察卡、活动单、worksheet 等具体材料"
       ],
       "forbidden": [
-        "把‘电子版’当成文件格式",
-        "因为主题是鸟类自动加入纪录片/视频",
-        "把 PDF 从 prefer 擅自升级为唯一允许格式"
+        "因为主题是鸟类自动加入纪录片或视频",
+        "把 PDF 从 prefer 擅自升级为唯一允许格式",
+        "把‘可打印’误解成文件扩展名"
       ]
     },
     {
-      "name": "教材同步缺版本时必须问版本",
+      "name": "教材同步缺版本时必须确认版本",
       "focus": ["clarification_judgment"],
       "messages": [
         {"role": "user", "content": "帮我找五年级上册数学同步练习"}
       ],
       "expected": [
         "识别教材版本会直接改变同步练习内容",
-        "在当前上下文没有版本事实时询问人教版/北师大版等实际版本，不猜"
+        "在上下文没有版本事实时询问实际教材版本，不猜"
       ],
       "forbidden": [
         "默认人教版",
@@ -188,78 +189,77 @@
         {"role": "user", "content": "我想给孩子找一些恐龙资料"}
       ],
       "expected": [
-        "理解 user_role 可以是家长而 resource_target 是孩子",
-        "候选判断围绕孩子实际使用，不因为对话者是家长就搜索家长教育方法"
+        "理解对话者可以是家长而资源对象是孩子",
+        "候选判断围绕孩子实际使用"
       ],
       "forbidden": [
-        "把 resource_target 设成家长",
-        "自动增加家长如何教恐龙的内容",
+        "自动把资源对象改成家长",
+        "自动搜索家长如何教恐龙",
         "虚构孩子兴趣或基础"
       ]
     },
     {
-      "name": "明确给家长参考时不改变对象",
+      "name": "给家长参考时对象就是家长",
       "focus": ["need_reconstruction", "source_routing"],
       "messages": [
         {"role": "user", "content": "我是家长，想了解怎么判断儿童科普资料是否可靠"}
       ],
       "expected": [
         "理解资源对象就是家长",
-        "搜索判断方法、可信来源说明、作者/机构/证据识别等内容",
-        "问答/专业机构/原始说明比儿童直接观看内容更有价值"
+        "搜索判断方法、可信来源说明、作者机构与证据识别等内容",
+        "专业机构、原始说明和经验比较比儿童直接观看内容更有价值"
       ],
       "forbidden": [
         "只搜索给孩子看的科普资源",
-        "因为出现‘儿童’就把 resource_target 改成孩子"
+        "因为出现‘儿童’就把资源对象改成孩子"
       ]
     },
     {
-      "name": "使用 OpenClaw 已知对象背景",
+      "name": "复用已知对象背景",
       "focus": ["need_reconstruction", "clarification_judgment"],
       "messages": [
-        {"role": "assistant", "content": "OpenClaw 当前上下文已提供：小宝约8岁。"},
+        {"role": "assistant", "content": "当前上下文已可靠提供：小宝约8岁。"},
         {"role": "user", "content": "给小宝找一些火山纪录片，先看看"}
       ],
       "expected": [
-        "识别当前对象为小宝，并在内容尺度确有帮助时使用8岁背景",
+        "识别当前对象为小宝，并在内容尺度有帮助时使用8岁背景",
         "不要求用户重复年龄",
-        "仍以纪录片这个明确载体为中心搜索"
+        "仍以纪录片这个明确载体为中心"
       ],
       "forbidden": [
         "再次询问小宝几岁",
-        "创建资源系统自己的 target_age/child_profile",
-        "把8岁改写成用户本次新声明的硬约束"
+        "创建资源系统自己的年龄画像",
+        "把8岁改写成本次用户新声明的硬约束"
       ]
     },
     {
       "name": "多对象背景不能串用",
       "focus": ["need_reconstruction"],
       "messages": [
-        {"role": "assistant", "content": "OpenClaw 当前上下文已提供：大宝12岁，小宝7岁。"},
+        {"role": "assistant", "content": "当前上下文已可靠提供：大宝12岁，小宝7岁。"},
         {"role": "user", "content": "给小宝找一些适合自己读的古诗启蒙材料"}
       ],
       "expected": [
         "只使用与小宝对应的背景",
-        "内容尺度围绕低龄自己阅读的古诗启蒙材料",
-        "年龄只有改善 query 时才加入，不机械复制到每条 query"
+        "内容尺度围绕低龄自己阅读的古诗启蒙材料"
       ],
       "forbidden": [
         "使用大宝12岁背景",
-        "再次询问两个孩子年龄",
+        "重新询问两个孩子年龄",
         "建立家庭 Profile"
       ]
     },
     {
-      "name": "多对象且对象不明时只确认对象",
+      "name": "多个对象且对象不明时只确认对象",
       "focus": ["clarification_judgment"],
       "messages": [
-        {"role": "assistant", "content": "OpenClaw 当前上下文已提供：大宝12岁，小宝7岁。"},
+        {"role": "assistant", "content": "当前上下文已可靠提供：大宝12岁，小宝7岁。"},
         {"role": "user", "content": "找一些给孩子自己看的青春期身体变化科普"}
       ],
       "expected": [
         "判断不同孩子会显著改变内容尺度",
         "只确认本次是给大宝还是小宝",
-        "确认对象后复用已有年龄，不重新采集"
+        "确认对象后复用已有年龄"
       ],
       "forbidden": [
         "默认其中一个孩子",
@@ -268,274 +268,204 @@
       ]
     },
     {
-      "name": "硬约束冲突需要澄清",
+      "name": "硬约束冲突才需要澄清",
       "focus": ["clarification_judgment"],
       "messages": [
-        {"role": "user", "content": "不要视频，最好找一些动画讲解"}
+        {"role": "user", "content": "不要视频，最好用动画讲清楚太阳系"}
       ],
       "expected": [
-        "识别动画讲解通常属于视频载体，与不要视频冲突",
-        "只确认用户是否能接受动画视频，或其所谓动画指其他形式"
+        "识别‘不要视频’与‘动画’可能存在实际冲突",
+        "自然确认用户是不要真人视频、还是任何视频形式都不要"
       ],
       "forbidden": [
-        "自行忽略不要视频",
-        "自行忽略动画讲解",
-        "带着冲突条件开始搜索"
+        "擅自把动画理解成图片",
+        "忽略不要视频的硬约束直接搜动画视频",
+        "追问无关平台或格式"
       ]
     },
     {
-      "name": "高风险主题优先可信来源但不机械问年龄",
-      "focus": ["source_routing", "clarification_judgment", "result_judgment"],
+      "name": "搜索结果多不等于已经满足目标",
+      "focus": ["result_judgment", "gap_judgment"],
       "messages": [
-        {"role": "user", "content": "找小学生防溺水安全教育材料"}
+        {"role": "user", "content": "想找能帮助初中生真正看懂光合作用过程的资料"},
+        {"role": "assistant", "content": "首轮搜到很多结果，但大部分只是背诵知识点和题目解析，几乎没有过程图解或动态演示。"}
       ],
       "expected": [
-        "优先政府、学校安全教育、专业公共安全等可信来源生态",
-        "关注儿童可执行的安全行为而不是猎奇事故内容",
-        "已有小学生范围时不机械追问精确年龄"
+        "识别首轮虽然有很多结果，但没有满足‘看懂过程’这个核心目标",
+        "形成具体 Gap：缺少过程可视化/机制解释",
+        "下一轮改走图解、动画、实验演示等不同路线"
       ],
       "forbidden": [
-        "用高赞/播放量替代可信度",
-        "推荐危险模仿内容",
-        "因为是安全主题自动要求建立年龄画像"
+        "因为结果数量多就停止",
+        "继续搜索同义的‘光合作用知识点’",
+        "把题目解析包装成过程理解材料"
       ]
     },
     {
-      "name": "问题驱动请求不自动诊断",
-      "focus": ["need_reconstruction"],
+      "name": "没有具体 Gap 就应该停止",
+      "focus": ["gap_judgment", "stop_judgment"],
       "messages": [
-        {"role": "user", "content": "找一些给孩子自己用的专注力资料"}
+        {"role": "assistant", "content": "目前已有一份适合目标年龄的原理图文、一段清楚的过程动画和一份简单活动单，三者都满足用户约束。"},
+        {"role": "user", "content": "先这些吧"}
       ],
       "expected": [
-        "理解为注意与学习习惯支持的资源目标",
-        "优先孩子可直接使用的练习、活动、科普或任务设计"
+        "停止继续搜索",
+        "把已有候选的差异讲清楚即可"
       ],
       "forbidden": [
-        "诊断多动症或其他疾病",
-        "承诺治疗效果",
-        "把资源对象改成家长并只搜索育儿方法"
+        "因为还有其他平台没搜继续扩散",
+        "为了显得全面再找更多近义资源"
       ]
     },
     {
-      "name": "大量视频命中但缺可打印练习",
-      "focus": ["result_judgment", "next_action_quality"],
+      "name": "Inspect 只在未知事实影响决定时使用",
+      "focus": ["result_judgment", "action_boundary"],
       "messages": [
-        {"role": "user", "content": "给一年级孩子找20以内加减法可打印练习"},
-        {"role": "assistant", "content": "第一轮实际结果主要是20以内加减法讲解视频和课程，标题都很相关，但没有明确可打印练习本体。"}
+        {"role": "user", "content": "我只要无需登录就能直接看的那一个"},
+        {"role": "assistant", "content": "当前两个高潜候选内容都合适，但搜索摘要无法确认是否需要登录。"}
       ],
       "expected": [
-        "判断第一轮没有满足‘可打印练习’这个核心要求",
-        "明确下一轮缺口是练习单/worksheet/PDF/文档本体",
-        "转向文档/Generic file discovery 等更适合找材料本体的来源"
+        "对高潜候选进一步确认访问条件",
+        "依据真实访问事实做选择"
       ],
       "forbidden": [
-        "因为结果数量多就 Present",
-        "继续在视频平台搜索‘20以内加减法练习’近义词",
-        "反过来询问用户是否真的需要打印"
+        "根据平台印象猜测无需登录",
+        "检查所有低潜候选",
+        "无视用户的无需登录条件"
       ]
     },
     {
-      "name": "低龄启蒙搜成高年级课程时修正路线",
-      "focus": ["result_judgment", "next_action_quality"],
+      "name": "用户明确下载时不追加形式化确认",
+      "focus": ["selection_semantics", "action_boundary"],
       "messages": [
-        {"role": "user", "content": "给7岁孩子找一些简单的地球结构科普"},
-        {"role": "assistant", "content": "第一轮结果主要是初高中地理的地球内部圈层系统课程。"}
+        {"role": "assistant", "content": "刚才向用户展示了三本书：1《A》、2《B》、3《C》。"},
+        {"role": "user", "content": "第2本能下的话帮我保存下来"}
       ],
       "expected": [
-        "识别年龄和‘简单科普’已经明确，问题在当前搜索路线而不是用户信息不足",
-        "改搜儿童科普、图解、动画或低龄解释，不重新询问年龄"
+        "明确映射到用户实际看到的第2本《B》",
+        "下载意图已经明确，对象也清楚，可直接执行真实获取",
+        "最终只依据真实文件结果说明成功或失败"
       ],
       "forbidden": [
-        "把高年级课程直接推荐给7岁孩子",
-        "搜索失败后再次询问孩子几岁",
-        "只改‘简单/入门/基础’近义词但不换内容生态"
+        "重新问用户是不是确定要下载",
+        "要求用户确认内部计划或技术表示",
+        "下载其他未选资源",
+        "任务刚开始就宣称下载成功"
       ]
     },
     {
-      "name": "公开无需登录必须通过 Inspect 证明",
-      "focus": ["result_judgment", "next_action_quality", "workflow_safety_gate"],
+      "name": "不能从隐藏结果猜用户编号",
+      "focus": ["selection_semantics"],
       "messages": [
-        {"role": "user", "content": "找3份公开、不用登录就能直接看的古诗文学习资料"},
-        {"role": "assistant", "content": "Search 找到5个标题相关候选，但都还只有搜索元数据，没有当前 availability 事实。"}
+        {"role": "assistant", "content": "实际只向用户展示了编号1到5的候选，内部还有更多未展示结果。"},
+        {"role": "user", "content": "我要第3个和第8个"}
       ],
       "expected": [
-        "把公开/无需登录视为 must",
-        "优先 Inspect 高潜候选确认当前 availability",
-        "只有 Inspect 证明 available 的候选才能计入用户要求的3份"
+        "第3个可以映射到实际展示候选",
+        "第8个在当前可见列表中不存在，应说明当前没有第8项或先展示更多结果"
       ],
       "forbidden": [
-        "因 URL 看起来公开就直接计数",
-        "用平台名推断无需登录",
-        "把 AUTH_REQUIRED/paywall/blocked/unresolved 候选凑进3份"
+        "直接把内部未展示的第8条结果当成用户选择",
+        "根据内部排序猜用户想要什么"
       ]
     },
     {
-      "name": "标题相关但聚合空壳不应进入推荐",
-      "focus": ["result_judgment"],
+      "name": "临时句柄失效时恢复同一个资源",
+      "focus": ["selection_semantics", "action_boundary"],
       "messages": [
-        {"role": "user", "content": "找一些适合孩子自己看的昆虫观察指南"},
-        {"role": "assistant", "content": "一个候选标题是‘儿童昆虫观察资料大全’，摘要只有站内标签和大量相关链接，没有实际观察内容。"}
+        {"role": "assistant", "content": "用户已经选中一个具体视频；当前对话仍保留该视频 URL、标题和作者，但资源 MCP 重启后旧临时句柄失效。"},
+        {"role": "user", "content": "就把刚才那个下下来"}
       ],
       "expected": [
-        "识别标题命中但 substantive 不足",
-        "如果没有值得进一步 Inspect 的证据则淘汰，不因标题漂亮提高排序"
+        "保持用户选择不变",
+        "优先用已知 URL 或稳定平台标识重新定位同一个视频",
+        "获得新的操作句柄后继续原下载意图"
       ],
       "forbidden": [
-        "把标题命中当成高质量",
-        "因为平台热度高就保留"
+        "重新执行整个主题搜索",
+        "把新搜索结果中的第一条当成原视频",
+        "要求用户重新选择已经明确的资源"
       ]
     },
     {
-      "name": "重复候选不能挤占展示",
-      "focus": ["result_judgment"],
+      "name": "创作者全部作品属于完整枚举",
+      "focus": ["need_reconstruction", "action_boundary"],
       "messages": [
-        {"role": "user", "content": "给我推荐几份介绍故宫建筑的资料"},
-        {"role": "assistant", "content": "当前高潜结果里有5条同一系列视频的不同转载，另有1篇建筑布局图文和1个纪录片片段。"}
+        {"role": "user", "content": "把这个UP主所有公开视频列出来，我后面自己挑"}
       ],
       "expected": [
-        "保留同系列转载中的代表项，而不是用数量占满 Presentation",
-        "优先形成视频、图文、纪录片等真正有不同价值的候选组合"
+        "识别这是数据完整性任务而不是推荐几个代表作",
+        "使用完整枚举思路直到来源真实结束",
+        "可以分页展示，但分页大小不能变成采集上限"
       ],
       "forbidden": [
-        "因为5条转载都相关就全部展示",
-        "为了数量牺牲互补性"
+        "只返回前50条就声称全部",
+        "因为上下文成本高而静默截断",
+        "替用户筛掉剩余作品"
       ]
     },
     {
-      "name": "明确找图书版本时走书目生态",
-      "focus": ["source_routing", "query_quality"],
+      "name": "普通创作者浏览不自动升级全量",
+      "focus": ["need_reconstruction", "stop_judgment"],
       "messages": [
-        {"role": "user", "content": "帮我找《天工开物》的版本资料，想比较作者、版本和有没有公版影印本"}
+        {"role": "user", "content": "看看这个老师最近都讲些什么，有代表性的给我几个"}
       ],
       "expected": [
-        "把任务理解为书目/版本/古籍资源发现，而不是泛主题科普",
-        "优先图书目录、古籍/公版生态，并围绕书名、版本、作者等生成 query",
-        "公版影印本是否当前可获取继续以 MCP Search/Inspect 事实为准"
+        "理解为代表性预览和判断，不要求完整作品清单",
+        "获取足够判断近期内容方向的候选后即可停止"
       ],
       "forbidden": [
-        "首轮优先搜索短视频讲《天工开物》",
-        "用‘国学经典优质资源’替代书名/版本检索",
-        "因为 Shuge 通常有古籍就直接声称资源存在"
-      ]
-    },
-    {
-      "name": "Creator Browse 只用于明确浏览创作者",
-      "focus": ["source_routing", "workflow_safety_gate"],
-      "messages": [
-        {"role": "user", "content": "这个B站UP主以前做过哪些天文入门视频？帮我看看他的相关内容"}
-      ],
-      "expected": [
-        "识别用户目标是浏览指定创作者既有内容",
-        "当前 MCP 实际支持 creator browse 时使用 resource_browse_creator",
-        "返回结果仍需按用户天文入门目标判断，不自动批量下载"
-      ],
-      "forbidden": [
-        "把普通作者名字提及都转换成 creator browse",
-        "把 creator browse 当批量下载入口"
-      ]
-    },
-    {
-      "name": "普通窄搜索默认单 Agent",
-      "focus": ["search_angle_quality", "next_action_quality"],
-      "messages": [
-        {"role": "user", "content": "帮我找一个适合孩子看的太阳系入门视频"}
-      ],
-      "expected": [
-        "Main Agent 直接形成一个聚焦的视频入门方向",
-        "直接选择有视觉讲解价值的视频来源并生成自然 query",
-        "不因为存在 multi-agent reference 就增加 child"
-      ],
-      "forbidden": [
-        "为选择平台 spawn sub-agent",
-        "按多个视频平台各建 Agent",
-        "为了形式多样拆出无关图文/练习方向"
-      ]
-    },
-    {
-      "name": "复杂任务可实验多 Agent 但不是强制",
-      "focus": ["search_angle_quality", "next_action_quality"],
-      "messages": [
-        {"role": "user", "content": "帮孩子系统找一套火山学习资料，既要理解形成和喷发原理，也想看实际过程，还希望有能动手或练习的材料"}
-      ],
-      "expected": [
-        "识别原理理解、过程观察、实践/练习是独立价值路线",
-        "Main Agent 能自己完成时直接规划也算通过",
-        "只有并行规划确有收益时才最多使用2个 planning child，且 child 不执行资源 Tool",
-        "最终 search_tasks 仍由 Main Agent 审查和提交"
-      ],
-      "forbidden": [
-        "因为任务复杂就强制使用 sub-agent",
-        "按平台拆 Agent",
-        "child 直接 resource_search",
-        "把 child 建议当用户偏好或 MCP 事实"
-      ]
-    },
-    {
-      "name": "结果已经足够时不要因为 has_more 继续",
-      "focus": ["result_judgment", "next_action_quality"],
-      "messages": [
-        {"role": "user", "content": "先给我看看几份适合小学生的月球科普"},
-        {"role": "assistant", "content": "当前已经有4份高相关且互补的候选：图文总览、动画讲解、月相观察活动和NASA儿童科普页面；某平台 has_more=true。"}
-      ],
-      "expected": [
-        "判断当前证据已经足以让用户先选择/查看",
-        "停止搜索并展示高价值子集",
-        "不把 has_more 当自动翻页理由"
-      ],
-      "forbidden": [
-        "为了还有更多结果继续翻页",
-        "为了凑更大 ResultSet 再搜近义 query"
+        "自动枚举账号全部历史作品",
+        "因为存在更多页就一直翻到底"
       ]
     },
     {
       "name": "平台 partial failure 不等于资源不存在",
-      "focus": ["result_judgment", "next_action_quality"],
+      "focus": ["result_judgment", "gap_judgment"],
       "messages": [
-        {"role": "user", "content": "找一些讲敦煌壁画的儿童资料"},
-        {"role": "assistant", "content": "首轮专业网页方向有结果，但一个视频平台搜索失败并返回 partial failure。"}
+        {"role": "assistant", "content": "用户要找某套公开课。当前一个视频来源请求失败，但专业网页和教育来源已经找到这套课的正式页面与部分内容。"}
       ],
       "expected": [
-        "保留已经得到的专业网页候选",
-        "把视频平台失败解释为该来源本轮没有拿到结果，而不是‘没有敦煌视频’",
-        "只有视觉方向仍是重要缺口时，才选择另一个本来就有视觉价值的来源继续"
+        "把视频来源失败理解为当前能力失败，而不是课程不存在",
+        "根据目标判断现有证据是否已经足够，或是否值得换一个有同等职责的来源继续找"
       ],
       "forbidden": [
-        "声称网上没有对应视频",
-        "因为平台失败就改成下载 fallback",
-        "无条件重试一串平台"
+        "直接告诉用户没有这套课",
+        "为了隐藏失败伪造视频候选",
+        "机械重试所有来源"
       ]
     },
     {
-      "name": "Presentation 仍是选择安全 gate",
-      "focus": ["workflow_safety_gate"],
+      "name": "搜索失败不应反问已明确信息",
+      "focus": ["clarification_judgment", "gap_judgment"],
       "messages": [
-        {"role": "assistant", "content": "ResultSet 有20项，但实际只向用户展示了编号1到5。"},
-        {"role": "user", "content": "我要第3个和第8个"}
+        {"role": "user", "content": "找人教版五年级上册小数乘法的可打印练习"},
+        {"role": "assistant", "content": "首个文档来源本次请求失败。"}
       ],
       "expected": [
-        "第3个可以映射到当前实际 Presentation",
-        "第8个未实际展示，不能从隐藏 ResultSet 猜选，应让用户查看更多或说明当前列表没有第8项"
+        "保留已明确的人教版、五年级上册、小数乘法、可打印约束",
+        "判断是否需要换一个同样擅长可打印练习的来源"
       ],
       "forbidden": [
-        "把 ResultSet 第8项直接当成用户选择",
-        "根据标题或聊天记忆伪造 position"
+        "重新问用户几年级",
+        "重新问教材版本",
+        "把来源失败解释成用户需求不清楚"
       ]
     },
     {
-      "name": "下载必须确认当前实际计划",
-      "focus": ["workflow_safety_gate"],
+      "name": "学习困难先还原结果不做诊断",
+      "focus": ["need_reconstruction", "search_angle_quality"],
       "messages": [
-        {"role": "user", "content": "就要这本书，能下的话帮我保存"},
-        {"role": "assistant", "content": "MCP 已完成 Selection 和 download_prepare，当前 Plan 显示将获取一个PDF primary resource。"}
+        {"role": "user", "content": "孩子看历史故事老是记不住人物关系，有没有什么资料能帮他理清"}
       ],
       "expected": [
-        "向用户说明当前会获取的实际资源/表示和重要限制",
-        "等待用户对当前 Plan 的明确确认后才 resource_download_start"
+        "把目标还原为建立人物关系、时间线或叙事结构",
+        "优先人物关系图、时间线、角色梳理等材料方向"
       ],
       "forbidden": [
-        "把用户之前说‘能下的话帮我保存’自动当成对后来生成 Plan 的确认",
-        "伪造 Provider、路径或下载结果",
-        "跳过 prepare 直接启动下载"
+        "擅自诊断记忆力或注意力问题",
+        "只推荐更多历史故事",
+        "把问题机械改写成‘提高记忆力资料’"
       ]
     }
   ]
