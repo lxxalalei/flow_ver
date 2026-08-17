@@ -130,3 +130,38 @@ Scope drift detected?: no（排序/时间过滤按用户决策砍除）
 ## 结果
 
 M0/M1 完成：zhihu 可物化下载、批量基座上线（9 工具）、真实 B站枚举冒烟通过且复用同一登录库。后续里程碑（M2 smartedu、M3 douyin 图集/资料、M4 time_range/catalog_expand）按计划推进；部署（gateway stop → sync → restart）待用户确认时机。
+
+---
+
+## M2 / M4a / M4b 实施结果（2026-08-17）
+
+### M2 smartedu 搜索分类 tabs（8d99691）
+
+- `SearchTask.tabs` 可选字段（typed schema），smartedu 平台生效；service 校验、MultiPlatformSearchProvider 透传、adapter `_build_payload` 用传入 tabs（不传 = 26 全分类）。参考 fork client `_build_payload` 的 tab_codes 参数。
+
+### M4a time_range_search 批量模式（d7fbe3a）
+
+- bilibili adapter `search` 支持 `pubtime_begin_s/pubtime_end_s`（payload 透传）。
+- 批量模式：keyword + start_day/end_day（YYYY-MM-DD，≤90 天）逐日枚举、去重、落盘；响亮入口校验。
+
+### M4b catalog_expand 批量模式（e019b71）
+
+- **纯 CDN JSON 路线**（修正早期"需浏览器"误判；参考实现为 `C:\Users\admin\projects\mediacrawler\tools\smartedu_batch_download.py`）。
+- `discover_textbook_courses(specs)`：`data_version.json` → `part_*.json` tag 匹配（zxxxk/zxxnj/zxxcc/zxxbb + 新教材）→ `resources/part_100.json` national_lesson 课程；全走 `urlopen_with_fallback`，零浏览器。
+- 批量模式：specs 入参 → 课程清单（title/activity_id/textbook/classActivity URL）→ results.jsonl。
+- **真实冒烟**：`语文/一年级/上册/统编版` 免登录发现 45 门课程。
+- CDP 抓包探测（`%TEMP%\cdp_probe*.py`）证实：SPA 页无列表 XHR（列表数据全部来自 CDN JSON），验证了参考结论。
+
+## 验证（M2/M4a/M4b）
+
+| Validation | Result | What it proves |
+| --- | --- | --- |
+| test_smartedu_tabs 4 项 | 全过 | tabs 流转、默认/忽略/响亮校验 |
+| test_batch_time_range 4 项 | 全过 | 逐日窗口、去重、校验、平台拒绝 |
+| test_batch_catalog 3 项 | 全过 | catalog 流转、specs 校验、错误平台拒绝 |
+| 全量 pytest | 51 = 基线 | 零回归 |
+| 真实 CDN 冒烟 | 45 课程（语文/一年级/上册/统编版） | CDN JSON 免登录可直调 |
+
+## 结果（M2/M4a/M4b）
+
+smartedu 分类过滤、B站时间范围全量、教材目录展开（纯 API）上线。M4b 确立 CDN 路线——目录展开无需浏览器。剩余：M3（douyin 图集，已按用户决策砍除）、M5（skill 退役，待确认）。部署待执行（gateway stop → sync → restart）。
