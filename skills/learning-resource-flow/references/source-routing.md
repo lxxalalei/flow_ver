@@ -154,7 +154,7 @@ Generic 是 discovery 路线，不是 acquisition fallback。专门 Provider 失
 - 科学健康安全：政府、公共卫生、专业科普机构；
 - 具体材料：`filetype:pdf`、`filetype:ppt` 等。
 
-不要把域名当 platform ID；如果是 Generic Web 定向发现，仍使用 MCP 实际支持的 Generic 平台，并把站点限制放进 query。
+不要把域名当 platform ID。Generic Web 定向发现默认走**宿主 websearch**（`site:` / `filetype:` 写进 websearch 的 query），挑中目标后用 `resource_import_url` 进 MCP 管道；仅当宿主 websearch 中文召回不足时，才显式用 MCP 的 `platform="generic"` 补搜（站点限制同样写进 query）。
 
 一条 query 通常绑定一个明确站点/文件目标即可，不要堆很多域名把检索变成不可解释的 OR 列表。
 

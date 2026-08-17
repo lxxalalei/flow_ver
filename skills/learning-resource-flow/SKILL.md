@@ -9,7 +9,7 @@ description: 学习资源（图书、课程、视频、文章、教材、音频�
 
 `education-resources` 是能力工具箱：搜索、按创作者浏览、检查资源、下载、查看/取消下载任务、归档文件。
 
-通用网页检索的分工：**普通网页发现用宿主的 websearch 工具**（OpenClaw 自带或 anysearch）；在宿主结果里挑中目标后，用 `resource_import_url(source_url)` 把链接注册成 MCP 资源句柄，即可下载/物化/归档。MCP 的 `platform="generic"` 搜索保留，用于中文召回不足时补充搜索（多引擎并行）。
+通用网页检索的分工：**普通网页发现用宿主的 websearch 工具**（OpenClaw 自带或 anysearch）；在宿主结果里挑中目标后，用 `resource_import_url(source_url)` 把链接注册成 MCP 资源句柄，即可下载/物化/归档。**搜索任务中不包含 generic 平台**；仅当宿主 websearch 中文召回不足时，才显式用 `platform="generic"` 补搜（MCP 多引擎并行）。
 
 ## 1. 分工
 
@@ -74,8 +74,7 @@ MCP 不负责保存“用户已经看过第几版候选”“选择版本”“P
 - 方法、经验、比较 → 问答/社区/专业网页；
 - 专业科普、官方材料 → 官方/专业 Web；
 - 图书、版本、古籍 → 图书/古籍来源；
-- PDF、讲义、课件、练习 → 文档来源或 Generic Web；
-- 未单独接入的长尾站点 → Generic Web。
+- PDF、讲义、课件、练习 → 文档来源；未单独接入的长尾站点 → 宿主 websearch（选中后 `resource_import_url` 进管道）。
 
 具体平台生态见 [`references/source-routing.md`](references/source-routing.md)。不要为了平台覆盖率机械扩散。
 
@@ -119,13 +118,15 @@ Search 提供候选线索。只有某个事实会改变推荐或下载决策时�
 resource_search({
   "search_tasks": [
     {"platform": "bilibili", "queries": ["火山喷发 原理 动画"]},
-    {"platform": "generic",  "queries": ["火山形成 科普 儿童图文"]}
+    {"platform": "smartedu", "queries": ["火山形成 科普 图文"]}
   ],
   "limit": 8
 })
 ```
 
-每个 task = 一个平台 + 一组搜索短语（字符串数组）。platform 是平台 id（bilibili / douyin / smartedu / ximalaya / generic 等）。注意没有顶层 `query` 字段——搜索单独一条也是放进 `queries` 数组。
+每个 task = 一个平台 + 一组搜索短语（字符串数组）。platform 是平台 id（bilibili / douyin / smartedu / ximalaya 等）。注意没有顶层 `query` 字段——搜索单独一条也是放进 `queries` 数组。
+
+**搜索任务里不放 generic 平台**：通用网页发现统一走宿主 websearch，挑中链接后 `resource_import_url` 进管道。仅当宿主 websearch 对中文召回不足时，才显式用 `platform="generic"` 补搜（MCP 多引擎并行）。
 
 返回候选后直接在当前对话里判断、比较和展示。`resource_id` 只是当前 MCP 进程里的资源句柄。补搜直接再次 Search，没有 ResultSet lineage、extend version、Flow version。
 
