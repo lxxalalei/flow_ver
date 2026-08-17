@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "education-resource-mcp"
 version = "0.3.0"
-description = "Thin MCP capability service for resource search, inspection, download and archive"
+description = "Thin MCP capability service for learning-resource discovery, inspection, acquisition, batch enumeration and archive"
 requires-python = ">=3.12"
 dependencies = [
   "mcp==2.0.0",

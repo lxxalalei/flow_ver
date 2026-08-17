@@ -1,8 +1,8 @@
-"""Thin stdio MCP exposing search, download and archive capabilities."""
+"""Thin stdio MCP exposing resource capability contracts and execution."""
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Annotated, Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, Field
@@ -18,19 +18,23 @@ class SearchTask(BaseModel):
         description=(
             "平台 id：bilibili、douyin、zhihu、smartedu、ximalaya、cctv、yixi、"
             "kepu、baiduwenku、runoob、nlc、open163、annas-archive、weibo、"
-            "wechat、shuge、zjer、generic（下划线会自动归一为连字符）"
+            "wechat、shuge、zjer、generic（下划线会自动归一为连字符）。"
+            "普通网页发现通常由宿主 Web Search 完成；generic 是 MCP 内补充网页搜索。"
         )
     )
     queries: list[str] = Field(
         min_length=1,
-        description="1-3 条真实搜索短语（像在平台搜索框里输入的完整短句），"
-        '如 ["火山喷发 原理 动画"]',
+        description=(
+            "平台搜索短语列表。每项应是可直接输入对应平台搜索框的自然 query，"
+            '如 ["火山喷发 原理 动画"]。'
+        ),
     )
     tabs: list[str] | None = Field(
         default=None,
-        description="仅 smartedu 有效：智慧教育平台分类代码子集，如 tchMaterial（教材）/"
-        "qualityCourse（课程）/prepareLesson（备课）/sedu（德育）/specialEdu（特教）；"
-        "不传则搜全部分类",
+        description=(
+            "仅 smartedu 有效：分类代码子集，如 tchMaterial（教材）/qualityCourse（课程）/"
+            "prepareLesson（备课）/sedu（德育）/specialEdu（特教）；不传则搜全部分类。"
+        ),
     )
 
 
@@ -48,31 +52,40 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     server = MCPServer(
         name="education-resources",
         title="Education Resources",
-        description="Search, inspect, download and archive learning resources",
+        description=(
+            "Learning-resource capabilities for platform search, creator browsing, URL import, "
+            "inspection, download jobs, batch enumeration/paging, cancellation and archive"
+        ),
         version="0.3.0",
         instructions=(
-            "This MCP is a capability layer, not a workflow engine. "
-            "Use resource_search/resource_browse_creator to discover platform resources. "
-            "Use the host web search for general web discovery, then resource_import_url for a selected URL. "
-            "Use resource_inspect only when details affect the decision. "
-            "Call resource_download only after the user has explicitly asked to download selected resources. "
-            "After a successful or partial download, classify the files and call resource_archive. "
-            "Use resource_job_status for progress or resource_job_cancel to stop a job. "
-            "For a creator's complete catalogue use resource_batch_collect without max_items and page it with resource_batch_read. "
-            "Set max_items only when the user explicitly wants a bound. "
-            "Resource handles are process-local. If one is lost after restart, re-import the selected URL when known; "
-            "otherwise precisely relocate that resource instead of rerunning the whole research task. "
-            "Download and batch jobs run in detached workers and survive an MCP restart; "
-            "job_status reports interrupted for jobs whose worker died."
+            "This MCP exposes resource capabilities and execution facts; it does not own user intent, "
+            "search strategy, candidate ranking, selection semantics or classification decisions. "
+            "Platform search, creator preview, known-URL import, inspection, download jobs, large-result "
+            "batch enumeration, paging, cancellation and archive are exposed as separate tools. "
+            "Resource handles are process-local. Download and batch operations return persistent job handles; "
+            "batch items are paged back with resource_batch_read. Use each tool's schema for accepted identifiers, "
+            "mode-specific inputs and result handling."
         ),
     )
 
     @server.tool(structured_output=True)
     def resource_search(
-        search_tasks: list[SearchTask],
-        limit: int = 8,
+        search_tasks: Annotated[
+            list[SearchTask],
+            Field(description="一个或多个平台搜索任务；返回候选及当前进程内 resource_id。"),
+        ],
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                description=(
+                    "每条平台 query 请求的候选数，默认 8。只控制本次响应规模，"
+                    "不表示平台总结果数，也不是完整枚举上限。"
+                ),
+            ),
+        ] = 8,
     ) -> dict[str, Any]:
-        """Run configured platform search adapters and return resource handles."""
+        """Search configured platforms and return candidate resource handles."""
         return _call(
             lambda: resource_service.search(
                 [task.model_dump() for task in search_tasks], limit=limit
@@ -81,85 +94,170 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_browse_creator(
-        platform: str,
-        creator_id: str,
-        limit: int = 50,
+        platform: Annotated[
+            str,
+            Field(description="创作者所在平台 id；仅当前支持 creator browse 的平台有效。"),
+        ],
+        creator_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "创作者定位符。优先传之前发现的该创作者任一作品 resource_id（res_...），"
+                    "MCP 会自行解析创作者；也可传平台原生 creator id 或支持的完整主页 URL。"
+                    "已有 resource_id 时不要手工重建很长的平台 creator id。"
+                )
+            ),
+        ],
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                description=(
+                    "本次预览请求的作品数，默认 50。它是交互式预览规模，不是全部作品上限；"
+                    "完整枚举使用 resource_batch_collect。"
+                ),
+            ),
+        ] = 50,
     ) -> dict[str, Any]:
-        """Preview resources published by one creator."""
+        """Preview a limited set of works from one creator."""
         return _call(
-            lambda: resource_service.browse_creator(
-                platform,
-                creator_id,
-                limit=limit,
-            )
+            lambda: resource_service.browse_creator(platform, creator_id, limit=limit)
         )
 
     @server.tool(structured_output=True)
-    def resource_import_url(source_url: str) -> dict[str, Any]:
-        """Register an external URL as a process-local resource handle and inspect it."""
-        return _call(
-            lambda: resource_service.import_url(source_url),
-            source_url=source_url,
-        )
+    def resource_import_url(
+        source_url: Annotated[
+            str,
+            Field(
+                description=(
+                    "已经明确知道的 HTTP(S) 资源/网页 URL。该工具不负责搜索网页；"
+                    "它注册当前进程内 resource_id，并立即解析资源事实。"
+                )
+            ),
+        ]
+    ) -> dict[str, Any]:
+        """Register a known external URL as a process-local resource handle and inspect it."""
+        return _call(lambda: resource_service.import_url(source_url), source_url=source_url)
 
     @server.tool(structured_output=True)
-    def resource_inspect(resource_id: str) -> dict[str, Any]:
-        """Inspect one resource for availability and concrete representations."""
-        return _call(
-            lambda: resource_service.inspect(resource_id),
-            resource_id=resource_id,
-        )
+    def resource_inspect(
+        resource_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "Search/Browse/Import 返回的当前进程内 resource_id；"
+                    "返回当前可访问性、可获取表示及已解析资源事实。"
+                )
+            ),
+        ]
+    ) -> dict[str, Any]:
+        """Resolve current availability and concrete representations for one resource handle."""
+        return _call(lambda: resource_service.inspect(resource_id), resource_id=resource_id)
 
     @server.tool(structured_output=True)
     def resource_download(
-        resource_ids: list[str],
-        preferred_container: str = "original",
+        resource_ids: Annotated[
+            list[str],
+            Field(
+                min_length=1,
+                description="要下载的当前进程内 resource_id 列表；调用返回 download job_id。",
+            ),
+        ],
+        preferred_container: Annotated[
+            str,
+            Field(
+                description=(
+                    '表示容器偏好，默认 "original"，通常保持默认。只有确实需要某个已有表示时'
+                    "才指定 pdf/mp4/mp3/html 等；它不是任意格式转换请求。"
+                )
+            ),
+        ] = "original",
     ) -> dict[str, Any]:
-        """Start downloading resources the user has explicitly chosen."""
+        """Start a download job for the supplied resource handles."""
         return _call(
             lambda: resource_service.download(
-                resource_ids,
-                preferred_container=preferred_container,
+                resource_ids, preferred_container=preferred_container
             )
         )
 
     @server.tool(structured_output=True)
-    def resource_job_status(job_id: str) -> dict[str, Any]:
-        """Return progress, files and failures for one download or batch job."""
-        return _call(
-            lambda: resource_service.job_status(job_id),
-            job_id=job_id,
-        )
+    def resource_job_status(
+        job_id: Annotated[
+            str,
+            Field(description="resource_download 或 resource_batch_collect 返回的 job_id。"),
+        ]
+    ) -> dict[str, Any]:
+        """Return status/progress for a download or batch job.
+
+        Download jobs may include files. Batch items are not returned here; read
+        collected batch items with resource_batch_read.
+        """
+        return _call(lambda: resource_service.job_status(job_id), job_id=job_id)
 
     @server.tool(structured_output=True)
-    def resource_job_cancel(job_id: str) -> dict[str, Any]:
-        """Cancel a queued or running job."""
-        return _call(
-            lambda: resource_service.job_cancel(job_id),
-            job_id=job_id,
-        )
+    def resource_job_cancel(
+        job_id: Annotated[
+            str,
+            Field(description="要取消的 queued/running/cancelling 下载或批量 job_id。"),
+        ]
+    ) -> dict[str, Any]:
+        """Cancel a queued or running download or batch job."""
+        return _call(lambda: resource_service.job_cancel(job_id), job_id=job_id)
 
     @server.tool(structured_output=True)
     def resource_batch_collect(
-        platform: str,
-        mode: str = "creator_full",
-        creator_id: str = "",
-        keyword: str = "",
-        start_day: str = "",
-        end_day: str = "",
-        specs: list[str] | None = None,
-        max_items: int | None = None,
+        platform: Annotated[
+            str,
+            Field(description="批量枚举目标平台 id；具体 mode 只在支持的平台有效。"),
+        ],
+        mode: Annotated[
+            Literal["creator_full", "time_range_search", "catalog_expand"],
+            Field(
+                description=(
+                    "creator_full=完整枚举一个创作者；time_range_search=Bilibili 关键词按日期范围枚举；"
+                    "catalog_expand=SmartEdu 教材规格展开。"
+                )
+            ),
+        ] = "creator_full",
+        creator_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "仅 creator_full 使用。优先传该创作者任一已发现作品 resource_id（res_...）；"
+                    "也可传平台原生 creator id 或支持的完整主页 URL。"
+                )
+            ),
+        ] = "",
+        keyword: Annotated[
+            str,
+            Field(description="仅 time_range_search 使用：Bilibili 搜索关键词。"),
+        ] = "",
+        start_day: Annotated[
+            str,
+            Field(description="仅 time_range_search 使用：起始日期 YYYY-MM-DD，包含当天。"),
+        ] = "",
+        end_day: Annotated[
+            str,
+            Field(description="仅 time_range_search 使用：结束日期 YYYY-MM-DD，包含当天。"),
+        ] = "",
+        specs: Annotated[
+            list[str] | None,
+            Field(description="仅 catalog_expand 使用：SmartEdu 教材规格标识列表。"),
+        ] = None,
+        max_items: Annotated[
+            int | None,
+            Field(
+                description=(
+                    "可选显式结果上限。None 表示枚举到来源真实结束；"
+                    "只有确实需要最多 N 条时才传正整数。"
+                )
+            ),
+        ] = None,
     ) -> dict[str, Any]:
-        """Enumerate a large result set into ``results.jsonl``.
+        """Start a large-result enumeration job with items stored outside the conversation.
 
-        Omit max_items for complete enumeration. Supply max_items only when
-        the user explicitly requests a bound. Results are streamed to disk
-        and read back with resource_batch_read.
-
-        Modes:
-        - creator_full: creator id, profile URL, or resource_id from one work
-        - time_range_search: Bilibili keyword over [start_day, end_day]
-        - catalog_expand: SmartEdu textbook specs
+        creator_full uses creator_id; time_range_search uses keyword plus start_day/end_day;
+        catalog_expand uses specs. Read collected items with resource_batch_read.
         """
         return _call(
             lambda: resource_service.batch_collect(
@@ -176,11 +274,26 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_batch_read(
-        job_id: str,
-        offset: int = 0,
-        limit: int = 20,
+        job_id: Annotated[
+            str,
+            Field(description="resource_batch_collect 返回的 batch job_id。"),
+        ],
+        offset: Annotated[
+            int,
+            Field(ge=0, description="从第几个结果开始读取，0-based，默认 0。"),
+        ] = 0,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                description=(
+                    "本页读取条数，默认 20，服务端单页最多返回 50。"
+                    "分页大小不截断磁盘上的完整结果集。"
+                ),
+            ),
+        ] = 20,
     ) -> dict[str, Any]:
-        """Read one page (default 20, max 50) without truncating the stored result set."""
+        """Read one page from a batch job's stored result set."""
         return _call(
             lambda: resource_service.batch_read(job_id, offset=offset, limit=limit),
             job_id=job_id,
@@ -188,16 +301,33 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_archive(
-        job_id: str,
-        domain_id: str = "",
-        topic: str = "",
+        job_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "已产生真实文件且状态为 succeeded/partial 的 download job_id；"
+                    "纯 batch 枚举 Job 没有可归档下载文件。"
+                )
+            ),
+        ],
+        domain_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "学习资料库顶层语义领域 id，由调用方根据资源内容选择；"
+                    "分类不确定可留空进入待分类区域。"
+                )
+            ),
+        ] = "",
+        topic: Annotated[
+            str,
+            Field(description="自由文本学习主题，例如“天文与宇宙”“自然拼读”；可留空。"),
+        ] = "",
     ) -> dict[str, Any]:
-        """Move completed download files into the learning library by domain/topic."""
+        """Move real files from a completed download job into the learning library."""
         return _call(
             lambda: resource_service.archive(
-                job_id,
-                domain_id=domain_id,
-                topic=topic,
+                job_id, domain_id=domain_id, topic=topic
             ),
             job_id=job_id,
         )
