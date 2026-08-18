@@ -4,15 +4,60 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Annotated, Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel, ConfigDict, Field
 
 from .store import SessionError, SessionStore
 
 
 CONTRACT_VERSION = "1.0.0"
-SERVICE_VERSION = "0.4.0"
+SERVICE_VERSION = "0.4.1"
+
+
+class SessionCapture(BaseModel):
+    """One browser capture or explicitly authorized canonical token import.
+
+    Unknown fields pass through unchanged so the store keeps failing loudly
+    on unexpected input; the MCP performs platform extraction server-side.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    cookies: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "浏览器 cookie 能力返回的 cookie 对象数组，逐个原样传入。"
+            "不要筛选、转写、合并或重新编码任何值；服务端会按平台域名规则提取。"
+        ),
+    )
+    storage_origin: str | None = Field(
+        default=None,
+        description=(
+            "捕获 storage 时活动官方页面的 location.origin，"
+            "如 https://basic.smartedu.cn；仅在传入 local_storage/session_storage 时需要。"
+        ),
+    )
+    local_storage: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "localStorage 快照，键与值都必须是字符串（浏览器 API 返回什么就传什么），"
+            "不得嵌套对象。服务端只保留平台规则匹配的最小条目。"
+        ),
+    )
+    session_storage: dict[str, str] | None = Field(
+        default=None,
+        description="同 local_storage，来自 sessionStorage。",
+    )
+    tokens: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "规范 Token 直连导入（如 smartedu 的 accessToken）。仅当用户自愿提供"
+            "合法取得的 Token 并明确授权保存时使用；它不是浏览器捕获的精简通道——"
+            "捕获数据请走 cookies/local_storage/session_storage，由服务端提取。"
+        ),
+    )
 
 
 def _ok(data: dict[str, Any]) -> dict[str, Any]:
@@ -87,8 +132,23 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
     @server.tool(structured_output=True)
     def resource_session_status(
         contract_version: Literal["1.0.0"],
-        platforms: list[str] | None = None,
-        deep: bool = False,
+        platforms: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "要查询的平台 id 列表；不传则返回全部。支持的平台以返回结果为准。"
+                )
+            ),
+        ] = None,
+        deep: Annotated[
+            bool,
+            Field(
+                description=(
+                    "是否真实探测远端（仅 probe_supported 平台有效）。默认 false 只看本地状态；"
+                    "保存后的复验和“登录态到底还能不能用”用 true。"
+                )
+            ),
+        ] = False,
     ) -> dict[str, Any]:
         """Return session state plus machine-readable login/capture metadata.
 
@@ -100,7 +160,11 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
 
     @server.tool(structured_output=True)
     def resource_session_login_guide(
-        contract_version: Literal["1.0.0"], platform: str
+        contract_version: Literal["1.0.0"],
+        platform: Annotated[
+            str,
+            Field(description="平台 id，如 douyin、bilibili、zhihu、smartedu；以 status 返回列表为准。"),
+        ],
     ) -> dict[str, Any]:
         """Return safe host-browser login steps and allowed capture scope.
 
@@ -115,10 +179,29 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
     @server.tool(structured_output=True)
     def resource_session_save(
         contract_version: Literal["1.0.0"],
-        platform: str,
-        session_data: dict[str, Any],
-        expires_at: str | None = None,
-        idempotency_key: str | None = None,
+        platform: Annotated[
+            str,
+            Field(description="平台 id；保存前先经 status/login_guide 确认平台支持。"),
+        ],
+        session_data: SessionCapture,
+        expires_at: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "RFC3339 时间戳。仅当一个可靠过期时间覆盖整个平台会话时才传；"
+                    "不确定就省略，由存储侧按平台规则处理。"
+                )
+            ),
+        ] = None,
+        idempotency_key: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "幂等键，8-128 位字母/数字/点/下划线/冒号/连字符。每次捕获生成唯一值；"
+                    "仅在确认上次请求确切结果后才可复用，绝不自动重放不确定的写入。"
+                )
+            ),
+        ] = None,
     ) -> dict[str, Any]:
         """Securely persist host-captured or explicitly authorized canonical session data.
 
@@ -132,7 +215,7 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
         return _invoke(
             lambda: session_store.save(
                 platform,
-                session_data,
+                session_data.model_dump(exclude_none=True),
                 expires_at=expires_at,
                 idempotency_key=idempotency_key,
             ),
@@ -142,8 +225,14 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
     @server.tool(structured_output=True)
     def resource_session_delete(
         contract_version: Literal["1.0.0"],
-        platform: str,
-        idempotency_key: str | None = None,
+        platform: Annotated[
+            str,
+            Field(description="要删除本地登录态的平台 id。"),
+        ],
+        idempotency_key: Annotated[
+            str | None,
+            Field(description="幂等键；重试同一次删除时复用，规则同 resource_session_save。"),
+        ] = None,
     ) -> dict[str, Any]:
         """Delete a locally stored platform session; supports idempotent retry."""
         return _invoke(
