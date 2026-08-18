@@ -22,7 +22,6 @@ class GenericWebSearchProviderTests(unittest.TestCase):
             root = Path(data_dir)
             settings = Settings(
                 data_dir=root,
-                database_path=root / "database.sqlite",
                 jobs_dir=root / "jobs",
                 library_dir=root / "library",
             )
@@ -59,7 +58,6 @@ class GenericWebSearchProviderTests(unittest.TestCase):
             root = Path(data_dir)
             settings = Settings(
                 data_dir=root,
-                database_path=root / "database.sqlite",
                 jobs_dir=root / "jobs",
                 library_dir=root / "library",
             )
@@ -83,7 +81,6 @@ class GenericWebSearchProviderTests(unittest.TestCase):
             root = Path(data_dir)
             settings = Settings(
                 data_dir=root,
-                database_path=root / "database.sqlite",
                 jobs_dir=root / "jobs",
                 library_dir=root / "library",
             )
@@ -106,7 +103,6 @@ class GenericWebSearchProviderTests(unittest.TestCase):
             root = Path(data_dir)
             settings = Settings(
                 data_dir=root,
-                database_path=root / "database.sqlite",
                 jobs_dir=root / "jobs",
                 library_dir=root / "library",
             )
@@ -143,7 +139,6 @@ class SearXNGSearchProviderTests(unittest.TestCase):
     def _make_settings(self, data_dir: Path) -> Settings:
         return Settings(
             data_dir=data_dir,
-            database_path=data_dir / "database.sqlite",
             jobs_dir=data_dir / "jobs",
             library_dir=data_dir / "library",
             searxng_base_url="http://localhost:8888",

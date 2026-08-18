@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 import sys
 import tempfile
-import time
+import threading
 import unittest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -33,11 +33,9 @@ from education_resource_mcp.service import ResourceService
 def _settings(data_dir: Path) -> Settings:
     return Settings(
         data_dir=data_dir,
-        database_path=data_dir / "database.sqlite",
         jobs_dir=data_dir / "jobs",
         library_dir=data_dir / "library",
         max_workers=2,
-        plan_ttl_seconds=60,
     )
 
 
@@ -157,7 +155,6 @@ class ServiceRoutingTests(unittest.TestCase):
             [
                 ProviderRegistration(
                     provider_id="generic-web-materializer",
-                    provider_version="1.0.0",
                     provider=static,
                     strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
                     scopes=("landing_page",),
@@ -176,60 +173,21 @@ class ServiceRoutingTests(unittest.TestCase):
 
     def test_webpage_job_uses_static_materializer_without_browser(self) -> None:
         service = self._make_service()
-        flow = service.flow_start(
-            "flow-routing-0001", {"goal": {"topic": "天文"}, "constraints": []}
-        )
         search = service.search(
-            flow["flow_id"],
-            "search-routing-00001",
-            [{"platform": "generic", "queries": [{"query": "天文"}]}],
-            filters={},
-            limit=10,
+            [{"platform": "generic", "queries": [{"query": "天文"}]}], limit=10
         )
-        service.inspect(
-            flow["flow_id"],
-            "inspect-routing-00001",
-            search["candidates"][0]["resource_id"],
+        resource_id = search["candidates"][0]["resource_id"]
+        files = service.download_resource(
+            "job-routing-0001",
+            service._get_resource(resource_id),
+            "html",
+            threading.Event(),
         )
-        presentation = service.presentation_save(
-            flow["flow_id"],
-            search["result_set_id"],
-            [item["resource_id"] for item in search["candidates"]],
-            "presentation-routing-0001",
-        )
-        selection = service.selection_save(
-            flow["flow_id"],
-            "selection-routing-0001",
-            presentation["presentation_id"],
-            presentation["presented_version"],
-            [1],
-        )
-        plan = service.download_prepare(
-            flow["flow_id"],
-            "prepare-routing-000001",
-            selection["selection_version"],
-            options={"preferred_container": "html"},
-        )
-        started = service.download_start(
-            flow["flow_id"], plan["plan_id"], plan["confirmation_token"],
-            "start-routing-000001",
-        )
-        job_id = started["job_id"]
-        deadline = time.monotonic() + 3
-        status = None
-        while time.monotonic() < deadline:
-            status = service.job_status(flow["flow_id"], job_id)
-            if status["status"] in {"succeeded", "failed", "cancelled"}:
-                break
-            time.sleep(0.01)
-        self.assertIsNotNone(status)
-        self.assertEqual(status["status"], "succeeded")
         self.assertTrue(service._fake_static_materializer.called)  # type: ignore[attr-defined]
         self.assertFalse(service._fake_renderer.called)  # type: ignore[attr-defined]
-        assets = status.get("assets") or []
-        self.assertEqual(len(assets), 1)
-        self.assertEqual(assets[0]["media_type"], "application/zip")
-        service.close()
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0]["media_type"], "application/zip")
+        service.shutdown()
 
 
 if __name__ == "__main__":

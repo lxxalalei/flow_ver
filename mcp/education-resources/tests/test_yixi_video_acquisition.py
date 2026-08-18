@@ -158,4 +158,3 @@ def test_yixi_video_routes_to_generic_direct() -> None:
 
     assert len(matches) == 1
     assert matches[0].provider_id == "generic-direct"
-    assert matches[0].provider_version == "1.0.0"

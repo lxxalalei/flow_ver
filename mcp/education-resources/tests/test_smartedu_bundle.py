@@ -39,11 +39,9 @@ def public_resolver(hostname: str, port: int):
 def _settings(root: Path) -> Settings:
     return Settings(
         data_dir=root,
-        database_path=root / "database.sqlite",
         jobs_dir=root / "jobs",
         library_dir=root / "library",
         max_workers=2,
-        plan_ttl_seconds=60,
     )
 
 

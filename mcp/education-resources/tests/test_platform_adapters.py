@@ -129,13 +129,15 @@ class PlatformSearchAdapterTests(unittest.TestCase):
             results[0]["metadata"]["creator_sec_uid"],
         )
 
-    def test_smartedu_requires_login(self) -> None:
+    def test_unreachable_endpoints_report_partial_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             adapter = SmartEduSearchAdapter(SessionStore(root), _settings(root))
-            results, error = adapter.search("test", 10)
+            with patch.object(SmartEduSearchAdapter, "_post_search", return_value=None):
+                results, error = adapter.search("test", 10)
         self.assertEqual([], results)
-        self.assertEqual("AUTH_REQUIRED", error["code"])
+        self.assertEqual("PARTIAL_FAILURE", error["code"])
+        self.assertTrue(error["retryable"])
 
 
 class MultiPlatformSearchTests(unittest.TestCase):
@@ -159,10 +161,12 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = MultiPlatformSearchProvider(
                 _settings(root),
                 SessionStore(root),
-                adapters={"first": first, "second": second},
+                MagicMock(),
             )
+            provider.register_adapter(first)
+            provider.register_adapter(second)
             resources, _ = provider.search(
-                [{"platform": "first", "query": "q"}], 10
+                [{"platform": "first", "queries": [{"query": "q"}]}], 10
             )
 
         first.search.assert_called_once_with("q", 10)
@@ -196,12 +200,14 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = MultiPlatformSearchProvider(
                 _settings(root, max_workers=2),
                 SessionStore(root),
-                adapters={"a": adapter("a"), "b": adapter("b")},
+                MagicMock(),
             )
+            provider.register_adapter(adapter("a"))
+            provider.register_adapter(adapter("b"))
             resources, _ = provider.search(
                 [
-                    {"platform": "a", "query": "q1"},
-                    {"platform": "b", "query": "q2"},
+                    {"platform": "a", "queries": [{"query": "q1"}]},
+                    {"platform": "b", "queries": [{"query": "q2"}]},
                 ],
                 10,
             )
@@ -213,14 +219,14 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = MultiPlatformSearchProvider(
                 _settings(root),
                 SessionStore(root),
-                adapters={},
+                MagicMock(),
             )
             resources, runs = provider.search(
-                [{"platform": "missing", "query": "q"}], 10
+                [{"platform": "missing", "queries": [{"query": "q"}]}], 10
             )
         self.assertEqual([], resources)
         self.assertEqual(
-            "FEATURE_NOT_SUPPORTED",
+            "PLATFORM_UNAVAILABLE",
             runs[0]["query_runs"][0]["error"]["code"],
         )
 
@@ -230,10 +236,12 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = default_search_provider(_settings(root), SessionStore(root))
         registered = set(provider._adapters)
         for platform in (
-            "generic", "bilibili", "douyin", "smartedu", "ximalaya", "zhihu",
+            "bilibili", "douyin", "smartedu", "ximalaya", "zhihu",
             "annas-archive", "shuge", "yixi", "zjer",
         ):
             self.assertIn(platform, registered)
+        self.assertNotIn("generic", registered)
+        self.assertIsNotNone(provider.generic_provider)
 
 
 if __name__ == "__main__":

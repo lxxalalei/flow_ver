@@ -18,7 +18,6 @@ from education_resource_mcp.sessions import SessionStore
 def _settings(data_dir: Path) -> Settings:
     return Settings(
         data_dir=data_dir,
-        database_path=data_dir / "database.sqlite",
         jobs_dir=data_dir / "jobs",
         library_dir=data_dir / "library",
     )

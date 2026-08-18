@@ -106,8 +106,7 @@ def _request(
         },
         strategy=AcquisitionStrategy.WEB_MATERIALIZE,
         provider_id="fixture-web-materializer",
-        provider_version="1.0.0",
-        planned_scope="landing_page",
+        scope="landing_page",
         representation_id="repr_web_materializer_0001",
         preferred_container="html",
         jobs_root=root,
@@ -350,9 +349,9 @@ class WebMaterializerSecurityTests(unittest.TestCase):
         url = "https://example.com/path-traversal"
         page = "<article><img src='../../../../etc/passwd' alt='bad'><p>正文</p></article>".encode("utf-8")
         fetcher = FakeFetcher({url: page}, {"https://example.com/etc/passwd": _PNG})
-        with self.assertRaises(ValueError) as context:
+        with self.assertRaises(DomainError) as context:
             WebMaterializer(fetcher=fetcher).acquire(_request(self.root, url, job_id="../escape"))
-        self.assertIn("job_id", str(context.exception))
+        self.assertEqual("INVALID_ARGUMENT", context.exception.code)
 
         result = WebMaterializer(fetcher=fetcher).acquire(_request(self.root, url, job_id="job-safe"))
         self.assertTrue(result.bundle.artifacts)

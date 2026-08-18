@@ -22,7 +22,6 @@ class ShugeAcquisitionRouteTests(unittest.TestCase):
             [
                 ProviderRegistration(
                     provider_id="generic-direct",
-                    provider_version="1.0.0",
                     provider=_DirectProviderStub(),
                     strategies=(AcquisitionStrategy.DIRECT_FILE,),
                     scopes=("primary_resource",),
@@ -57,19 +56,16 @@ class ShugeAcquisitionRouteTests(unittest.TestCase):
             "resolved_resource": {"representations": [representation]},
         }
 
-        items = planner.plan_selection(
-            [resource],
-            [resolution],
+        plan = planner.route(
+            resource,
+            resolution,
             preferred_container="pdf",
         )
 
-        self.assertEqual(len(items), 1)
-        item = items[0]
-        self.assertEqual(item["planned_scope"], "primary_resource")
-        self.assertEqual(item["strategy"], "direct_file")
-        self.assertEqual(item["provider_id"], "generic-direct")
-        self.assertEqual(item["provider_version"], "1.0.0")
-        self.assertEqual(item["representation"]["selected_container"], "pdf")
+        self.assertEqual(plan["scope"], "primary_resource")
+        self.assertEqual(plan["strategy"], "direct_file")
+        self.assertEqual(plan["provider_id"], "generic-direct")
+        self.assertEqual(plan["container"], "pdf")
 
 
 if __name__ == "__main__":

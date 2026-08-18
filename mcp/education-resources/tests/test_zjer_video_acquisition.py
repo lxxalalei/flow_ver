@@ -193,4 +193,3 @@ def test_zjer_video_has_exact_provider_spec() -> None:
 
     assert len(matches) == 1
     assert matches[0].provider_id == "zjer-video"
-    assert matches[0].provider_version == "1.0.0"

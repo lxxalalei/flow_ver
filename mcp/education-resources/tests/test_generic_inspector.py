@@ -122,7 +122,7 @@ class GenericWebInspectorTests(unittest.TestCase):
         self.assertEqual("primary_resource", representation["scope"])
         self.assertEqual("primary", representation["role"])
         self.assertTrue(representation["materializable"])
-        self.assertEqual("inspection", representation["evidence"]["source"])
+        self.assertEqual("available", representation["technical_availability"])
         self.assertEqual("bounded_get", mapped["inspection"]["method"])
         self.assertEqual("generic", mapped["inspection"]["inspector_id"])
 
