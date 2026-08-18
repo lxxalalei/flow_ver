@@ -404,7 +404,7 @@ class SmartEduSearchAdapter:
         self, query: str, limit: int, tabs: list[str] | None = None
     ) -> dict[str, Any]:
         # Request more than the caller's limit because the post-filter
-        # (elite_lesson only) discards the majority of raw results.
+        # discards the majority of raw results.
         fetch_limit = max(limit * 5, 50)
         return {
             "identity": "家长",
@@ -560,7 +560,8 @@ class SmartEduSearchAdapter:
             # Extract as many items as the API returned (not just the caller's
             # limit) because the post-filter discards the majority of results.
             fetch_limit = max(limit * 5, 50)
-            items = _extract_search_items(data, min(fetch_limit, 100))
+            extract_limit = min(fetch_limit, 100)
+            items = _extract_search_items(data, extract_limit)
             if not items:
                 # Retry without tag filters (wide search).
                 wide_payload = dict(payload)
@@ -568,7 +569,7 @@ class SmartEduSearchAdapter:
                 for url in SEARCH_URLS:
                     wide_data = self._post_search(url, wide_payload, headers)
                     if wide_data is not None:
-                        items = _extract_search_items(wide_data, search_limit)
+                        items = _extract_search_items(wide_data, extract_limit)
                         if items:
                             break
 

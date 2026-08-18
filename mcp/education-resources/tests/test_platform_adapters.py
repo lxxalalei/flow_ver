@@ -157,6 +157,27 @@ class PlatformSearchAdapterTests(unittest.TestCase):
         self.assertEqual("PARTIAL_FAILURE", error["code"])
         self.assertTrue(error["retryable"])
 
+    def test_smartedu_wide_search_uses_same_extraction_limit(self) -> None:
+        wide_item = {
+            "id": "course-1",
+            "title": "火山形成与喷发",
+            "search_resource_type": "course",
+            "resource_type": "elite_lesson",
+            "content_type": "elite_lesson",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = SmartEduSearchAdapter(SessionStore(root), _settings(root))
+            with patch.object(
+                SmartEduSearchAdapter,
+                "_post_search",
+                side_effect=[{"data": []}, {"data": [wide_item]}],
+            ):
+                results, error = adapter.search("火山", 1)
+        self.assertIsNone(error)
+        self.assertEqual(1, len(results))
+        self.assertEqual("火山形成与喷发", results[0]["title"])
+
 
 class MultiPlatformSearchTests(unittest.TestCase):
     def test_only_requested_platform_runs(self) -> None:
