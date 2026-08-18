@@ -131,9 +131,9 @@ class PlatformSearchAdapterTests(unittest.TestCase):
             results[0]["metadata"]["creator_sec_uid"],
         )
 
-    def test_auth_failure_is_returned_not_raised(self) -> None:
+    def test_smartedu_public_rejection_is_not_auth_required(self) -> None:
         denied = HTTPError(
-            "https://basic.smartedu.cn/api", 401, "Unauthorized", {}, io.BytesIO(b"")
+            "https://basic.smartedu.cn/api", 403, "Forbidden", {}, io.BytesIO(b"")
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -144,8 +144,38 @@ class PlatformSearchAdapterTests(unittest.TestCase):
             ):
                 results, error = adapter.search("test", 10)
         self.assertEqual([], results)
-        self.assertEqual("AUTH_REQUIRED", error["code"])
-        self.assertFalse(error["retryable"])
+        self.assertEqual("NETWORK_BLOCKED", error["code"])
+        self.assertTrue(error["retryable"])
+
+    def test_smartedu_public_search_does_not_replay_saved_token(self) -> None:
+        item = {
+            "id": "course-token-free",
+            "title": "公开课程",
+            "search_resource_type": "course",
+            "resource_type": "elite_lesson",
+            "content_type": "elite_lesson",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = SessionStore(root)
+            store.save("smartedu", {"tokens": {"accessToken": "browser-ip-bound-token"}})
+            adapter = SmartEduSearchAdapter(store, _settings(root))
+            seen_headers = []
+
+            def public_search(_url, _payload, headers):
+                seen_headers.append(dict(headers))
+                return {"data": [item]}
+
+            with patch.object(adapter, "_post_search", side_effect=public_search):
+                results, error = adapter.search("公开课程", 1)
+
+        self.assertIsNone(error)
+        self.assertEqual(1, len(results))
+        self.assertTrue(seen_headers)
+        for headers in seen_headers:
+            lowered = {str(key).lower() for key in headers}
+            self.assertNotIn("authorization", lowered)
+            self.assertNotIn("accesstoken", lowered)
 
     def test_unreachable_endpoints_report_partial_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,14 +1,16 @@
 """SmartEdu (国家中小学智慧教育平台) search adapter.
 
-Uses the platform's combine-search POST API with token auth.  The token
-is pulled from ``SessionStore`` (stored as ``tokens.accessToken``);
-without a token the search API still returns some public results.
+Public search and textbook discovery intentionally do not attach a stored
+SmartEdu access token.  These routes are public, while tokens captured in a
+browser may be rejected when replayed from a different network/IP context.
+Authenticated detail/download paths remain separate and can use a session when
+an operation actually requires one.
 
 This adapter consolidates the search-only path from four legacy files
 (``_search.py``, ``_constants.py``, ``_text_utils.py``, ``_auth_http.py``)
 into a single module.  Detail-fetching, catalog walking and tag filtering
-beyond the search response are not included — those belong to a future
-download/detail adapter.
+beyond the search response are not included — those belong to the active
+download/detail adapters.
 """
 
 from __future__ import annotations
@@ -371,7 +373,7 @@ def _item_to_resource(item: dict[str, Any], query: str) -> dict[str, Any] | None
 # ---------------------------------------------------------------------------
 
 class SmartEduSearchAdapter:
-    """Search SmartEdu via the combine-search POST API."""
+    """Search SmartEdu public discovery endpoints without replaying login tokens."""
 
     platform_id = "smartedu"
     descriptor = descriptor_for_platform("smartedu")
@@ -380,8 +382,8 @@ class SmartEduSearchAdapter:
         self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
 
-    def _build_headers(self, session_data: dict[str, Any] | None) -> dict[str, str]:
-        headers: dict[str, str] = {
+    def _build_headers(self) -> dict[str, str]:
+        return {
             "User-Agent": UA,
             "Accept": "application/json, text/plain, */*",
             "Origin": "https://basic.smartedu.cn",
@@ -389,16 +391,6 @@ class SmartEduSearchAdapter:
             "sdp-app-id": DEFAULT_SDP_APP_ID,
             "Content-Type": "application/json;charset=UTF-8",
         }
-        if session_data:
-            tokens = session_data.get("tokens") or {}
-            token = tokens.get("accessToken")
-            if token:
-                raw = token[7:].strip() if token.lower().startswith("bearer ") else token
-                headers["Authorization"] = f"Bearer {raw}"
-                headers["accessToken"] = raw
-            extra = session_data.get("headers") or {}
-            headers.update(extra)
-        return headers
 
     def _build_payload(
         self, query: str, limit: int, tabs: list[str] | None = None
@@ -431,10 +423,11 @@ class SmartEduSearchAdapter:
         except HTTPError as exc:
             if exc.code in (401, 403):
                 raise _SmartEduError(
-                    "AUTH_REQUIRED",
-                    f"SmartEdu 搜索认证失败: HTTP {exc.code}；"
-                    "如本机保存过智慧教育登录态，可能已过期，请重新登录后再试",
-                    False,
+                    "NETWORK_BLOCKED",
+                    f"SmartEdu 公共搜索被平台拒绝: HTTP {exc.code}；"
+                    "可能与当前网络出口/IP 风控或平台访问策略有关，"
+                    "不应通过补登录态或重放浏览器 token 解决",
+                    True,
                 )
             return None
         except (TimeoutError, URLError, json.JSONDecodeError):
@@ -446,11 +439,11 @@ class SmartEduSearchAdapter:
         """Locate national-lesson textbooks by spec and list their courses.
 
         *specs* look like "学科/年级/册次/版本", e.g. "语文/一年级/上册/统编版".
-        Uses the public static CDN JSON endpoints directly — no browser.
+        Uses public static CDN JSON endpoints directly and never attaches a
+        stored browser token.
         """
 
-        session_data = self.session_store.get_session_data("smartedu")
-        headers = self._build_headers(session_data)
+        headers = self._build_headers()
         try:
             data_version = self._cdn_json(CDN_DATA_VERSION_URL, headers)
         except (HTTPError, URLError, TimeoutError) as exc:
@@ -544,8 +537,7 @@ class SmartEduSearchAdapter:
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         results: list[dict[str, Any]] = []
         try:
-            session_data = self.session_store.get_session_data("smartedu")
-            headers = self._build_headers(session_data)
+            headers = self._build_headers()
             payload = self._build_payload(query, limit, tabs)
 
             data: dict[str, Any] | None = None
@@ -610,8 +602,6 @@ class SmartEduSearchAdapter:
                         break
             return results, None
         except _SmartEduError as exc:
-            # Auth/status failures are adapter facts, not crashes; return
-            # them as the error contract so callers can act on the code.
             return results, exc.to_dict()
 
 

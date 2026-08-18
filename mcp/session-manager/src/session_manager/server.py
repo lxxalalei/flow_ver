@@ -90,7 +90,6 @@ def _invoke(
     except ValueError as exc:
         return _failure("INVALID_ARGUMENT", str(exc), **identifiers)
     except Exception:  # pragma: no cover - defensive protocol boundary
-        # Unexpected exception strings can accidentally include request data.
         return _failure("INTERNAL_ERROR", "Unexpected server error", **identifiers)
 
 
@@ -114,18 +113,22 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
         description="Guide browser login, securely store minimal cookies/tokens, and validate sessions",
         version=SERVICE_VERSION,
         instructions=(
-            "First call resource_session_status or resource_session_login_guide. "
-            "When login is required, open login_url with the host browser and ask "
-            "the user to log in themselves. Wait for explicit confirmation before "
-            "capturing browser cookies and same-origin storage. Pass the broad "
-            "browser capture directly to resource_session_save; the MCP performs "
-            "authoritative platform extraction and minimal persistence. Then check status. "
-            "Never request, accept, or autofill accounts, passwords, CAPTCHA, SMS codes, "
-            "or MFA. If the user voluntarily supplies a legally obtained canonical Cookie "
-            "or Token and explicitly names the supported platform, purpose, and permission "
-            "to save it, send it once only as resource_session_save session_data. Never "
-            "echo, narrate, log, forward, mix with browser capture, or automatically replay "
-            "credential values."
+            "Session Manager is an auxiliary authentication capability, not a preflight step. "
+            "Do not call it before public search/download operations merely because a platform "
+            "supports login. Use it when a resource capability has returned a concrete "
+            "AUTH_REQUIRED result, or when the user explicitly asks to inspect/manage a saved "
+            "platform session. A platform entry with requires_login=true means that the platform "
+            "has authenticated capabilities; it does not mean every operation needs a session. "
+            "If status says not_required/requires_login=false, do not initiate login. When a real "
+            "login is required, open login_url with the host browser and ask the user to log in "
+            "themselves. Wait for explicit confirmation before capturing browser cookies and "
+            "same-origin storage. Pass the broad browser capture directly to resource_session_save; "
+            "the MCP performs platform extraction and minimal persistence. Never request, accept, "
+            "or autofill accounts, passwords, CAPTCHA, SMS codes, or MFA. If the user voluntarily "
+            "supplies a legally obtained canonical Cookie or Token and explicitly names the supported "
+            "platform, purpose, and permission to save it, send it once only as resource_session_save "
+            "session_data. Never echo, narrate, log, forward, mix with browser capture, or "
+            "automatically replay credential values."
         ),
     )
 
@@ -137,6 +140,7 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
             Field(
                 description=(
                     "要查询的平台 id 列表；不传则返回全部。支持的平台以返回结果为准。"
+                    "不要把此状态查询作为所有资源操作的前置步骤。"
                 )
             ),
         ] = None,
@@ -145,16 +149,17 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
             Field(
                 description=(
                     "是否真实探测远端（仅 probe_supported 平台有效）。默认 false 只看本地状态；"
-                    "保存后的复验和“登录态到底还能不能用”用 true。"
+                    "保存后的复验和“已保存登录态到底还能不能用”用 true。"
                 )
             ),
         ] = False,
     ) -> dict[str, Any]:
-        """Return session state plus machine-readable login/capture metadata.
+        """Return stored-session state and login/capture metadata.
 
-        ``needs_login`` contains only platforms that require a fresh user login.
-        With ``deep=true``, supported platforms are actively probed; an invalid
-        probe is also included in ``needs_login``.
+        ``needs_login`` means a fresh session would be needed for that platform's
+        authenticated capabilities. It is not proof that the current resource
+        operation requires login. Act on it only after a concrete AUTH_REQUIRED
+        result or an explicit user request to manage login.
         """
         return _invoke(lambda: _session_status(session_store, platforms, deep))
 
@@ -166,11 +171,11 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
             Field(description="平台 id，如 douyin、bilibili、zhihu、smartedu；以 status 返回列表为准。"),
         ],
     ) -> dict[str, Any]:
-        """Return safe host-browser login steps and allowed capture scope.
+        """Return safe host-browser login steps after login is actually needed.
 
-        This tool never opens a browser and never returns credentials. The host
-        agent must open ``login_url``, wait for the user to finish login, then use
-        the declared ``capture_method`` and scope.
+        Use this after a concrete AUTH_REQUIRED result, or when the user asks to
+        manage the platform session. This tool never opens a browser and never
+        returns credentials. Public/no-session platforms return no login steps.
         """
         return _invoke(
             lambda: session_store.login_guide(platform), platform=platform
@@ -181,7 +186,7 @@ def create_server(store: SessionStore | None = None) -> MCPServer:
         contract_version: Literal["1.0.0"],
         platform: Annotated[
             str,
-            Field(description="平台 id；保存前先经 status/login_guide 确认平台支持。"),
+            Field(description="平台 id；在已确认需要登录并取得用户授权后保存。"),
         ],
         session_data: SessionCapture,
         expires_at: Annotated[

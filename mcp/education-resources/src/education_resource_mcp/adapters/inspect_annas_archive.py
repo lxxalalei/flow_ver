@@ -1,11 +1,9 @@
 """Bounded Anna's Archive inspection backed by public Libgen metadata.
 
-The search adapter obtains Anna-compatible MD5/book metadata from Libgen, and
-the downloader fetches the file from Libgen mirrors by MD5.  The synthetic
-``annas-archive.gl/md5/<md5>`` source URL is a user-facing identity page only:
-it is neither the data source nor the acquisition channel, so this inspector
-performs no request against it.  A valid MD5 must already be present in the
-server's resource metadata before any platform enrichment is allowed.
+Search and download use anonymous Libgen mirrors with Anna-compatible MD5
+identity.  The inspector does not need an Anna's Archive account or session and
+does not probe a membership page; a valid MD5 from server-controlled search
+metadata is sufficient to describe the mirror-backed primary representation.
 """
 
 from __future__ import annotations
@@ -84,8 +82,6 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
         if not isinstance(resource, Mapping):
             return super().inspect(resource)
         md5 = None
-        # The URL is intentionally not consulted.  The search result must
-        # carry the identity in a server-controlled field or metadata.
         for mapping in self._md5_mappings(resource):
             candidate = _valid_md5(mapping.get("md5"))
             if candidate is not None:
@@ -97,12 +93,6 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
                 "PLATFORM_VALIDATION_BLOCKED",
                 "Libgen-backed 检查需要资源元数据中的合法 32 位 MD5",
             )
-        # The MD5 is the whole platform identity: search and download both go
-        # through Libgen mirrors, and the downloader resolves mirrors and
-        # validates the real file format post-download.  The synthetic
-        # Anna's Archive detail page is not the inspection or acquisition
-        # channel, so no request is made against it — its risk control or
-        # unreachability must not veto the pipeline.
         base = self._result(
             resource, resolution_status="resolved", availability="available"
         )
@@ -110,9 +100,6 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
 
     @staticmethod
     def _md5_mappings(resource: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
-        # Keep this explicit rather than recursively traversing arbitrary
-        # metadata: no headers, cookies, tokens, or hidden locator objects are
-        # eligible as identity input.
         values: list[Mapping[str, Any]] = [resource]
         metadata = resource.get("metadata")
         if isinstance(metadata, Mapping):
@@ -134,7 +121,7 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             md5 = _valid_md5(mapping.get("md5"))
             if md5 is not None:
                 break
-        if md5 is None:  # Defensive: inspect() performs the same gate.
+        if md5 is None:
             return self._validation_result(
                 resource,
                 "PLATFORM_VALIDATION_BLOCKED",
@@ -183,16 +170,12 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             and item.get("technical_availability") == "available"
         ]
         if concrete_primary:
-            # A verified concrete response outranks Libgen/Anna metadata.  Do
-            # not replace or downgrade the primary representation.
             representations = current
+            for item in representations:
+                if item.get("scope") == "primary_resource" and item.get("role") == "primary":
+                    item["requires_auth"] = False
         else:
             base = current[0] if current else {}
-            # Anna's Archive resources carry a stable md5 identifier and a
-            # known file format from search metadata.  The downloader
-            # resolves Libgen mirrors and validates the real file format
-            # post-download; the inspector does not need to prove
-            # downloadability to mark the primary as materializable.
             representation: dict[str, Any] = {
                 "representation_id": self._representation_id(resource, "document", "primary"),
                 "kind": "document",
@@ -201,6 +184,7 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
                 "role": "primary",
                 "technical_availability": "available",
                 "materializable": True,
+                "requires_auth": False,
                 "rights_hint": RIGHTS_HINT,
             }
             representation.update(
@@ -221,7 +205,6 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             if language:
                 representation["language"] = language
             elif isinstance(base, Mapping) and base.get("language"):
-                # Only copy the already-validated language scalar.
                 representation["language"] = base["language"]
 
             landing = next(
@@ -243,7 +226,11 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
                     "role": "landing",
                     "technical_availability": "available",
                     "materializable": False,
+                    "requires_auth": False,
                 }
+            else:
+                landing = dict(landing)
+                landing["requires_auth"] = False
             representations = [representation, landing]
 
         return self._rewrite_result(

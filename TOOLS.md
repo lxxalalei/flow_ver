@@ -1,42 +1,53 @@
 # TOOLS.md
 
-唯一业务执行后端是 `education-resources` MCP。OpenClaw 中工具名通常带服务器前缀，例如 `education-resources__resource_search`。
+运行时能力以 OpenClaw 实际暴露的 Tool `name / description / input schema / return` 为准；不要从历史 contracts、legacy 文件或源码实现猜测 Tool 参数和状态。
 
-工具名称、版本、输入输出和副作用只以以下机器事实为准：
+当前有两个 MCP：
 
-- [`mcp/education-resources/contracts/tool-catalog.json`](mcp/education-resources/contracts/tool-catalog.json)
-- [`mcp/education-resources/contracts/schemas/`](mcp/education-resources/contracts/schemas/)
-- [`mcp/education-resources/contracts/error-codes.json`](mcp/education-resources/contracts/error-codes.json)
+- `education-resources`：真实资源能力，包括平台搜索、创作者预览、URL 导入、Inspect、下载、Batch、Job 状态/取消和归档。
+- `session-manager`：辅助登录态能力，只负责登录引导、浏览器捕获后的最小会话保存、状态查询和删除。
 
-服务安装、启动和验证见 [`mcp/education-resources/README.md`](mcp/education-resources/README.md)；文档导航见 [`docs/README.md`](docs/README.md)。
+## 资源能力边界
 
-运行时不得让模型拼接 shell、Python、Node、脚本路径、本地下载路径、任意下载 URL 或伪造业务 ID/状态。有副作用的获取继续遵循 `prepare -> 用户明确确认 -> start`；归档只接受服务端返回并校验过的 `asset_id`。
+Main Agent / Skill 负责理解需求、设计搜索任务、选择来源、判断候选、识别 Gap、理解用户选择和获取意图；`education-resources` 负责实际平台调用与文件副作用。
 
-## OpenClaw 搜索 sub-agent
+普通 Web 发现优先使用宿主 Web Search。选中具体网页后，再把 URL 交给 `resource_import_url`。不要把 `platform="generic"` 当成默认全网搜索入口。
 
-`learning-resource-flow` 可以在复杂检索中使用 OpenClaw 原生 `sessions_spawn` / `sessions_yield` / `subagents` 做**语义搜索规划**。这不增加第二个资源后端。
+`resource_id` 是当前 MCP 进程内的临时操作句柄；URL、平台原生 ID 等才是资源的稳定语义身份。`job_id` 只为真实长任务保存运行状态。
 
-Main Agent 需要的运行时工具：
+用户已经明确选中资源并明确要求“下载 / 保存 / 获取下来”时，可以直接使用 `resource_download`，不创建 `prepare -> confirm -> start` 二次确认流程。归档接受真实下载 Job 的 `job_id`，不使用 `asset_id`。
 
-- `sessions_spawn`：启动 leaf search-planning child；
-- `sessions_yield`：本轮已 spawn 所需 child 后，让完成事件自然回到 requester；
-- `subagents`：只用于按需查看/取消，不用于轮询等待。
+## 登录态不是前置流程
 
-从实际 Main Agent 会话执行 `/tools` 确认这些工具没有被 profile、agent、provider、channel/sender 或 sandbox policy 移除。若当前 profile 已包含这些工具，无需修改配置；若使用显式 `tools.allow`，把需要的工具加入现有 allow，不要在同一 scope 同时配置 `tools.allow` 与 `tools.alsoAllow`。
+不要在每次搜索或下载前先调用 `session-manager`。只有以下情况需要它：
 
-第一版保持 `maxSpawnDepth=1`，每次复杂搜索最多 2 个 leaf child。是否把 `maxChildrenPerAgent` 在 live OpenClaw config 收窄到 2，由部署配置决定；Skill 本身已经限制搜索规划并发预算。
+- 某个真实资源能力返回了 `AUTH_REQUIRED`；
+- 用户明确要求登录、保存、检查或删除某个平台会话。
 
-### leaf child 的工具边界
+平台支持登录不等于所有操作都需要登录。`requires_login=true` 表示该平台存在需要登录态的能力；不能据此推断当前搜索或下载一定需要认证。`status=not_required` / `requires_login=false` 的平台不得发起登录流程。
 
-在 `learning-resource-flow` 为搜索规划启动的 leaf child：
+### SmartEdu
 
-- 只分析 SearchDirection、来源职责、query 和不确定性；
-- 不调用 `education-resources__resource_*`；
-- 不调用 session-manager；
-- 不用 web/browser/exec/curl 等建立另一条候选发现路径；
-- 不生成或猜测 Flow、ResultSet、resource_id、Resolution、availability、Provider、Asset 等业务事实；
-- 不执行下载、归档或其他副作用。
+SmartEdu 的公共搜索和公共教材索引走匿名访问，不自动携带 session-manager 保存的浏览器 token。公共搜索若返回 `NETWORK_BLOCKED` / `PLATFORM_UNAVAILABLE`，应按当前网络出口、IP 风控或平台访问失败处理，不要通过“重新登录 / 补 token”自动重试。
 
-部署层若需要硬限制，可以在 OpenClaw 的 `tools.subagents.tools` policy 中进一步 deny 上述工具；具体字段以当前 live `openclaw config schema` / `config.schema.lookup` 为准，不在仓库里覆盖用户机器的 `~/.openclaw/openclaw.json`。
+具体资源的 Inspect / Download 如果真实返回 `AUTH_REQUIRED`，再进入 session-manager 登录态处理。
 
-完整行为规则见 [`skills/learning-resource-flow/references/multi-agent.md`](skills/learning-resource-flow/references/multi-agent.md)。
+### Anna's Archive
+
+`annas-archive` 在本项目中是 **Libgen 镜像后端的图书发现/获取能力**：使用兼容 MD5 标识，搜索和下载走公共 Libgen 镜像，不依赖 Anna's Archive 会员登录。
+
+因此：
+
+- 不要为 `annas-archive` 调用登录引导；
+- 不要因为展示名称是“安娜的档案”就访问会员下载页；
+- 以 `education-resources` 返回的镜像候选、Inspect 和 Download 结果为事实。
+
+## 大结果与 Batch
+
+创作者最近作品等交互预览使用预览能力；“全部作品 / 完整时间段 / 完整教材目录”等完整性任务使用 Batch。Batch 的 Tool Result 分页只控制单次返回，不得成为采集上限；只有用户明确要求“最多 N 条”时才设置 `max_items`。
+
+## OpenClaw 搜索协作
+
+复杂检索可以使用宿主原生 sub-agent 做临时语义规划，但 child 只提出搜索角度、来源职责、query 和不确定性；Main Agent 必须重新判断。不要为此恢复 Flow、ResultSet、Selection、Plan 或固定 child 数量的持久架构。
+
+当前语义规则见 `skills/learning-resource-flow/SKILL.md` 及其 active references；当前实现边界见 `docs/CURRENT_ARCHITECTURE.md`。

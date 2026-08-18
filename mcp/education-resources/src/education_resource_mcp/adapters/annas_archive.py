@@ -1,12 +1,8 @@
-"""Anna's Archive search adapter (Libgen-backed).
+"""Anna's Archive search adapter backed by public Libgen mirrors.
 
-Uses Libgen mirrors as the data source — same md5 identifiers as Anna's
-Archive, but anonymous, no membership, and reachable from mainland China
-(unlike annas-archive.gl which is slow/unreachable domestically).
-
-Replaces the previous annas-archive.gl HTML scraper.  Now returns full
-metadata (author, publisher, year, language, ISBN, format, …) parsed via
-BeautifulSoup instead of fragile regex guessing.
+The platform label remains ``annas-archive`` for the user-facing resource
+category, but discovery and acquisition are anonymous Libgen-mirror operations
+using the same MD5 identity.  No Anna's Archive membership/session is required.
 """
 from __future__ import annotations
 
@@ -31,19 +27,21 @@ class AnnasArchiveSearchAdapter:
         try:
             books = self._client.search(query, limit=min(limit, 50))
         except LibgenError as exc:
-            return [], adapter_error("PARTIAL_FAILURE", f"Anna's Archive 搜索失败: {exc}", True)
+            return [], adapter_error("PARTIAL_FAILURE", f"Anna's Archive 镜像搜索失败: {exc}", True)
 
+        primary_mirror = self._client.mirrors[0]
         results: list[dict[str, Any]] = []
         for book in books:
             results.append(
                 make_resource(
                     platform="annas-archive",
                     title=book.title or f"Document {book.md5[:8]}",
-                    source_url=f"https://annas-archive.gl/md5/{book.md5}",
+                    source_url=f"{primary_mirror}/ads.php?md5={book.md5}",
                     resource_type="图书",
                     summary=book.description or None,
                     author=book.author or None,
                     published_at=book.year or None,
+                    download_feasibility="匿名镜像",
                     platform_signals={
                         "md5": book.md5,
                         "format": book.extension or None,
@@ -52,6 +50,7 @@ class AnnasArchiveSearchAdapter:
                         "size": book.size or None,
                         "publisher": book.publisher or None,
                         "isbn": book.isbn or None,
+                        "acquisition_route": "libgen_mirror",
                     },
                 )
             )
