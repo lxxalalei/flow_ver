@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 import tempfile
 import threading
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import MagicMock, patch
 
 from education_resource_mcp.adapters.base import make_resource
@@ -128,6 +130,22 @@ class PlatformSearchAdapterTests(unittest.TestCase):
             "MS4wLjABAAAAtest_sec_uid_0001",
             results[0]["metadata"]["creator_sec_uid"],
         )
+
+    def test_auth_failure_is_returned_not_raised(self) -> None:
+        denied = HTTPError(
+            "https://basic.smartedu.cn/api", 401, "Unauthorized", {}, io.BytesIO(b"")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = SmartEduSearchAdapter(SessionStore(root), _settings(root))
+            with patch(
+                "education_resource_mcp.adapters.smartedu.urlopen_with_fallback",
+                side_effect=denied,
+            ):
+                results, error = adapter.search("test", 10)
+        self.assertEqual([], results)
+        self.assertEqual("AUTH_REQUIRED", error["code"])
+        self.assertFalse(error["retryable"])
 
     def test_unreachable_endpoints_report_partial_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

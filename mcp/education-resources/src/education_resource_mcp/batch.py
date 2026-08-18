@@ -359,27 +359,33 @@ def _iter_catalog_expand(
     discover = getattr(adapter, "discover_textbook_courses", None) if adapter else None
     if not callable(discover):
         raise DomainError("FEATURE_NOT_SUPPORTED", "smartedu 适配器不支持教材发现")
-    for course in discover(specs):
-        if cancel.is_set():
-            break
-        aid = str(course.get("id") or "")
-        title = str(course.get("title") or "").strip()
-        if not aid or not title:
-            continue
-        yield public_item(
-            {
-                "platform": "smartedu",
-                "title": title,
-                "resource_type": "course",
-                "source_url": (
-                    "https://basic.smartedu.cn/syncClassroom/classActivity"
-                    f"?activityId={urllib.parse.quote(aid)}"
-                ),
-                "activity_id": aid,
-                "textbook": course.get("textbook"),
-                "metadata": {},
-            }
-        )
+    try:
+        for course in discover(specs):
+            if cancel.is_set():
+                break
+            aid = str(course.get("id") or "")
+            title = str(course.get("title") or "").strip()
+            if not aid or not title:
+                continue
+            yield public_item(
+                {
+                    "platform": "smartedu",
+                    "title": title,
+                    "resource_type": "course",
+                    "source_url": (
+                        "https://basic.smartedu.cn/syncClassroom/classActivity"
+                        f"?activityId={urllib.parse.quote(aid)}"
+                    ),
+                    "activity_id": aid,
+                    "textbook": course.get("textbook"),
+                    "metadata": {},
+                }
+            )
+    except Exception as exc:
+        converted = _adapter_error(exc)
+        if converted is not None:
+            raise converted from exc
+        raise
 
 
 def _item_identity(item: dict[str, Any]) -> str:

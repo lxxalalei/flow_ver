@@ -66,6 +66,23 @@ def _service(root: Path, adapter: object) -> ResourceService:
     )
 
 
+class _AuthDenied(Exception):
+    """Any adapter error carrying the code/message/retryable contract."""
+
+    def __init__(self, code: str, message: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+
+
+class _AuthDeniedSmartedu:
+    platform_id = "smartedu"
+
+    def discover_textbook_courses(self, specs: list[str]):
+        raise _AuthDenied("AUTH_REQUIRED", "SmartEdu 教材索引认证失败", False)
+
+
 class CatalogExpandTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -98,6 +115,18 @@ class CatalogExpandTests(unittest.TestCase):
         self.assertTrue(first["url"].startswith(
             "https://basic.smartedu.cn/syncClassroom/classActivity?activityId="
         ))
+
+    def test_adapter_auth_failure_is_recorded_not_crashed(self) -> None:
+        service = _service(self.root, _AuthDeniedSmartedu())
+        result = service.batch_collect(
+            "smartedu", mode="catalog_expand", specs=["语文/一年级"]
+        )
+        directory = self.root / "jobs" / result["job_id"]
+        self.assertEqual(0, run_batch_collect(directory, service))
+        status = service.job_status(result["job_id"])
+        self.assertEqual("failed", status["status"])
+        self.assertEqual("AUTH_REQUIRED", status["failures"][0]["code"])
+        self.assertFalse(status["failures"][0]["retryable"])
 
     def test_missing_specs_rejected_loudly(self) -> None:
         with self.assertRaises(DomainError) as ctx:

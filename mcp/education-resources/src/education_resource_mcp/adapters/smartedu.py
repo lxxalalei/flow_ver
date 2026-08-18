@@ -430,7 +430,12 @@ class SmartEduSearchAdapter:
                 return json.loads(response.read().decode("utf-8", errors="replace"))
         except HTTPError as exc:
             if exc.code in (401, 403):
-                raise _SmartEduError("AUTH_REQUIRED", f"SmartEdu 搜索认证失败: HTTP {exc.code}", False)
+                raise _SmartEduError(
+                    "AUTH_REQUIRED",
+                    f"SmartEdu 搜索认证失败: HTTP {exc.code}；"
+                    "如本机保存过智慧教育登录态，可能已过期，请重新登录后再试",
+                    False,
+                )
             return None
         except (TimeoutError, URLError, json.JSONDecodeError):
             return None
@@ -537,71 +542,76 @@ class SmartEduSearchAdapter:
     def search(
         self, query: str, limit: int, tabs: list[str] | None = None
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        session_data = self.session_store.get_session_data("smartedu")
-        headers = self._build_headers(session_data)
-        payload = self._build_payload(query, limit, tabs)
-
-        data: dict[str, Any] | None = None
-        for url in SEARCH_URLS:
-            data = self._post_search(url, payload, headers)
-            if data is not None:
-                break
-
-        if data is None:
-            return [], adapter_error("PARTIAL_FAILURE", "SmartEdu 搜索所有端点均失败", True)
-
-        # Extract as many items as the API returned (not just the caller's
-        # limit) because the post-filter discards the majority of results.
-        fetch_limit = max(limit * 5, 50)
-        items = _extract_search_items(data, min(fetch_limit, 100))
-        if not items:
-            # Retry without tag filters (wide search).
-            wide_payload = dict(payload)
-            wide_payload["combine_resources"] = []
-            for url in SEARCH_URLS:
-                wide_data = self._post_search(url, wide_payload, headers)
-                if wide_data is not None:
-                    items = _extract_search_items(wide_data, search_limit)
-                    if items:
-                        break
-
         results: list[dict[str, Any]] = []
-        for item in items:
-            # Only return student-facing items with standalone pages:
-            # courses (elite_lesson, national_lesson) and teaching materials.
-            # Skip sub-assets and teacher-facing items.
-            search_rtype = _norm(_first_value(item, ["search_resource_type", "searchResourceType"]))
-            rtype = _norm(_first_value(item, ["resource_type", "resourceType", "content_type", "contentType"]))
-            if search_rtype not in ("course", "teaching_material"):
-                continue
-            if rtype in {
-                "prepare_lesson", "experiment_elite_lesson",
-                "thematic_course", "assets_url",
-            }:
-                continue
-            resource = _item_to_resource(item, query)
-            if resource:
-                results.append(resource)
-            if len(results) >= limit:
-                break
+        try:
+            session_data = self.session_store.get_session_data("smartedu")
+            headers = self._build_headers(session_data)
+            payload = self._build_payload(query, limit, tabs)
 
-        # Textbook materials (tchMaterial) don't appear in combined search;
-        # do a dedicated search and merge.
-        if len(results) < limit:
-            tch_payload = dict(payload)
-            tch_payload["tab_codes"] = ["tchMaterial"]
+            data: dict[str, Any] | None = None
             for url in SEARCH_URLS:
-                tch_data = self._post_search(url, tch_payload, headers)
-                if tch_data is not None:
-                    tch_items = _extract_search_items(tch_data, limit)
-                    for item in tch_items:
-                        resource = _item_to_resource(item, query)
-                        if resource:
-                            results.append(resource)
-                        if len(results) >= limit:
-                            break
+                data = self._post_search(url, payload, headers)
+                if data is not None:
                     break
-        return results, None
+
+            if data is None:
+                return [], adapter_error("PARTIAL_FAILURE", "SmartEdu 搜索所有端点均失败", True)
+
+            # Extract as many items as the API returned (not just the caller's
+            # limit) because the post-filter discards the majority of results.
+            fetch_limit = max(limit * 5, 50)
+            items = _extract_search_items(data, min(fetch_limit, 100))
+            if not items:
+                # Retry without tag filters (wide search).
+                wide_payload = dict(payload)
+                wide_payload["combine_resources"] = []
+                for url in SEARCH_URLS:
+                    wide_data = self._post_search(url, wide_payload, headers)
+                    if wide_data is not None:
+                        items = _extract_search_items(wide_data, search_limit)
+                        if items:
+                            break
+
+            for item in items:
+                # Only return student-facing items with standalone pages:
+                # courses (elite_lesson, national_lesson) and teaching materials.
+                # Skip sub-assets and teacher-facing items.
+                search_rtype = _norm(_first_value(item, ["search_resource_type", "searchResourceType"]))
+                rtype = _norm(_first_value(item, ["resource_type", "resourceType", "content_type", "contentType"]))
+                if search_rtype not in ("course", "teaching_material"):
+                    continue
+                if rtype in {
+                    "prepare_lesson", "experiment_elite_lesson",
+                    "thematic_course", "assets_url",
+                }:
+                    continue
+                resource = _item_to_resource(item, query)
+                if resource:
+                    results.append(resource)
+                if len(results) >= limit:
+                    break
+
+            # Textbook materials (tchMaterial) don't appear in combined search;
+            # do a dedicated search and merge.
+            if len(results) < limit:
+                tch_payload = dict(payload)
+                tch_payload["tab_codes"] = ["tchMaterial"]
+                for url in SEARCH_URLS:
+                    tch_data = self._post_search(url, tch_payload, headers)
+                    if tch_data is not None:
+                        tch_items = _extract_search_items(tch_data, limit)
+                        for item in tch_items:
+                            resource = _item_to_resource(item, query)
+                            if resource:
+                                results.append(resource)
+                            if len(results) >= limit:
+                                break
+                        break
+            return results, None
+        except _SmartEduError as exc:
+            # Auth/status failures are adapter facts, not crashes; return
+            # them as the error contract so callers can act on the code.
+            return results, exc.to_dict()
 
 
 class _SmartEduError(Exception):
