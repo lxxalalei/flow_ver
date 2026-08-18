@@ -799,19 +799,35 @@ class SessionStore:
             for key, child in value.items():
                 if isinstance(key, str) and key in names and isinstance(child, str) and child:
                     found.setdefault(key, child)
-                if isinstance(child, (dict, list)):
-                    for nested_key, nested_value in SessionStore._nested_string_fields(
-                        child, names, depth + 1
-                    ).items():
-                        found.setdefault(nested_key, nested_value)
+                for nested_key, nested_value in SessionStore._nested_string_fields(
+                    SessionStore._decode_json_container(child), names, depth + 1
+                ).items():
+                    found.setdefault(nested_key, nested_value)
         elif isinstance(value, list):
             for child in value:
-                if isinstance(child, (dict, list)):
-                    for nested_key, nested_value in SessionStore._nested_string_fields(
-                        child, names, depth + 1
-                    ).items():
-                        found.setdefault(nested_key, nested_value)
+                for nested_key, nested_value in SessionStore._nested_string_fields(
+                    SessionStore._decode_json_container(child), names, depth + 1
+                ).items():
+                    found.setdefault(nested_key, nested_value)
         return found
+
+    @staticmethod
+    def _decode_json_container(child: Any) -> Any:
+        """Descend through JSON-encoded string values inside a parsed document.
+
+        Storage records may serialize an inner object as a JSON string inside
+        the outer JSON (real SmartEdu capture, 2026-08-18); the token walker
+        must parse those to reach credential fields.
+        """
+        if isinstance(child, (dict, list)):
+            return child
+        if isinstance(child, str) and child[:1] in ("{", "["):
+            try:
+                decoded = json.loads(child)
+            except ValueError:
+                return None
+            return decoded if isinstance(decoded, (dict, list)) else None
+        return None
 
     def _sanitize_cookie_payload(
         self, config: PlatformConfig, session_data: dict[str, Any]

@@ -632,6 +632,32 @@ class TokenSessionTests(unittest.TestCase):
             self.assertNotIn("username", record_text)
             self.assertNotIn("display_name", record_text)
 
+    def test_smartedu_json_string_nested_token_is_extracted(self) -> None:
+        with _home_temp_directory() as temp_dir:
+            store = SessionStore(Path(temp_dir) / "data")
+            dynamic_key = "ND_UC_AUTH-test-id&ncet-xedu&token"
+            result = store.save(
+                "smartedu",
+                {
+                    "storage_origin": "https://basic.smartedu.cn",
+                    "local_storage": {
+                        dynamic_key: json.dumps(
+                            {
+                                "account": json.dumps(
+                                    {"session": {"access_token": "nested-secret"}}
+                                ),
+                            }
+                        ),
+                    },
+                },
+            )
+            saved = store.get_session_data("smartedu")
+            record_text = (store.sessions_dir / "smartedu.json").read_text(encoding="utf-8")
+
+            self.assertEqual(saved, {"tokens": {"accessToken": "nested-secret"}})
+            self.assertEqual(result["stored_credential_count"], 1)
+            self.assertNotIn(dynamic_key, record_text)
+
     def test_smartedu_constrained_cookie_can_supply_access_token_fallback(self) -> None:
         with _home_temp_directory() as temp_dir:
             store = SessionStore(Path(temp_dir) / "data")
