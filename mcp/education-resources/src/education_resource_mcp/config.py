@@ -35,7 +35,6 @@ class Settings:
     max_workers: int = 8
     searxng_base_url: str = ""
     prefer_searxng: bool = False
-    session_manager_data_dir: Path | None = None
     library_dir: Path | None = None
 
     @property
@@ -68,12 +67,6 @@ class Settings:
                 "EDUCATION_RESOURCE_MCP_SEARXNG_URL", ""
             ).rstrip("/"),
             prefer_searxng=prefer_searxng,
-            session_manager_data_dir=(
-                Path(os.environ["EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR"])
-                .expanduser()
-                if os.environ.get("EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR")
-                else None
-            ),
             library_dir=Path(library_dir).expanduser() if library_dir else None,
         )
 

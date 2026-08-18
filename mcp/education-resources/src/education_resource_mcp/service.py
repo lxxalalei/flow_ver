@@ -42,7 +42,7 @@ from .job_state import (
 )
 from .jobs import JobSpawner, spawn_worker
 from .search import SearchProvider, canonical_http_url, default_search_provider
-from .session_bridge import create_session_store
+from .sessions import SessionStore
 
 
 LOGGER = logging.getLogger(__name__)
@@ -192,6 +192,21 @@ def _resource_type(value: Any) -> str:
     )
 
 
+def _platform_from_import_url(url: str) -> str:
+    """Recognize only URL shapes with a dedicated active inspector."""
+
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").casefold().rstrip(".")
+    path = parsed.path or "/"
+    if host in {"bilibili.com", "www.bilibili.com", "m.bilibili.com"} and path.startswith("/video/"):
+        return "bilibili"
+    if host in {"www.zhihu.com", "zhuanlan.zhihu.com"}:
+        return "zhihu"
+    if host == "basic.smartedu.cn":
+        return "smartedu"
+    return "generic"
+
+
 def _provider_registrations(
     settings: Settings,
     session_store: Any,
@@ -253,7 +268,7 @@ class ResourceService:
     ) -> None:
         self.settings = settings or Settings.from_env()
         self.settings.ensure_directories()
-        self.session_store = create_session_store(self.settings)
+        self.session_store = SessionStore(self.settings.data_dir)
         self.search_provider = search_provider or default_search_provider(
             self.settings, self.session_store
         )
@@ -430,7 +445,7 @@ class ResourceService:
         resource_id = new_id("res")
         resource = {
             "resource_id": resource_id,
-            "platform": "generic",
+            "platform": _platform_from_import_url(url),
             "title": str(
                 urllib.parse.urlparse(url).path.rsplit("/", 1)[-1] or url
             )[:120],

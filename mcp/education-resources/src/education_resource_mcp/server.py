@@ -1,11 +1,11 @@
-"""Thin stdio MCP exposing resource capability contracts and execution."""
+"""Thin stdio MCP exposing resource and session capabilities."""
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .errors import DomainError
 from .service import ResourceService
@@ -38,6 +38,36 @@ class SearchTask(BaseModel):
     )
 
 
+class SessionCapture(BaseModel):
+    """Broad browser capture; the store extracts the platform-specific subset."""
+
+    model_config = ConfigDict(extra="allow")
+
+    cookies: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="浏览器返回的 cookie 对象数组，原样传入；MCP 按平台域名筛选。",
+    )
+    storage_origin: str | None = Field(
+        default=None,
+        description="捕获 localStorage/sessionStorage 时当前官方页面的 location.origin。",
+    )
+    local_storage: dict[str, str] | None = Field(
+        default=None,
+        description="浏览器 localStorage 快照；MCP 只保存平台真正需要的键。",
+    )
+    session_storage: dict[str, str] | None = Field(
+        default=None,
+        description="浏览器 sessionStorage 快照；MCP 只保存平台真正需要的键。",
+    )
+    tokens: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "用户明确授权时可直接导入平台支持的 canonical Token；"
+            "浏览器捕获不要先由 Agent 手工筛选成 tokens。"
+        ),
+    )
+
+
 def _call(function: Callable[[], dict[str, Any]], **ids: str) -> dict[str, Any]:
     try:
         return {"ok": True, **function()}
@@ -47,24 +77,52 @@ def _call(function: Callable[[], dict[str, Any]], **ids: str) -> dict[str, Any]:
         return result
 
 
+def _session_status(
+    service: ResourceService,
+    platforms: list[str] | None,
+    deep: bool,
+) -> dict[str, Any]:
+    statuses = service.session_store.get_status(platforms)
+    sessions: list[dict[str, Any]] = []
+    needs_login: list[dict[str, Any]] = []
+    for status in statuses:
+        entry = status.to_dict()
+        if deep and status.status == "stored" and status.config.probe_supported:
+            probe = service.session_store.validate(status.platform)
+            entry["probe_status"] = probe["probe_status"]
+            entry["probed_at"] = probe["probed_at"]
+            if probe.get("detail"):
+                entry["probe_detail"] = probe["detail"]
+        sessions.append(entry)
+        if (
+            status.config.auth_kind != "none"
+            and (
+                status.status in {"missing", "expired", "invalid"}
+                or entry.get("probe_status") == "invalid"
+            )
+        ):
+            needs_login.append(status.config.public_metadata())
+    return {"sessions": sessions, "needs_login": needs_login}
+
+
 def create_server(service: ResourceService | None = None) -> MCPServer:
     resource_service = service or ResourceService()
     server = MCPServer(
         name="education-resources",
         title="Education Resources",
         description=(
-            "Learning-resource capabilities for platform search, creator browsing, URL import, "
-            "inspection, download jobs, batch enumeration/paging, cancellation and archive"
+            "Learning-resource search, inspection, download, batch/archive and "
+            "platform session capabilities"
         ),
-        version="0.3.0",
+        version="0.4.0",
         instructions=(
-            "This MCP exposes resource capabilities and execution facts; it does not own user intent, "
-            "search strategy, candidate ranking, selection semantics or classification decisions. "
-            "Platform search, creator preview, known-URL import, inspection, download jobs, large-result "
-            "batch enumeration, paging, cancellation and archive are exposed as separate tools. "
-            "Resource handles are process-local. Download and batch operations return persistent job handles; "
-            "batch items are paged back with resource_batch_read. Use each tool's schema for accepted identifiers, "
-            "mode-specific inputs and result handling."
+            "This MCP exposes factual resource capabilities and a small auxiliary session store; "
+            "it does not own user intent, search strategy, candidate ranking, selection semantics "
+            "or classification decisions. Session tools are not a preflight step: use them only "
+            "after a concrete AUTH_REQUIRED result or when the user explicitly asks to manage a "
+            "platform session. Public operations must not be forced through login merely because "
+            "the platform also has authenticated capabilities. Resource handles are process-local; "
+            "download and batch operations return persistent job handles."
         ),
     )
 
@@ -85,7 +143,6 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = 8,
     ) -> dict[str, Any]:
-        """Search configured platforms and return candidate resource handles."""
         return _call(
             lambda: resource_service.search(
                 [task.model_dump() for task in search_tasks], limit=limit
@@ -96,15 +153,14 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     def resource_browse_creator(
         platform: Annotated[
             str,
-            Field(description="创作者所在平台 id；仅当前支持 creator browse 的平台有效。"),
+            Field(description="创作者所在平台 id；仅支持 creator browse 的平台有效。"),
         ],
         creator_id: Annotated[
             str,
             Field(
                 description=(
-                    "创作者定位符。优先传之前发现的该创作者任一作品 resource_id（res_...），"
-                    "MCP 会自行解析创作者；也可传平台原生 creator id 或支持的完整主页 URL。"
-                    "已有 resource_id 时不要手工重建很长的平台 creator id。"
+                    "优先传已发现作品 resource_id；也可传平台原生 creator id "
+                    "或支持的完整主页 URL。"
                 )
             ),
         ],
@@ -113,13 +169,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(
                 ge=1,
                 description=(
-                    "本次预览请求的作品数，默认 50。它是交互式预览规模，不是全部作品上限；"
-                    "完整枚举使用 resource_batch_collect。"
+                    "交互式预览数量，默认 50；完整枚举使用 resource_batch_collect。"
                 ),
             ),
         ] = 50,
     ) -> dict[str, Any]:
-        """Preview a limited set of works from one creator."""
         return _call(
             lambda: resource_service.browse_creator(platform, creator_id, limit=limit)
         )
@@ -131,12 +185,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(
                 description=(
                     "已经明确知道的 HTTP(S) 资源/网页 URL。该工具不负责搜索网页；"
-                    "它注册当前进程内 resource_id，并立即解析资源事实。"
+                    "会识别已接入平台 URL，否则按 generic 网页处理。"
                 )
             ),
         ]
     ) -> dict[str, Any]:
-        """Register a known external URL as a process-local resource handle and inspect it."""
         return _call(lambda: resource_service.import_url(source_url), source_url=source_url)
 
     @server.tool(structured_output=True)
@@ -151,7 +204,6 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ]
     ) -> dict[str, Any]:
-        """Resolve current availability and concrete representations for one resource handle."""
         return _call(lambda: resource_service.inspect(resource_id), resource_id=resource_id)
 
     @server.tool(structured_output=True)
@@ -167,13 +219,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             str,
             Field(
                 description=(
-                    '表示容器偏好，默认 "original"，通常保持默认。只有确实需要某个已有表示时'
+                    '表示容器偏好，默认 "original"。只有确实需要某个已有表示时'
                     "才指定 pdf/mp4/mp3/html 等；它不是任意格式转换请求。"
                 )
             ),
         ] = "original",
     ) -> dict[str, Any]:
-        """Start a download job for the supplied resource handles."""
         return _call(
             lambda: resource_service.download(
                 resource_ids, preferred_container=preferred_container
@@ -187,11 +238,6 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="resource_download 或 resource_batch_collect 返回的 job_id。"),
         ]
     ) -> dict[str, Any]:
-        """Return status/progress for a download or batch job.
-
-        Download jobs may include files. Batch items are not returned here; read
-        collected batch items with resource_batch_read.
-        """
         return _call(lambda: resource_service.job_status(job_id), job_id=job_id)
 
     @server.tool(structured_output=True)
@@ -201,7 +247,6 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="要取消的 queued/running/cancelling 下载或批量 job_id。"),
         ]
     ) -> dict[str, Any]:
-        """Cancel a queued or running download or batch job."""
         return _call(lambda: resource_service.job_cancel(job_id), job_id=job_id)
 
     @server.tool(structured_output=True)
@@ -214,35 +259,27 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Literal["creator_full", "time_range_search", "catalog_expand"],
             Field(
                 description=(
-                    "creator_full=完整枚举一个创作者；time_range_search=Bilibili 关键词按日期范围枚举；"
+                    "creator_full=完整枚举创作者；time_range_search=Bilibili 日期范围搜索；"
                     "catalog_expand=SmartEdu 教材规格展开。"
                 )
             ),
         ] = "creator_full",
         creator_id: Annotated[
             str,
-            Field(
-                description=(
-                    "仅 creator_full 使用。优先传该创作者任一已发现作品 resource_id（res_...）；"
-                    "也可传平台原生 creator id 或支持的完整主页 URL。"
-                )
-            ),
+            Field(description="creator_full 使用：resource_id、原生 creator id 或主页 URL。"),
         ] = "",
         keyword: Annotated[
-            str,
-            Field(description="仅 time_range_search 使用：Bilibili 搜索关键词。"),
+            str, Field(description="time_range_search 使用：Bilibili 搜索关键词。")
         ] = "",
         start_day: Annotated[
-            str,
-            Field(description="仅 time_range_search 使用：起始日期 YYYY-MM-DD，包含当天。"),
+            str, Field(description="time_range_search 使用：起始日期 YYYY-MM-DD。")
         ] = "",
         end_day: Annotated[
-            str,
-            Field(description="仅 time_range_search 使用：结束日期 YYYY-MM-DD，包含当天。"),
+            str, Field(description="time_range_search 使用：结束日期 YYYY-MM-DD。")
         ] = "",
         specs: Annotated[
             list[str] | None,
-            Field(description="仅 catalog_expand 使用：SmartEdu 教材规格标识列表。"),
+            Field(description="catalog_expand 使用：SmartEdu 教材规格标识列表。"),
         ] = None,
         max_items: Annotated[
             int | None,
@@ -254,11 +291,6 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = None,
     ) -> dict[str, Any]:
-        """Start a large-result enumeration job with items stored outside the conversation.
-
-        creator_full uses creator_id; time_range_search uses keyword plus start_day/end_day;
-        catalog_expand uses specs. Read collected items with resource_batch_read.
-        """
         return _call(
             lambda: resource_service.batch_collect(
                 platform,
@@ -279,21 +311,19 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="resource_batch_collect 返回的 batch job_id。"),
         ],
         offset: Annotated[
-            int,
-            Field(ge=0, description="从第几个结果开始读取，0-based，默认 0。"),
+            int, Field(ge=0, description="从第几个结果开始读取，0-based，默认 0。")
         ] = 0,
         limit: Annotated[
             int,
             Field(
                 ge=1,
                 description=(
-                    "本页读取条数，默认 20，服务端单页最多返回 50。"
+                    "本页读取条数，默认 20，单页最多返回 50；"
                     "分页大小不截断磁盘上的完整结果集。"
                 ),
             ),
         ] = 20,
     ) -> dict[str, Any]:
-        """Read one page from a batch job's stored result set."""
         return _call(
             lambda: resource_service.batch_read(job_id, offset=offset, limit=limit),
             job_id=job_id,
@@ -306,7 +336,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(
                 description=(
                     "已产生真实文件且状态为 succeeded/partial 的 download job_id；"
-                    "纯 batch 枚举 Job 没有可归档下载文件。"
+                    "纯 batch Job 没有可归档下载文件。"
                 )
             ),
         ],
@@ -314,8 +344,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             str,
             Field(
                 description=(
-                    "学习资料库顶层语义领域 id，由调用方根据资源内容选择；"
-                    "分类不确定可留空进入待分类区域。"
+                    "学习资料库顶层语义领域 id，由调用方根据内容选择；"
+                    "不确定可留空进入待分类。"
                 )
             ),
         ] = "",
@@ -324,12 +354,80 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="自由文本学习主题，例如“天文与宇宙”“自然拼读”；可留空。"),
         ] = "",
     ) -> dict[str, Any]:
-        """Move real files from a completed download job into the learning library."""
         return _call(
-            lambda: resource_service.archive(
-                job_id, domain_id=domain_id, topic=topic
-            ),
+            lambda: resource_service.archive(job_id, domain_id=domain_id, topic=topic),
             job_id=job_id,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_session_status(
+        platforms: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "要查询的平台 id；不传返回全部。不要把状态查询作为资源操作的前置步骤。"
+                )
+            ),
+        ] = None,
+        deep: Annotated[
+            bool,
+            Field(description="是否对支持 probe 的已保存登录态做一次远端有效性检查。"),
+        ] = False,
+    ) -> dict[str, Any]:
+        return _call(lambda: _session_status(resource_service, platforms, deep))
+
+    @server.tool(structured_output=True)
+    def resource_session_login_guide(
+        platform: Annotated[
+            str,
+            Field(
+                description=(
+                    "仅在真实资源能力返回 AUTH_REQUIRED，或用户主动要求管理登录态时调用。"
+                )
+            ),
+        ]
+    ) -> dict[str, Any]:
+        return _call(
+            lambda: resource_service.session_store.login_guide(platform),
+            platform=platform,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_session_save(
+        platform: Annotated[
+            str,
+            Field(description="需要保存登录态的平台 id。"),
+        ],
+        session_data: SessionCapture,
+        expires_at: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "可选 ISO 8601 过期时间；不确定时省略。"
+                    "浏览器宽捕获由 MCP 先筛选，再保存 canonical session。"
+                )
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        return _call(
+            lambda: resource_service.session_store.save(
+                platform,
+                session_data.model_dump(exclude_none=True),
+                expires_at=expires_at,
+            ),
+            platform=platform,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_session_delete(
+        platform: Annotated[
+            str,
+            Field(description="删除该平台本地保存的登录态。"),
+        ]
+    ) -> dict[str, Any]:
+        return _call(
+            lambda: resource_service.session_store.delete(platform),
+            platform=platform,
         )
 
     return server

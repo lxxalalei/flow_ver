@@ -6,22 +6,27 @@
 
 - 顶层 `.agent/plans/` 只放当前仍需跟踪的 `in_progress`、`blocked` 和 `pending` 计划；已完成或已被替代的计划移入本目录。
 - `archive/` 不是默认必读目录。正常接手任务先看顶层当前计划，只有追溯历史决策、验证证据、迁移边界或回滚信息时再进入本目录。
-- 计划的唯一标识是完整文件名（含数字前缀和主题 slug），不能只用数字前缀。
+- 计划的唯一标识是完整文件名（含数字前缀和主题 slug），不能只使用数字前缀。
 - 计划移动或重命名后，所有 Markdown 链接应指向新路径。
-- 0031/0032 收敛了 active Skill references；归档材料中的旧 reference 路径只代表当时审计证据，现行映射见 [`docs/archive/README.md`](../../../docs/archive/README.md#历史-skill-reference-路径)。
 
 ## 当前顶层计划
 
-- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress，用户执行真实 OpenClaw/平台验收
-- [0029-retrieval-benchmark-release-gate.md](../0029-retrieval-benchmark-release-gate.md) — pending，semantic-first 检索质量 benchmark
-- [0041-web-content-extraction-benchmark.md](../0041-web-content-extraction-benchmark.md) — pending
+- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress，真实 OpenClaw/平台验收
 - [0051-yixi-video-acquisition.md](../0051-yixi-video-acquisition.md) — in_progress，一席真实视频获取闭环
 - [0052-zjer-course-video-acquisition.md](../0052-zjer-course-video-acquisition.md) — in_progress，之江汇 experimental 课程视频获取链
-- [0054-douyin-creator-id-exposure.md](../0054-douyin-creator-id-exposure.md) — in_progress，抖音 creator_id 来源与 browse_creator 验收
-- [0056-download-job-subprocess-durability.md](../0056-download-job-subprocess-durability.md) — in_progress，下载 Job 子进程化 + 文件状态持久
-- [0057-native-batch-capability-parity.md](../0057-native-batch-capability-parity.md) — in_progress，四平台批量能力原生化（skill 仅参考，完成后退役）
+- [0054-douyin-creator-id-exposure.md](../0054-douyin-creator-id-exposure.md) — in_progress，抖音 creator_id 与 browse_creator 验收
+- [0056-download-job-subprocess-durability.md](../0056-download-job-subprocess-durability.md) — in_progress，下载 Job 子进程/文件状态验收
+- [0057-native-batch-capability-parity.md](../0057-native-batch-capability-parity.md) — in_progress，批量能力原生化验收
+- [0058-system-convergence-and-resource-fidelity.md](../0058-system-convergence-and-resource-fidelity.md) — in_progress，Session 合并、Import 接通、Trafilatura Web Resource 与最终 E2E
 
-## 归档索引
+## 本轮新增归档
+
+| 文件 | 原状态 | 归档说明 |
+| --- | --- | --- |
+| [0029-retrieval-benchmark-release-gate.md](0029-retrieval-benchmark-release-gate.md) | pending | 语义检索 benchmark 思路保留为历史参考；不再作为 active release gate，后续质量判断以真实 OpenClaw 与 `learning-resource-flow` 当前语义规则为准 |
+| [0041-web-content-extraction-benchmark.md](0041-web-content-extraction-benchmark.md) | pending | benchmark-first 路线被 0058 直接采用 Trafilatura 的最小方案替代 |
+
+## 历史归档索引
 
 | 文件 | 原状态 | 归档说明 |
 | --- | --- | --- |
@@ -33,42 +38,42 @@
 | [0006-goal-first-semantic-rebuild.md](0006-goal-first-semantic-rebuild.md) | completed | 历史完成计划 |
 | [0007-user-model-correction.md](0007-user-model-correction.md) | completed | 历史完成计划 |
 | [0008-task-context-model.md](0008-task-context-model.md) | completed | 历史完成计划 |
-| [0009-session-manager-distribution.md](0009-session-manager-distribution.md) | completed | 历史完成计划 |
-| [0010-session-manager-native-windows.md](0010-session-manager-native-windows.md) | completed | 历史完成计划 |
-| [0011-windows-openclaw-session-manager-install.md](0011-windows-openclaw-session-manager-install.md) | completed | 历史完成计划 |
-| [0012-broad-browser-session-capture.md](0012-broad-browser-session-capture.md) | completed | 历史完成计划 |
-| [0013-education-mcp-v2-control-plane.md](0013-education-mcp-v2-control-plane.md) | completed | 历史完成计划 |
+| [0009-session-manager-distribution.md](0009-session-manager-distribution.md) | completed | 独立 session-manager 的历史设计；0058 已将部署边界合回 education-resources |
+| [0010-session-manager-native-windows.md](0010-session-manager-native-windows.md) | completed | Windows 本机凭据保护历史实现；必要 DPAPI 能力由 0058 迁入 education-resources |
+| [0011-windows-openclaw-session-manager-install.md](0011-windows-openclaw-session-manager-install.md) | completed | 独立 MCP 安装历史，不再是当前部署方式 |
+| [0012-broad-browser-session-capture.md](0012-broad-browser-session-capture.md) | completed | 宽浏览器捕获领域知识保留；0058 改为同一 MCP 内先筛选后保存 canonical session |
+| [0013-education-mcp-v2-control-plane.md](0013-education-mcp-v2-control-plane.md) | completed | 历史控制面设计 |
 | [0014-product-reset-fit-gap.md](0014-product-reset-fit-gap.md) | blocked | superseded；保留 blocked 状态和接替说明 |
 | [0015-remove-education-v1-and-align-docs.md](0015-remove-education-v1-and-align-docs.md) | completed | 历史完成计划 |
 | [0016-learning-resource-archive-foundation.md](0016-learning-resource-archive-foundation.md) | completed | 历史完成计划 |
 | [0017-current-contract-and-doc-alignment.md](0017-current-contract-and-doc-alignment.md) | completed | 历史完成计划 |
-| [0018-resource-model-and-platform-registry.md](0018-resource-model-and-platform-registry.md) | completed | 历史完成计划 |
-| [0019-inspection-layer.md](0019-inspection-layer.md) | completed | 历史完成计划 |
-| [0020-adaptive-retrieval-loop.md](0020-adaptive-retrieval-loop.md) | completed | 历史完成计划 |
-| [0021-acquisition-core-and-web-materializer.md](0021-acquisition-core-and-web-materializer.md) | completed | 历史完成计划 |
-| [0022-multimodal-asset-bundle.md](0022-multimodal-asset-bundle.md) | completed | 历史完成计划 |
-| [0024-retrieval-authority-and-quality-calibration.md](0024-retrieval-authority-and-quality-calibration.md) | completed | 历史完成计划 |
-| [0025-capability-truth-audit.md](0025-capability-truth-audit.md) | completed | 旧能力真相审计；0037 后不再是 Active 获取架构 |
-| [0025-platform-capability-contract-alignment.md](0025-platform-capability-contract-alignment.md) | completed | 旧能力契约实施证据；0037 已简化其运行时模型 |
+| [0018-resource-model-and-platform-registry.md](0018-resource-model-and-platform-registry.md) | completed | 历史资源模型/平台 Registry 设计 |
+| [0019-inspection-layer.md](0019-inspection-layer.md) | completed | Inspection 历史实现 |
+| [0020-adaptive-retrieval-loop.md](0020-adaptive-retrieval-loop.md) | completed | 旧检索状态化实现历史 |
+| [0021-acquisition-core-and-web-materializer.md](0021-acquisition-core-and-web-materializer.md) | completed | Acquisition/Web Materializer 历史基础 |
+| [0022-multimodal-asset-bundle.md](0022-multimodal-asset-bundle.md) | completed | 旧 AssetBundle 设计历史 |
+| [0024-retrieval-authority-and-quality-calibration.md](0024-retrieval-authority-and-quality-calibration.md) | completed | 旧 authority/quality 设计历史 |
+| [0025-capability-truth-audit.md](0025-capability-truth-audit.md) | completed | 旧能力真相审计 |
+| [0025-platform-capability-contract-alignment.md](0025-platform-capability-contract-alignment.md) | completed | 旧能力契约实施证据 |
 | [0025-platform-capability-contract-alignment-handoff.md](0025-platform-capability-contract-alignment-handoff.md) | completed snapshot | 0025 完成快照与历史交接 |
 | [0026-acquisition-call-site-migration.md](0026-acquisition-call-site-migration.md) | completed | 获取调用面历史迁移 |
-| [0027-platform-acquisition-enablement.md](0027-platform-acquisition-enablement.md) | completed | 保留 exact Provider / no-silent-fallback 业务原则；旧 authority chain 已被 0037 废弃 |
-| [0030-document-authority-consolidation.md](0030-document-authority-consolidation.md) | completed | 文档权威、归档和默认阅读面收敛 |
-| [0031-document-surface-simplification.md](0031-document-surface-simplification.md) | completed | 默认阅读面与 Skill/reference 职责去重 |
-| [0032-skill-reference-compat-cleanup.md](0032-skill-reference-compat-cleanup.md) | completed | 删除旧 reference 兼容壳并保留历史路径迁移说明 |
+| [0027-platform-acquisition-enablement.md](0027-platform-acquisition-enablement.md) | completed | 保留 exact Provider / no-silent-fallback 原则；旧 authority chain 已废弃 |
+| [0030-document-authority-consolidation.md](0030-document-authority-consolidation.md) | completed | 文档权威与默认阅读面收敛 |
+| [0031-document-surface-simplification.md](0031-document-surface-simplification.md) | completed | Skill/reference 职责去重 |
+| [0032-skill-reference-compat-cleanup.md](0032-skill-reference-compat-cleanup.md) | completed | 删除旧 reference 兼容壳 |
 | [0033-project-governance-integration.md](0033-project-governance-integration.md) | completed | 最小修改、复杂度举证、scope checkpoint 与分级验证规则 |
-| [0034-skill-semantic-loss-audit.md](0034-skill-semantic-loss-audit.md) | completed | 对照 0031 前 Skill 语义补回仍有效规则 |
-| [0035-deleted-skill-reference-complete-audit.md](0035-deleted-skill-reference-complete-audit.md) | completed | 旧 Skill/reference 逐文件语义守恒审计 |
-| [0036-platform-acquisition-capability-recovery.md](0036-platform-acquisition-capability-recovery.md) | superseded | 平台恢复目标保留；旧 Capability Authority 和重新引入大小/哈希门禁的路线被 0037 覆盖 |
-| [0039-download-platform-active-expansion.md](0039-download-platform-active-expansion.md) | completed | SmartEdu 之后的 Douyin/Ximalaya/Bilibili active exact route 工程接入已完成；真实平台验收继续由 0028 跟踪 |
-| [0040-search-subagent-orchestration.md](0040-search-subagent-orchestration.md) | completed | OpenClaw leaf sub-agent 并行规划 SearchDirection；MCP 继续统一串行执行搜索与业务状态 |
-| [0042-web-resource-current-path-fix.md](0042-web-resource-current-path-fix.md) | completed | 修正当前 Generic HTML primary/landing 语义，并将网页主归档物改为图片自包含 HTML；0041 benchmark 继续 pending |
-| [0043-shuge-guji-source.md](0043-shuge-guji-source.md) | completed engineering scope | Shuge OpenList 搜索、Inspect 与公开 `/d/` 文件链已实现；真实用户 E2E 继续由 0028 跟踪 |
-| [0044-shuge-detail-url-search.md](0044-shuge-detail-url-search.md) | completed engineering scope | Shuge 详情页/短链可解析书名并回查公开存储；真实用户 E2E 继续由 0028 跟踪 |
-| [0045-download-item-concurrency.md](0045-download-item-concurrency.md) | completed / superseded | 历史 Service 执行 Provider 并发声明设计；0047 已将并发所有权下沉到获取实现 |
-| [0046-skill-semantic-refactor.md](0046-skill-semantic-refactor.md) | completed | 将 active Skill 重构为 semantic-first；主测需求还原、来源派发、query 和结果判断，multi-agent 降级为实验能力 |
-| [0047-downloader-owned-concurrency.md](0047-downloader-owned-concurrency.md) | completed / superseded | 历史“一 Item 一 worker + Downloader 锁”方案；0048 已改为 exact Provider 批次派发 |
-| [0048-provider-batch-dispatch-simplification.md](0048-provider-batch-dispatch-simplification.md) | completed | Service 按 exact Provider 批次派发；保留逐项结果但不再为每个 JobItem 创建 worker |
-| [0049-annas-metadata-inspection.md](0049-annas-metadata-inspection.md) | completed | Anna's Archive Inspect 改为合法 MD5 元数据通道，避免合成详情页 403 阻断；等待 0028 用户复测 |
-| [0050-project-state-alignment.md](0050-project-state-alignment.md) | completed | 对齐当前计划、17 平台 schema、semantic-first 架构和 0029 benchmark；未运行本地 pytest，真实 E2E 继续由 0028 跟踪 |
-| [0053-browser-cookie-capture-chain.md](0053-browser-cookie-capture-chain.md) | superseded | 真实登录事故保留；自建 CDP/WebSocket 捕获经 OpenClaw 官方源码复核后判定为重复实现并撤销，仅保留空名 Cookie 清洗修复 |
+| [0034-skill-semantic-loss-audit.md](0034-skill-semantic-loss-audit.md) | completed | Skill 语义守恒审计 |
+| [0035-deleted-skill-reference-complete-audit.md](0035-deleted-skill-reference-complete-audit.md) | completed | 旧 Skill/reference 完整审计 |
+| [0036-platform-acquisition-capability-recovery.md](0036-platform-acquisition-capability-recovery.md) | superseded | 平台恢复目标保留；旧 Capability Authority / 大小哈希门禁路线被后续简化 |
+| [0039-download-platform-active-expansion.md](0039-download-platform-active-expansion.md) | completed | SmartEdu/Douyin/Ximalaya/Bilibili exact route 工程接入历史 |
+| [0040-search-subagent-orchestration.md](0040-search-subagent-orchestration.md) | completed | OpenClaw leaf sub-agent 搜索规划实验历史 |
+| [0042-web-resource-current-path-fix.md](0042-web-resource-current-path-fix.md) | completed | Generic HTML primary/landing 与早期自包含 HTML 路线；0058 已改为 raw source + Trafilatura |
+| [0043-shuge-guji-source.md](0043-shuge-guji-source.md) | completed engineering scope | Shuge 搜索/Inspect/公开文件链 |
+| [0044-shuge-detail-url-search.md](0044-shuge-detail-url-search.md) | completed engineering scope | Shuge 详情页/短链解析 |
+| [0045-download-item-concurrency.md](0045-download-item-concurrency.md) | completed / superseded | 历史 Provider 并发设计 |
+| [0046-skill-semantic-refactor.md](0046-skill-semantic-refactor.md) | completed | active Skill semantic-first 重构 |
+| [0047-downloader-owned-concurrency.md](0047-downloader-owned-concurrency.md) | completed / superseded | 历史 downloader 并发方案 |
+| [0048-provider-batch-dispatch-simplification.md](0048-provider-batch-dispatch-simplification.md) | completed | exact Provider 批次派发 |
+| [0049-annas-metadata-inspection.md](0049-annas-metadata-inspection.md) | completed | Anna MD5 元数据 Inspect 修复；真实用户 E2E 继续由 0028 跟踪 |
+| [0050-project-state-alignment.md](0050-project-state-alignment.md) | completed | 历史状态/文档对齐 |
+| [0053-browser-cookie-capture-chain.md](0053-browser-cookie-capture-chain.md) | superseded | 登录事故保留；自建 CDP/WebSocket 捕获已撤销 |
