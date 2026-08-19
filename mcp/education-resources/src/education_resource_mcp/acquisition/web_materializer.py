@@ -1,9 +1,10 @@
 """Static web materialization with source preservation and mature extraction.
 
 The fetch layer owns network policy. This module saves the fetched HTML response
-unchanged as ``source.html`` and then uses Trafilatura to derive readable HTML
-and Markdown. Extraction is a derivative view: failure to extract readable text
-does not erase or truncate the successfully fetched source snapshot.
+unchanged as ``source.html``, uses Trafilatura to derive readable content, then
+renders the cleaned HTML inside one stable offline-friendly Reader template.
+Extraction is a derivative view: failure to extract readable text does not erase
+or truncate the successfully fetched source snapshot.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from typing import Any
 from urllib.parse import urlsplit
 import zipfile
 
+from bs4 import BeautifulSoup
 from trafilatura import extract as trafilatura_extract
 
 from ..errors import DomainError
@@ -37,6 +39,112 @@ from .web_fetch import BoundedWebFetcher, FetchResult
 MAX_HTML_BYTES = 8 * 1024 * 1024
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _HTTP_SCHEMES = frozenset({"http", "https"})
+_READER_THEME = "Simple.css"
+_READER_THEME_VERSION = "2.3.7"
+_READER_TEMPLATE = "clean-reader-v1"
+_VENDOR_DIR = Path(__file__).with_name("vendor")
+_READER_OVERRIDES = """
+body {
+  grid-template-columns: 1fr min(52rem, calc(100% - 2rem)) 1fr;
+  font-size: 17px;
+  line-height: 1.75;
+}
+body > header.reader-bar {
+  background: var(--accent-bg);
+  border-bottom: var(--border-width) solid var(--border);
+  padding: .85rem 1rem;
+  text-align: left;
+}
+.reader-meta {
+  align-items: center;
+  display: flex;
+  gap: .75rem;
+  margin: 0 auto;
+  max-width: 52rem;
+  min-width: 0;
+}
+.reader-badge {
+  font-size: .84rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.reader-domain {
+  color: var(--text-light);
+  font-size: .9rem;
+  overflow-wrap: anywhere;
+}
+.reader-source-link {
+  font-size: .9rem;
+  margin-inline-start: auto;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.reader-main {
+  min-width: 0;
+  padding-top: 2rem;
+}
+.reader-main article {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.reader-main section {
+  border: 0;
+  margin: 2.75rem 0;
+  padding: 0;
+}
+.reader-main h1:first-child {
+  margin-top: .25rem;
+}
+.reader-main img {
+  box-shadow: 0 10px 30px rgb(0 0 0 / 10%);
+  display: block;
+  margin: 1.75rem auto;
+}
+.reader-main table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.reader-main a {
+  overflow-wrap: anywhere;
+}
+.reader-footer {
+  margin-top: 3rem;
+}
+.reader-footer p {
+  margin: .4rem auto;
+  max-width: 52rem;
+}
+.reader-empty {
+  background: var(--accent-bg);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--standard-border-radius);
+  padding: 1rem 1.25rem;
+}
+@media (prefers-color-scheme: dark) {
+  .reader-main img { box-shadow: none; }
+}
+@media only screen and (width <= 720px) {
+  body {
+    grid-template-columns: 1fr min(52rem, calc(100% - 1.25rem)) 1fr;
+    font-size: 16px;
+    line-height: 1.7;
+  }
+  .reader-domain { display: none; }
+  .reader-main { padding-top: 1.25rem; }
+}
+@media print {
+  body > header.reader-bar {
+    background: transparent;
+    border-bottom: 1px solid #bbb;
+    padding: 0 0 .5rem;
+  }
+  .reader-source-link { display: none; }
+  .reader-main { padding-top: .5rem; }
+}
+""".strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,32 +250,76 @@ def _zip_bytes(files: Mapping[str, bytes], *, cancel_event: Any = None) -> bytes
     return buffer.getvalue()
 
 
-def _readable_document(fragment: str, *, title: str, source_url: str) -> str:
-    """Return Trafilatura's complete HTML document, or a small fallback page."""
+def _reader_css() -> str:
+    """Load the vendored MIT theme and keep its license inside generated HTML."""
+
+    try:
+        base_css = (_VENDOR_DIR / "simple.min.css").read_text(encoding="utf-8")
+        license_text = (_VENDOR_DIR / "SIMPLE_CSS_LICENSE.txt").read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise DomainError("WEB_TEMPLATE_UNAVAILABLE", "网页 Reader 主题文件缺失") from exc
+    notice = (
+        f"/* Reader base theme: {_READER_THEME} {_READER_THEME_VERSION}\n"
+        f"{license_text}\n*/"
+    )
+    return f"{notice}\n{base_css}\n{_READER_OVERRIDES}\n"
+
+
+def _cleaned_body(fragment: str) -> str:
+    """Take Trafilatura's cleaned body while discarding its document wrapper."""
 
     extracted = fragment.strip()
-    if extracted:
-        if extracted.casefold().startswith("<html"):
-            return f"<!doctype html>\n{extracted}\n"
-        return f"{extracted}\n"
+    if not extracted:
+        return ""
+    soup = BeautifulSoup(extracted, "html.parser")
+    container = soup.body if soup.body is not None else soup
+    return "".join(str(node) for node in container.contents).strip()
+
+
+def _readable_document(fragment: str, *, title: str, source_url: str) -> str:
+    """Render cleaned Trafilatura HTML inside the stable Reader shell."""
 
     safe_title = html_module.escape(title or "教育资源", quote=False)
     safe_url = html_module.escape(source_url, quote=True)
-    body = (
-        "<p>正文抽取未得到可读内容；原始 HTML 已完整保存为 "
-        "<code>source.html</code>。</p>"
-        f'<p>来源：<a href="{safe_url}">{safe_url}</a></p>'
-    )
+    hostname = urlsplit(source_url).hostname or source_url
+    safe_hostname = html_module.escape(hostname, quote=False)
+    content = _cleaned_body(fragment)
+    if not content:
+        content = (
+            '<div class="reader-empty">'
+            "<p>正文抽取未得到可读内容；原始 HTML 已完整保存为 "
+            "<code>source.html</code>。</p>"
+            f'<p>来源：<a href="{safe_url}">{safe_url}</a></p>'
+            "</div>"
+        )
     csp = (
-        "default-src 'none'; img-src http: https: data:; style-src 'none'; "
-        "script-src 'none'; object-src 'none'; frame-src 'none'; "
-        "base-uri 'none'; form-action 'none'"
+        "default-src 'none'; img-src 'self' http: https: data:; "
+        "style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; "
+        "frame-src 'none'; base-uri 'none'; form-action 'none'"
     )
     return (
-        "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n"
-        "<meta charset=\"utf-8\">\n"
+        '<!doctype html>\n<html lang="zh-CN">\n<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f'<meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">\n'
-        f"<title>{safe_title}</title>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
+        f"<title>{safe_title}</title>\n"
+        "<style>\n"
+        f"{_reader_css()}"
+        "</style>\n"
+        "</head>\n<body>\n"
+        '<header class="reader-bar">\n'
+        '<div class="reader-meta">\n'
+        '<span class="reader-badge">网页资料 · 清洗版</span>\n'
+        f'<span class="reader-domain">{safe_hostname}</span>\n'
+        f'<a class="reader-source-link" href="{safe_url}">查看原网页 ↗</a>\n'
+        "</div>\n</header>\n"
+        '<main class="reader-main" id="content">\n'
+        f"{content}\n"
+        "</main>\n"
+        '<footer class="reader-footer">\n'
+        '<p>由网页正文清洗结果生成 · 原始响应保存在 <code>source.html</code></p>\n'
+        "</footer>\n"
+        "</body>\n</html>\n"
     )
 
 
@@ -314,6 +466,9 @@ class WebMaterializer:
             "redirect_count": response.redirect_count,
             "extractor": "trafilatura",
             "extraction_status": extraction_status,
+            "reader_template": _READER_TEMPLATE,
+            "reader_theme": f"{_READER_THEME} {_READER_THEME_VERSION}",
+            "reader_css_embedded": True,
             "links_requested": True,
             "images_requested": True,
             "warnings": warnings,
@@ -357,6 +512,8 @@ class WebMaterializer:
                 "extractor": "trafilatura",
                 "source_snapshot": "source.html",
                 "extraction_status": extraction_status,
+                "reader_template": _READER_TEMPLATE,
+                "reader_theme": f"{_READER_THEME} {_READER_THEME_VERSION}",
             },
             completion="complete" if extraction_status == "succeeded" else "partial",
         )

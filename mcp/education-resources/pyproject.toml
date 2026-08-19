@@ -25,7 +25,11 @@ dev = ["pytest>=9"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-education_resource_mcp = ["library-taxonomy.json"]
+education_resource_mcp = [
+  "library-taxonomy.json",
+  "acquisition/vendor/simple.min.css",
+  "acquisition/vendor/SIMPLE_CSS_LICENSE.txt",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
