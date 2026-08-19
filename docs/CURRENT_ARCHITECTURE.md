@@ -1,6 +1,6 @@
 # 当前架构
 
-> 快照日期：2026-08-19  
+> 快照日期：2026-08-19
 > 只描述当前 active 运行事实。旧 Flow / ResultSet / Presentation / Selection / Plan / Asset / authority / digest 设计只保留在 Git 历史或 legacy 中。
 
 ## 1. 当前定位

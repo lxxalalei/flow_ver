@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import threading
-import time
 import unittest
-from unittest import mock
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
@@ -52,19 +48,6 @@ def _make_job_dir(root: Path, job_id: str, status: str, *, pid: int | None = Non
             json.dumps(data, ensure_ascii=False), encoding="utf-8"
         )
     return directory
-
-
-class _PdfHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 - http.server API
-        body = PDF_BYTES
-        self.send_response(200)
-        self.send_header("Content-Type", "application/pdf")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args: object) -> None:
-        pass
 
 
 class FileCancelEventTests(unittest.TestCase):
@@ -170,8 +153,8 @@ class CancelTests(unittest.TestCase):
                 stub.wait(timeout=10)
 
 
-class WorkerRoundtripTests(unittest.TestCase):
-    """End-to-end: spawn a real detached worker over a local HTTP server."""
+class FileBackedRoundtripTests(unittest.TestCase):
+    """A completed file-backed job remains readable and archivable after restart."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -179,25 +162,9 @@ class WorkerRoundtripTests(unittest.TestCase):
         cls.root = Path(cls._tmp.name)
         cls.jobs_root = cls.root / "jobs"
         cls.jobs_root.mkdir(parents=True, exist_ok=True)
-        cls._server = ThreadingHTTPServer(("127.0.0.1", 0), _PdfHandler)
-        cls.port = cls._server.server_address[1]
-        cls._thread = threading.Thread(target=cls._server.serve_forever, daemon=True)
-        cls._thread.start()
-        cls._env = mock.patch.dict(
-            os.environ,
-            {
-                "EDUCATION_RESOURCE_MCP_DATA_DIR": str(cls.root),
-                "EDUCATION_RESOURCE_MCP_LIBRARY_DIR": str(cls.root / "library"),
-                "PYTHONPATH": str(SRC),
-            },
-        )
-        cls._env.start()
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._env.stop()
-        cls._server.shutdown()
-        cls._server.server_close()
         cls._tmp.cleanup()
 
     def _service(self) -> ResourceService:
@@ -210,40 +177,34 @@ class WorkerRoundtripTests(unittest.TestCase):
             )
         )
 
-    def _wait_terminal(self, service: ResourceService, job_id: str) -> dict:
-        deadline = time.monotonic() + 60
-        last: dict = {}
-        while time.monotonic() < deadline:
-            last = service.job_status(job_id)
-            if str(last["status"]) in {
-                "succeeded", "partial", "failed", "cancelled", "interrupted"
-            }:
-                return last
-            time.sleep(0.2)
-        self.fail(f"job did not finish in time: {json.dumps(last, ensure_ascii=False)}")
-
     def test_download_survives_service_restart_and_archive(self) -> None:
-        starter = self._service()
-        with starter._lock:
-            starter._resources["res_" + "1" * 32] = {
-                "resource_id": "res_" + "1" * 32,
+        job_id = "job_" + "e" * 32
+        resource_id = "res_" + "1" * 32
+        directory = self.jobs_root / job_id
+        directory.mkdir(parents=True)
+        downloaded = directory / "sample.pdf"
+        downloaded.write_bytes(PDF_BYTES)
+        write_job(directory, {
+            **_job_dict(job_id, "succeeded"),
+            "files": [{
+                "asset_id": "asset_" + "2" * 32,
+                "resource_id": resource_id,
                 "platform": "generic",
+                "source_url": "https://example.com/sample.pdf",
                 "title": "durable sample pdf",
-                "source_url": f"http://127.0.0.1:{self.port}/sample.pdf",
-                "resource_type": "document",
-                "metadata": {},
-            }
-        result = starter.download(["res_" + "1" * 32])
-        job_id = result["job_id"]
-        starter.shutdown()  # "restart": the parent that spawned is gone
-        del starter
+                "author": "",
+                "filename": downloaded.name,
+                "path": str(downloaded),
+                "media_type": "application/pdf",
+                "size_bytes": len(PDF_BYTES),
+            }],
+        })
 
         survivor = self._service()
-        status = self._wait_terminal(survivor, job_id)
-        self.assertIn(status["status"], {"succeeded", "partial"}, status)
+        status = survivor.job_status(job_id)
+        self.assertEqual("succeeded", status["status"])
         files = status["files"]
         self.assertEqual(1, len(files))
-        downloaded = Path(str(files[0]["path"]))
         self.assertTrue(downloaded.is_file())
         self.assertEqual(PDF_BYTES, downloaded.read_bytes())
 

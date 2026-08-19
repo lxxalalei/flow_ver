@@ -815,11 +815,15 @@ class ResourceService:
             with path.open("r", encoding="utf-8") as handle:
                 page_lines = list(islice(handle, offset, offset + limit))
             page_line_count = len(page_lines)
-            for line in page_lines:
+            for index, line in enumerate(page_lines, start=offset + 1):
                 try:
                     items.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+                except json.JSONDecodeError as exc:
+                    raise DomainError(
+                        "JOB_STATE_INVALID",
+                        "批量采集结果文件损坏",
+                        details={"job_id": job_id, "line": index},
+                    ) from exc
         total = max(_safe_int(job.get("total")), _safe_int(job.get("completed")))
         status = str(job.get("status") or "")
         return {

@@ -147,6 +147,22 @@ class BatchCollectTests(unittest.TestCase):
         with self.assertRaises(DomainError):
             self.service.batch_read(result["job_id"], limit=0)
 
+    def test_read_rejects_corrupt_result_line(self) -> None:
+        result = self.service.batch_collect(
+            "bilibili", creator_id="434377496", max_items=3
+        )
+        directory = self.root / "jobs" / result["job_id"]
+        run_batch_collect(directory, self.service)
+        results_path = directory / "results.jsonl"
+        lines = results_path.read_text(encoding="utf-8").splitlines()
+        lines[1] = "{invalid-json"
+        results_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        with self.assertRaises(DomainError) as ctx:
+            self.service.batch_read(result["job_id"], offset=0, limit=3)
+        self.assertEqual("JOB_STATE_INVALID", ctx.exception.code)
+        self.assertEqual(2, ctx.exception.details["line"])
+
     def test_unsupported_creator_platform_fails_honestly(self) -> None:
         service = self._service(_NoCreatorProvider())
         try:
