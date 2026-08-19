@@ -88,7 +88,11 @@ resource_session_delete
 - 某个真实资源能力返回 `AUTH_REQUIRED`；
 - 用户明确要求登录、保存、检查或删除某个平台会话。
 
-浏览器捕获结果直接交给 `resource_session_save`；MCP 自己按平台规则筛选，只保存真正需要的 Cookie / Token / storage key。Agent 不手工拼接 canonical Cookie/Token，也不要求用户把账号密码、验证码或 MFA 交给模型。
+`resource_session_save` 的公共契约只暴露 `platform + capture + expires_at`。`capture` 是浏览器会话捕获的 opaque object：Agent 原样传递，不需要知道某个平台具体依赖哪些 Cookie 名、storage key 或 Token 字段，也不要手工拼接 canonical credential。
+
+平台认证规则由 MCP 内部 `PlatformConfig` / SessionStore 掌握。浏览器捕获可以较宽，MCP 再按已验证的平台规则筛选并只持久化需要的 canonical subset。当前已确认的字段继续由代码固化；尚未验证到具体 Cookie 名的平台不凭经验强行加白名单。
+
+`resource_session_status` / `resource_session_login_guide` 只返回进入登录流程所需的信息，例如是否需要登录、登录 URL、捕获方式、probe 能力；内部 `cookie_domains` / `storage_keys` 不再暴露给 Agent。
 
 平台支持登录不等于所有操作都需要登录。`status=not_required` / `requires_login=false` 的平台不得发起登录流程。
 

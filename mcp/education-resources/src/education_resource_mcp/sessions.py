@@ -56,7 +56,14 @@ class PlatformConfig:
         return bool(self.probe_url)
 
     def public_metadata(self) -> dict[str, Any]:
-        result: dict[str, Any] = {
+        """Expose only facts the Agent needs to enter the login flow.
+
+        Cookie domains, storage keys and required credential names remain an
+        internal platform contract; the Agent passes browser capture through
+        without reconstructing those credentials itself.
+        """
+
+        return {
             "platform": self.platform_id,
             "label": self.label,
             "requires_login": self.auth_kind != "none",
@@ -65,11 +72,6 @@ class PlatformConfig:
             "capture_method": self.capture_method,
             "probe_supported": self.probe_supported,
         }
-        if self.cookie_domains:
-            result["cookie_domains"] = list(self.cookie_domains)
-        if self.storage_keys:
-            result["storage_keys"] = list(self.storage_keys)
-        return result
 
 
 _PLATFORM_LIST = [

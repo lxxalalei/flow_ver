@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from .errors import DomainError
 from .service import ResourceService
@@ -34,36 +34,6 @@ class SearchTask(BaseModel):
         description=(
             "仅 smartedu 有效：分类代码子集，如 tchMaterial（教材）/qualityCourse（课程）/"
             "prepareLesson（备课）/sedu（德育）/specialEdu（特教）；不传则搜全部分类。"
-        ),
-    )
-
-
-class SessionCapture(BaseModel):
-    """Broad browser capture; the store extracts the platform-specific subset."""
-
-    model_config = ConfigDict(extra="allow")
-
-    cookies: list[dict[str, Any]] | None = Field(
-        default=None,
-        description="浏览器返回的 cookie 对象数组，原样传入；MCP 按平台域名筛选。",
-    )
-    storage_origin: str | None = Field(
-        default=None,
-        description="捕获 localStorage/sessionStorage 时当前官方页面的 location.origin。",
-    )
-    local_storage: dict[str, str] | None = Field(
-        default=None,
-        description="浏览器 localStorage 快照；MCP 只保存平台真正需要的键。",
-    )
-    session_storage: dict[str, str] | None = Field(
-        default=None,
-        description="浏览器 sessionStorage 快照；MCP 只保存平台真正需要的键。",
-    )
-    tokens: dict[str, str] | None = Field(
-        default=None,
-        description=(
-            "用户明确授权时可直接导入平台支持的 canonical Token；"
-            "浏览器捕获不要先由 Agent 手工筛选成 tokens。"
         ),
     )
 
@@ -121,13 +91,15 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "or classification decisions. Session tools are not a preflight step: use them only "
             "after a concrete AUTH_REQUIRED result or when the user explicitly asks to manage a "
             "platform session. Public operations must not be forced through login merely because "
-            "the platform also has authenticated capabilities. A logical resource may naturally "
-            "materialize to more than one file; do not infer that a landing webpage is the only "
-            "downloadable form or invent a file format to make it downloadable. Batch collection "
-            "only enumerates candidates and never grants download intent: download a complete "
-            "batch_job_id only after the user explicitly selects all of that batch; use resource_ids "
-            "for an explicitly selected subset. Resource handles are process-local; download and "
-            "batch operations return persistent job handles."
+            "the platform also has authenticated capabilities. Authentication field selection is "
+            "owned by the MCP: pass browser session capture through without manually choosing or "
+            "reconstructing cookies/tokens. A logical resource may naturally materialize to more "
+            "than one file; do not infer that a landing webpage is the only downloadable form or "
+            "invent a file format to make it downloadable. Batch collection only enumerates "
+            "candidates and never grants download intent: download a complete batch_job_id only "
+            "after the user explicitly selects all of that batch; use resource_ids for an explicitly "
+            "selected subset. Resource handles are process-local; download and batch operations "
+            "return persistent job handles."
         ),
     )
 
@@ -385,15 +357,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     def resource_session_status(
         platforms: Annotated[
             list[str] | None,
-            Field(
-                description=(
-                    "要查询的平台 id；不传返回全部。不要把状态查询作为资源操作的前置步骤。"
-                )
-            ),
+            Field(description="查询已保存登录态；仅在 AUTH_REQUIRED 或用户主动管理会话时使用。"),
         ] = None,
         deep: Annotated[
             bool,
-            Field(description="是否对支持 probe 的已保存登录态做一次远端有效性检查。"),
+            Field(description="是否对支持远端检查的平台验证当前登录态。"),
         ] = False,
     ) -> dict[str, Any]:
         return _call(lambda: _session_status(resource_service, platforms, deep))
@@ -402,11 +370,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     def resource_session_login_guide(
         platform: Annotated[
             str,
-            Field(
-                description=(
-                    "仅在真实资源能力返回 AUTH_REQUIRED，或用户主动要求管理登录态时调用。"
-                )
-            ),
+            Field(description="需要登录的平台；仅在 AUTH_REQUIRED 或用户主动登录时使用。"),
         ]
     ) -> dict[str, Any]:
         return _call(
@@ -420,21 +384,24 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             str,
             Field(description="需要保存登录态的平台 id。"),
         ],
-        session_data: SessionCapture,
-        expires_at: Annotated[
-            str | None,
+        capture: Annotated[
+            dict[str, Any],
             Field(
                 description=(
-                    "可选 ISO 8601 过期时间；不确定时省略。"
-                    "浏览器宽捕获由 MCP 先筛选，再保存 canonical session。"
+                    "浏览器会话捕获对象，按捕获结果原样传入；不要由 Agent 手工挑选、"
+                    "改写或拼接 Cookie/Token。MCP 按平台规则提取需要的认证字段。"
                 )
             ),
+        ],
+        expires_at: Annotated[
+            str | None,
+            Field(description="可选 ISO 8601 过期时间；未知时省略。"),
         ] = None,
     ) -> dict[str, Any]:
         return _call(
             lambda: resource_service.session_store.save(
                 platform,
-                session_data.model_dump(exclude_none=True),
+                capture,
                 expires_at=expires_at,
             ),
             platform=platform,

@@ -64,9 +64,13 @@ SessionStore 与资源 Adapter 位于同一个 MCP 和同一个数据目录：
 $EDUCATION_RESOURCE_MCP_DATA_DIR/sessions/
 ```
 
-浏览器捕获可以包含较宽的 cookies/localStorage/sessionStorage；MCP 先按平台规则筛选，再只保存真正需要的凭据。Windows 使用当前用户 DPAPI 保护本地登录态。
+`resource_session_save` 对 Agent 只暴露 `platform + capture + expires_at`。`capture` 是 opaque browser-session capture object：Agent 原样传递，不需要理解或手工筛选 Cookie、localStorage、sessionStorage、Token 的具体字段。
 
-没有 standalone `session-manager`、`session_bridge.py`、双 Store 路径、operation ledger 或 idempotency fingerprint/revision 链。
+MCP 内部 `PlatformConfig` / SessionStore 才拥有平台认证契约。浏览器捕获可以较宽，MCP 再按已验证的平台规则筛选，只保存真正需要的 canonical subset。SmartEdu 当前明确需要 `accessToken`；Cookie 平台在未实测出最小 Cookie 名集合前继续按内部域名边界筛选，不凭经验硬编码白名单。
+
+`resource_session_status` / `resource_session_login_guide` 不再公开 `cookie_domains` / `storage_keys` 等内部认证字段；只返回是否需要登录、登录 URL、捕获方式、probe 能力和状态等 Agent 真正需要的事实。
+
+Windows 使用当前用户 DPAPI 保护本地登录态。没有 standalone `session-manager`、`session_bridge.py`、双 Store 路径、operation ledger 或 idempotency fingerprint/revision 链。
 
 从旧独立 session-manager 升级时不做长期双读兼容，已有登录态可能需要重新捕获一次。
 
@@ -119,7 +123,7 @@ HTTP response
 
 ## `resource_id` 只在当前进程有效
 
-Search / Import 返回的 `resource_id` 是临时操作句柄：
+Search / Import / BatchRead 返回的 `resource_id` 是临时操作句柄：
 
 ```text
 resource_id -> 当前 MCP 进程里的资源对象
@@ -131,6 +135,8 @@ resource_id -> 当前 MCP 进程里的资源对象
 
 ## Download / Job
 
+普通已选资源：
+
 ```text
 resource_download(
   resource_ids=["res_..."],
@@ -138,7 +144,16 @@ resource_download(
 )
 ```
 
-下载前 fresh Inspect，再按当前真实 primary Representation 路由到 exact Provider。默认 `original` 允许 Provider 为一个 Resource 产生一个或多个真实文件；附件/伴随文件的成功与失败分别进入 Job 结果。Provider 失败时返回真实失败，不静默换成不等价 Provider。
+用户明确选择一个完整 Batch 的全部结果时：
+
+```text
+resource_download(
+  batch_job_id="job_...",
+  preferred_container="original"
+)
+```
+
+两种输入二选一。下载前 fresh Inspect，再按当前真实 primary Representation 路由到 exact Provider。默认 `original` 允许 Provider 为一个 Resource 产生一个或多个真实文件；附件/伴随文件的成功与失败分别进入 Job 结果。Provider 失败时返回真实失败，不静默换成不等价 Provider。
 
 Job 使用薄文件状态：
 
@@ -160,7 +175,13 @@ worker 已死但 Job 未到终态时标记 `interrupted`；重新发起即可，
 
 完整枚举默认不传 `max_items`，直到来源真实结束。`resource_batch_read` 单页大小只控制 Tool Result，不截断磁盘上的完整结果。
 
-Batch 当前解决“完整枚举”，不自动等于“把结果中的每个资源都下载”。Catalog → 大批量 acquisition 的直接衔接如有真实需求再单独设计，不在本轮引入新的批量工作流状态机。
+Batch 只产生候选，不产生下载授权：
+
+- 用户选择部分结果 → `resource_batch_read` 返回的候选附带当前进程 `resource_id`，再调用 `resource_download(resource_ids=[...])`；
+- 用户明确选择完整 `succeeded` Batch 的全部结果 → `resource_download(batch_job_id="...")`，MCP 直接读取完整 `results.jsonl` 并复用现有多资源 Download Job；
+- `partial` / `failed` / `cancelled` Batch 不能冒充“全部”。
+
+这里没有新增 Batch Acquisition Tool 或 Selection 状态；只是把已选择资源的机械循环留在 MCP 后台。
 
 ## Archive
 
@@ -234,4 +255,4 @@ src/education_resource_mcp/
 └── job_state.py
 ```
 
-当前最重要的验收仍是真实 OpenClaw 场景：能否完成发现 → 判断 → 选择 → 下载 → 文件，以及需要登录时能否在同一个 MCP 中按 `AUTH_REQUIRED → Session save → 重试` 完成闭环。
+当前最重要的验收仍是真实 OpenClaw 场景：能否完成发现 → 判断 → 选择 → 下载 → 文件，以及需要登录时能否在同一个 MCP 中按 `AUTH_REQUIRED → 浏览器 capture → Session save → 重试` 完成闭环。

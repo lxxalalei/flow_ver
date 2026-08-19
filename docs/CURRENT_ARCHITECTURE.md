@@ -1,6 +1,6 @@
 # 当前架构
 
-> 快照日期：2026-08-19
+> 快照日期：2026-08-20
 > 只描述当前 active 运行事实。旧 Flow / ResultSet / Presentation / Selection / Plan / Asset / authority / digest 设计只保留在 Git 历史或 legacy 中。
 
 ## 1. 当前定位
@@ -92,7 +92,30 @@ $EDUCATION_RESOURCE_MCP_DATA_DIR/sessions/
 
 资源 Adapter 和 Session Tool 直接使用同一个 Store。
 
-浏览器捕获可以较宽，但 MCP 先按平台规则筛选，再只持久化真正需要的 Cookie / Token / storage key；不再因为整包 localStorage/cookie snapshot 较大而在筛选前拒绝。
+### 公共 Tool 与内部认证契约分离
+
+`resource_session_save` 对 Agent 只暴露：
+
+```text
+platform
+capture        # opaque browser-session capture object
+expires_at?
+```
+
+Agent 不需要知道 `capture` 内部某个平台具体依赖哪些 Cookie 名、storage key 或 Token 字段，也不手工筛选/拼接 credential。浏览器捕获可以较宽，SessionStore 再按平台内部规则筛选，只持久化 canonical subset。
+
+平台认证事实继续保存在内部 `PlatformConfig` / SessionStore 中。例如 SmartEdu 当前明确：
+
+```text
+auth_kind = token
+capture_method = browser_storage
+storage_keys = accessToken, x-nd-auth
+required_storage_keys = accessToken
+```
+
+这些内部字段不再通过 `resource_session_status` / `resource_session_login_guide` 暴露给 Agent；公开结果只保留进入登录流程真正需要的信息：平台、是否需要登录、登录 URL、捕获方式、probe 能力和状态。
+
+Cookie 平台当前已确认域名边界，但并非每个平台都已经实测到最小 Cookie 名集合。没有证据时继续按当前内部域名筛选，不为了“更严格”凭经验增加 Cookie 名白名单。
 
 保留的必要行为：
 
@@ -252,14 +275,16 @@ mcp/education-resources/
 ## 10. 当前验证重点
 
 1. 同一个 `education-resources` MCP 是否正确暴露资源与 Session Tool；
-2. Session broad capture 是否先筛选再保存 canonical session；
-3. SmartEdu 保存过 session 时公共 Search 是否仍匿名；
-4. Anna/Libgen 是否不触发登录；
-5. Host Web URL → Import 是否能恢复明确的平台身份；
-6. Generic Web 是否同时保留 `source.html` 与 Trafilatura 可读表示；
-7. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
-8. BatchRead 子集候选是否能得到 `resource_id`，完整 succeeded batch 是否能在用户明确选择全部后直接交给现有 Download Job；
-9. Download / Batch / Archive 其他既有行为是否未被多文件/批量衔接语义破坏；
-10. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且批量枚举不会自动触发下载。
+2. `resource_session_save` 的 public schema 是否只暴露 opaque `capture`，而不是 Cookie/Storage/Token 字段结构；
+3. Session broad capture 是否仍由 MCP 筛选后只保存 canonical session；
+4. Session status/login guide 是否不再泄漏内部 `cookie_domains` / `storage_keys`；
+5. SmartEdu 保存过 session 时公共 Search 是否仍匿名；
+6. Anna/Libgen 是否不触发登录；
+7. Host Web URL → Import 是否能恢复明确的平台身份；
+8. Generic Web 是否同时保留 `source.html` 与 Trafilatura 可读表示；
+9. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
+10. BatchRead 子集候选是否能得到 `resource_id`，完整 succeeded batch 是否能在用户明确选择全部后直接交给现有 Download Job；
+11. Download / Batch / Archive 其他既有行为是否未被多文件/批量衔接语义破坏；
+12. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且批量枚举不会自动触发下载。
 
-后端测试不能替代第 10 项。
+后端测试不能替代第 12 项。
