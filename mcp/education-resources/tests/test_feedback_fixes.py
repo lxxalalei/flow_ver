@@ -61,11 +61,11 @@ class PlatformIdTests(unittest.TestCase):
         self.assertEqual("annas-archive", tasks[0]["platform"])
 
     def test_unknown_platform_error_lists_available_ids(self) -> None:
-        from education_resource_mcp.session_bridge import create_session_store
+        from education_resource_mcp.sessions import SessionStore
 
         settings = _settings(self.root)
         multi = MultiPlatformSearchProvider(
-            settings, create_session_store(settings), GenericWebSearchProvider(settings)
+            settings, SessionStore(settings.data_dir), GenericWebSearchProvider(settings)
         )
         _, runs = multi.search(
             [{"platform": "annas-archive-typo", "queries": [{"query": "x"}]}], 5

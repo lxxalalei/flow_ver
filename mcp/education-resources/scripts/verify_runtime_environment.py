@@ -9,9 +9,9 @@ whose metadata no longer describes the current source dependencies.
 from __future__ import annotations
 
 import importlib
-import os
 import importlib.metadata as metadata
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tomllib
@@ -20,6 +20,21 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DISTRIBUTION_NAME = "education-resource-mcp"
+
+
+_REQUIREMENT_RE = re.compile(r"^(\s*[A-Za-z0-9._-]+(?:\[[^]]*])?)(.*)$")
+
+
+def _normalize_requirement(requirement: str) -> str:
+    """pip reorders comma-separated specifiers in installed metadata
+    (``trafilatura>=2.1,<3`` is recorded as ``trafilatura<3,>=2.1``), so sort
+    the specifier segments before comparing against pyproject."""
+    match = _REQUIREMENT_RE.match(requirement)
+    if match is None:
+        return requirement.strip()
+    name, spec = match.groups()
+    segments = sorted(part.strip() for part in spec.split(",") if part.strip())
+    return f"{name.strip()}{''.join(segments)}"
 
 
 def _load_project() -> dict[str, Any]:
@@ -45,30 +60,6 @@ def _run_pip_check() -> str | None:
     return output or f"pip check exited with status {completed.returncode}"
 
 
-
-def _verify_session_bridge_dependency(errors: list[str]) -> None:
-    """When the standalone session store is configured, session_bridge imports
-    ``session_manager.store`` from this environment.  A stale copy of that
-    package (missing platforms such as douyin) fails at search time, so verify
-    the registry here instead.
-    """
-    if not os.environ.get("EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR"):
-        return
-    try:
-        module = importlib.import_module("session_manager.store")
-    except Exception as exc:  # import failure is an actionable environment failure.
-        errors.append(
-            "EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR is configured, "
-            f"but session_manager.store cannot be imported: {exc!r}"
-        )
-        return
-    registry = getattr(module, "PLATFORM_REGISTRY", {})
-    for required in ("douyin",):
-        if required not in registry:
-            errors.append(
-                f"session_manager.store PLATFORM_REGISTRY is missing {required}; "
-                "openclaw-session-manager must be installed/synced into this venv"
-            )
 
 def _verify_crypto() -> None:
     """Exercise the lazy Crypto import used by download adapters."""
@@ -100,7 +91,9 @@ def main() -> int:
     ):
         print("ERROR: project.dependencies must be a list of strings", file=sys.stderr)
         return 2
-    expected_requirements = sorted(dependencies)
+    expected_requirements = sorted(
+        _normalize_requirement(dependency) for dependency in dependencies
+    )
 
     try:
         distribution = metadata.distribution(DISTRIBUTION_NAME)
@@ -113,7 +106,7 @@ def main() -> int:
                 f"but pyproject declares {expected_version}"
             )
         installed_requirements = sorted(
-            requirement
+            _normalize_requirement(requirement)
             for requirement in (distribution.requires or [])
             if "extra ==" not in requirement
         )
@@ -147,7 +140,6 @@ def main() -> int:
     except Exception as exc:  # Crypto is imported lazily by production adapters.
         errors.append(f"pycryptodome Crypto AES check failed: {exc!r}")
 
-    _verify_session_bridge_dependency(errors)
 
     pip_check_error = _run_pip_check()
     if pip_check_error is not None:

@@ -21,8 +21,8 @@ C:\Users\admin\.claude\skills\mediacrawler-platforms\MediaCrawler\media_platform
 ## Motivation
 
 - 现状能力差（相对 skill）：bili 无时间范围全量搜索/UP 资料/画质选择；douyin 无发布时间过滤/图集下载/创作者资料；zhihu 无详情富化与过滤参数；smartedu 无分类 tabs/目录展开。
-- MCP 的 adapters 本就自带签名与登录链（douyin_sign.js、wbi、session-manager cookie），血缘同源，原生扩展是自然延续。
-- 原生实现顺带消灭"两套登录态"：批量能力直接读 session-manager 共享库，不再需要 skill 的 Playwright browser_data。
+- MCP 的 adapters 本就自带签名与登录链（douyin_sign.js、wbi、内部 SessionStore cookie），血缘同源，原生扩展是自然延续。
+- 原生实现顺带消灭"两套登录态"：批量能力直接读 education-resources 内部 SessionStore（0058 会话收敛后已无独立 session-manager），不再需要 skill 的 Playwright browser_data。
 - 代价（自觉接受）：反爬对抗的维护完全落在本仓库；参考 fork 只用于移植时对照，之后不再跟进。
 
 ## Non-goals
@@ -30,7 +30,7 @@ C:\Users\admin\.claude\skills\mediacrawler-platforms\MediaCrawler\media_platform
 - 不引入 MediaCrawler 运行时依赖（不 import、不 subprocess 调用、不打包其代码）。
 - 不移植 IP 代理池。
 - 不移植 7 种存储格式；批量结果只用本仓库文件布局（jsonl）。
-- 不移植 Playwright 扫码登录；登录继续走 session-manager + OpenClaw 原生浏览器（AUTH_REQUIRED 链路）。
+- 不移植 Playwright 扫码登录；登录继续走 education-resources 内置 session 能力 + OpenClaw 原生浏览器（AUTH_REQUIRED 链路）。
 - 不把批量结果转成 `resource_id` 句柄；两个数据模型不硬焊。
 
 ## Business invariants

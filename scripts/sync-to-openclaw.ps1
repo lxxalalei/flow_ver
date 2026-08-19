@@ -6,7 +6,11 @@
 # After sync, restart the OpenClaw gateway and verify:
 #   openclaw gateway restart
 #   openclaw mcp doctor education-resources --probe
-#   openclaw mcp doctor session-manager  --probe
+#
+# Session capabilities converged into education-resources (eba4578): the
+# standalone session-manager MCP, session_bridge.py and the session-login-flow
+# skill are retired. Detected leftovers are reported with cleanup commands
+# instead of being synced.
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------------------
@@ -19,17 +23,13 @@ $EduPkg = "$WinLocal\packages\education-resources\current"
 $EduSrc = "$EduPkg\source"
 $EduPy  = "$EduPkg\venv\Scripts\python.exe"
 
-$SesPkg = "$WinLocal\packages\session-manager\current"
-$SesSrc = "$SesPkg\source"          # created by this script
-$SesPy  = "$SesPkg\venv\Scripts\python.exe"
-
 $LrfSkillTarget = "$WinLocal\packages\learning-resource-flow\current\skill"
 
-# session-login-flow is a junction/symlink - resolve to the real dir.
-$SesLoginTarget = "$env:USERPROFILE\.openclaw\skills\session-login-flow"
-if ((Get-Item $SesLoginTarget -Force).LinkType) {
-    $SesLoginTarget = (Get-Item $SesLoginTarget -Force).Target
-}
+# Retired in eba4578 - only checked so their cleanup is not forgotten.
+$OpenClawConfig   = "$env:USERPROFILE\.openclaw\openclaw.json"
+$RetiredPkgDir    = "$WinLocal\packages\session-manager"
+$RetiredDataDir   = "$WinLocal\session-manager"
+$RetiredSkillLink = "$env:USERPROFILE\.openclaw\skills\session-login-flow"
 
 $ExcludeDirs  = @('__pycache__', '.pytest_cache', 'venv', '.venv', 'build', '.git')
 $ExcludeFiles = @('*.pyc', '*.egg-info', 'database.sqlite')
@@ -40,6 +40,7 @@ $ExcludeFiles = @('*.pyc', '*.egg-info', 'database.sqlite')
 function Section([string]$Text) { Write-Host "`n>>> $Text" -ForegroundColor Cyan }
 function Ok([string]$Text)      { Write-Host "  [OK] $Text" -ForegroundColor Green }
 function Fail([string]$Text)    { Write-Host "  [FAIL] $Text" -ForegroundColor Red; exit 1 }
+function Warn([string]$Text)    { Write-Host "  [WARN] $Text" -ForegroundColor Yellow }
 
 # Native tools (pip/python/robocopy) legitimately write to stderr; under
 # $ErrorActionPreference='Stop' a redirected stderr line would become a
@@ -81,6 +82,21 @@ function InstallEditable([string]$Python, [string]$Source, [string]$Name) {
     $output | Select-String 'Successfully|error|ERROR|already satisfied'
 }
 
+# Uninstall a package that may already be gone; "not installed" is success too.
+function UninstallIfPresent([string]$Python, [string]$Name) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Python -m pip uninstall -y $Name --no-input 2>&1 | ForEach-Object { "$_" }
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $prev }
+    $global:LASTEXITCODE = 0
+    if ($output | Select-String 'Successfully uninstalled') {
+        Ok "Removed stale $Name from venv"
+    }
+}
+
 function CheckExists([string[]]$Paths) {
     foreach ($p in $Paths) {
         if (-not (Test-Path $p)) { Fail "Path not found: $p" }
@@ -93,9 +109,8 @@ function CheckExists([string[]]$Paths) {
 Section 'Pre-flight checks'
 CheckExists @(
     "$Repo\mcp\education-resources\src",
-    "$Repo\mcp\session-manager\src",
     "$Repo\skills\learning-resource-flow\SKILL.md",
-    $EduPy, $SesPy
+    $EduPy
 )
 Ok 'All source and venv paths verified'
 
@@ -106,6 +121,10 @@ Section 'Syncing education-resources MCP'
 MirrorDir "$Repo\mcp\education-resources" $EduSrc
 Ok "Source synced to $EduSrc"
 
+# The converged package absorbed session-manager; drop any stale editable
+# install left over from the standalone deployment (its source path is gone).
+UninstallIfPresent $EduPy 'openclaw-session-manager'
+
 InstallEditable $EduPy $EduSrc 'education-resources'
 Ok 'Package reinstalled in venv'
 
@@ -115,72 +134,53 @@ Ok 'Dependency consistency check passed'
 Invoke-Native { & $EduPy "$EduSrc\scripts\verify_runtime_environment.py" } 'Runtime environment verification'
 Ok 'Runtime environment verification passed'
 
-# Smoke test - verify new adapters load
+# Smoke test - verify adapters and the converged session store load
 Invoke-Native {
     & $EduPy -c @'
 from education_resource_mcp.adapters.douyin import DouyinSearchAdapter, sign_a_bogus
 from education_resource_mcp.adapters.douyin_download import DouyinDownloader
 from education_resource_mcp.adapters.bilibili import BilibiliSearchAdapter
-print('  adapters: douyin, douyin_download, bilibili import OK')
+from education_resource_mcp.sessions import SessionStore
+print('  adapters: douyin, douyin_download, bilibili + SessionStore import OK')
 '@
 } 'Import smoke test'
 Ok 'Import smoke test passed'
 
 # ---------------------------------------------------------------------------
-# 2. session-manager MCP
-# ---------------------------------------------------------------------------
-Section 'Syncing session-manager MCP'
-New-Item -ItemType Directory -Force -Path $SesSrc | Out-Null
-MirrorDir "$Repo\mcp\session-manager" $SesSrc -ExtraExcludes @('distribution')
-Ok "Source synced to $SesSrc"
-
-InstallEditable $SesPy $SesSrc 'session-manager'
-Ok 'Package reinstalled in venv'
-
-Invoke-Native { & $SesPy -m pip check } 'Dependency consistency check (pip check)'
-Ok 'Dependency consistency check passed'
-
-# Smoke test - verify douyin registration
-Invoke-Native {
-    & $SesPy -c @'
-from session_manager.store import _PLATFORM_LIST
-ids = [p.platform_id for p in _PLATFORM_LIST]
-assert 'douyin' in ids, f'douyin not in {ids}'
-print(f'  registered platforms: {ids}')
-'@
-} 'Import smoke test'
-Ok 'Import smoke test passed'
-
-# education-resources reads sessions through the standalone session-manager
-# package when EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR is configured;
-# keep that dependency in sync in this venv too (a stale copy breaks search
-# with "未知平台" for platforms like douyin).
-InstallEditable $EduPy $SesSrc 'session-manager (edu venv)'
-Invoke-Native {
-    & $EduPy -c @'
-from session_manager.store import _PLATFORM_LIST
-ids = [p.platform_id for p in _PLATFORM_LIST]
-assert 'douyin' in ids, f'douyin not in {ids}'
-print(f'  edu-venv session_manager platforms: {ids}')
-'@
-} 'session-manager edu-venv verification'
-Ok 'session-manager synced into education-resources venv'
-
-# ---------------------------------------------------------------------------
-# 3. Skills
+# 2. Skills
 # ---------------------------------------------------------------------------
 Section 'Syncing learning-resource-flow skill'
 MirrorDir "$Repo\skills\learning-resource-flow" $LrfSkillTarget
 Ok "Skill synced to $LrfSkillTarget"
 
-Section 'Syncing session-login-flow skill'
-if (Test-Path "$Repo\mcp\session-manager\distribution\skills\session-login-flow") {
-    MirrorDir "$Repo\mcp\session-manager\distribution\skills\session-login-flow" $SesLoginTarget
-    Ok "Skill synced to $SesLoginTarget"
+# ---------------------------------------------------------------------------
+# 3. Retired session-manager leftovers
+# ---------------------------------------------------------------------------
+Section 'Checking retired session-manager leftovers'
+$leftovers = $false
+if ((Test-Path $OpenClawConfig) -and
+    (Select-String -Path $OpenClawConfig -Pattern 'session-manager' -SimpleMatch -Quiet)) {
+    $leftovers = $true
+    Warn "openclaw.json still references session-manager - remove the 'session-manager' MCP entry"
+    Warn "  and the EDUCATION_RESOURCE_MCP_SESSION_MANAGER_DATA_DIR env var, then restart the gateway"
 }
-else {
-    Write-Host '  (skipped - no session-login-flow in repo distribution)'
+if (Test-Path $RetiredPkgDir) {
+    $leftovers = $true
+    Warn "Retired package still deployed: $RetiredPkgDir"
+    Warn "  after openclaw.json is cleaned: Remove-Item -Recurse -Force `"$RetiredPkgDir`""
 }
+if (Test-Path $RetiredSkillLink) {
+    $leftovers = $true
+    Warn "Retired session-login-flow skill still installed: $RetiredSkillLink"
+    Warn "  login guidance now comes from resource_session_login_guide; remove it or the gateway"
+    Warn "  keeps exposing the obsolete skill"
+}
+if (Test-Path $RetiredDataDir) {
+    $leftovers = $true
+    Warn "Old session data dir kept (old encrypted logins are NOT readable by the new store):"
+    Warn "  $RetiredDataDir - logins must be re-captured; archive or delete at will"
+}
+if (-not $leftovers) { Ok 'No session-manager leftovers detected' }
 
 # ---------------------------------------------------------------------------
 # Summary
@@ -191,7 +191,6 @@ Write-Host @'
   Next steps (run in a Windows terminal):
     openclaw gateway restart
     openclaw mcp doctor education-resources --probe
-    openclaw mcp doctor session-manager  --probe
 
   Or if OpenClaw is managed as a scheduled task, restart via Task Scheduler.
 '@

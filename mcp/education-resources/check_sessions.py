@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
-"""Check all sessions after login helper"""
-import json, sys, glob
-sys.stdout.reconfigure()
+"""Print a one-line status for every platform session in the data dir."""
+from __future__ import annotations
 
-for f in sorted(glob.glob("/home/admin_quanxiao/.local/share/quanxiao/education-resource-mcp-data/sessions/*.json")):
-    with open(f) as fh:
-        d = json.load(fh)
-    platform = d.get("platform")
-    sd = d.get("session_data", {})
-    cookies = sd.get("cookies", [])
-    storage = sd.get("storage", {})
-    print(f"  {platform:12s}  cookies={len(cookies):2d}  storage={len(storage):2d}  captured={d.get('captured_at','')[:19]}  expires={d.get('expires_at','')[:10]}")
+import sys
+from pathlib import Path
+
+from education_resource_mcp.config import Settings
+from education_resource_mcp.sessions import SessionStore
+
+
+def main() -> int:
+    if len(sys.argv) > 1:
+        data_dir = Path(sys.argv[1]).expanduser().resolve()
+    else:
+        data_dir = Settings.from_env().data_dir
+    for status in SessionStore(data_dir).get_status():
+        print(
+            f"  {status.platform:12s}  {status.status:12s}"
+            f"  captured={status.captured_at or '-'}"
+            f"  expires={status.expires_at or '-'}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

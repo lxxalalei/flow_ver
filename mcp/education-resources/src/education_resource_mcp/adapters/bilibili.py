@@ -81,7 +81,7 @@ class BilibiliSearchAdapter:
         if self._nav_logged_in is False:
             return adapter_error(
                 "AUTH_REQUIRED",
-                "B站登录态已失效，请重新登录（session-login-flow）后再搜索",
+                "B站登录态已失效，请重新登录后再搜索",
                 False,
             )
         return None

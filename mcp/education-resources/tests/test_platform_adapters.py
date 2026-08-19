@@ -43,7 +43,7 @@ class PlatformSearchAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = SessionStore(root)
-            store.save("bilibili", {"cookies": [{"name": "SESSDATA", "value": "abc"}]})
+            store.save("bilibili", {"cookies": [{"name": "SESSDATA", "value": "abc", "domain": ".bilibili.com"}]})
             adapter = BilibiliSearchAdapter(store, _settings(root))
             nav = {
                 "code": 0,
@@ -98,7 +98,7 @@ class PlatformSearchAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = SessionStore(root)
-            store.save("douyin", {"cookies": [{"name": "sessionid", "value": "abc"}]})
+            store.save("douyin", {"cookies": [{"name": "sessionid", "value": "abc", "domain": ".douyin.com"}]})
             adapter = DouyinSearchAdapter(store, _settings(root))
             response = {
                 "status_code": 0,
