@@ -192,6 +192,35 @@ def _resource_type(value: Any) -> str:
     )
 
 
+def _batch_item_resource(item: dict[str, Any]) -> dict[str, Any]:
+    """Turn one persisted batch candidate back into an ordinary resource fact set."""
+
+    source_url = canonical_http_url(str(item.get("url") or item.get("source_url") or ""))
+    title = str(item.get("title") or "").strip()
+    if not title:
+        raise DomainError("JOB_STATE_INVALID", "批量采集结果缺少资源标题")
+    platform = str(item.get("platform") or "generic").strip() or "generic"
+    resource = dict(item)
+    resource.pop("url", None)
+    resource.pop("resource_id", None)
+    resource.update(
+        {
+            "platform": platform,
+            "title": title,
+            "source_url": source_url,
+            "resource_type": _resource_type(
+                item.get("resource_type") or item.get("type")
+            ),
+        }
+    )
+    metadata = dict(resource.get("metadata") or {}) if isinstance(resource.get("metadata"), dict) else {}
+    for key in ("author", "published_at", "language", "download_feasibility"):
+        if item.get(key) not in (None, ""):
+            metadata[key] = item[key]
+    resource["metadata"] = metadata
+    return resource
+
+
 def _platform_from_import_url(url: str) -> str:
     """Recognize only URL shapes with a dedicated active inspector."""
 
@@ -540,17 +569,65 @@ class ResourceService:
             "failures": list(resolution.get("failures") or []),
         }
 
+    def _resources_from_batch_job(self, batch_job_id: str) -> list[dict[str, Any]]:
+        directory, batch_job = self._load_job(batch_job_id)
+        batch_job = self._reconcile(directory, batch_job)
+        if str(batch_job.get("kind") or "") != "batch_collect":
+            raise DomainError("INVALID_ARGUMENT", "batch_job_id 不是批量采集任务")
+        if str(batch_job.get("status") or "") != "succeeded":
+            raise DomainError(
+                "BATCH_INCOMPLETE",
+                "批量结果尚未完整成功；不能把部分结果当成用户选择的全部资源",
+            )
+        path = directory / "results.jsonl"
+        if not path.is_file():
+            raise DomainError("JOB_STATE_INVALID", "批量采集结果文件不存在")
+
+        resources: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for index, line in enumerate(handle, start=1):
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise DomainError(
+                        "JOB_STATE_INVALID",
+                        "批量采集结果文件损坏",
+                        details={"job_id": batch_job_id, "line": index},
+                    ) from exc
+                if not isinstance(item, dict):
+                    raise DomainError(
+                        "JOB_STATE_INVALID",
+                        "批量采集结果项格式无效",
+                        details={"job_id": batch_job_id, "line": index},
+                    )
+                resource = _batch_item_resource(item)
+                resource["resource_id"] = new_id("res")
+                resources.append(resource)
+        if not resources:
+            raise DomainError("RESOURCE_NOT_FOUND", "批量采集任务没有可下载资源")
+        return resources
+
     def download(
         self,
-        resource_ids: list[str],
+        resource_ids: list[str] | None = None,
         *,
+        batch_job_id: str = "",
         preferred_container: str = "original",
     ) -> dict[str, Any]:
-        if not isinstance(resource_ids, list) or not resource_ids:
-            raise DomainError("INVALID_ARGUMENT", "resource_ids 不能为空")
+        resource_ids = list(resource_ids or [])
+        batch_job_id = str(batch_job_id or "").strip()
+        if bool(resource_ids) == bool(batch_job_id):
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "resource_ids 与 batch_job_id 必须且只能提供一种下载来源",
+            )
         if len(set(resource_ids)) != len(resource_ids):
             raise DomainError("INVALID_ARGUMENT", "resource_ids 不得重复")
-        resources = [self._get_resource(resource_id) for resource_id in resource_ids]
+        resources = (
+            self._resources_from_batch_job(batch_job_id)
+            if batch_job_id
+            else [self._get_resource(resource_id) for resource_id in resource_ids]
+        )
         job_id = new_id("job")
         directory = job_dir(self.settings.jobs_dir, job_id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -560,6 +637,7 @@ class ResourceService:
                 "job_id": job_id,
                 "resources": resources,
                 "preferred_container": preferred_container,
+                "source_batch_job_id": batch_job_id or None,
             },
         )
         write_job(
@@ -817,13 +895,26 @@ class ResourceService:
             page_line_count = len(page_lines)
             for index, line in enumerate(page_lines, start=offset + 1):
                 try:
-                    items.append(json.loads(line))
+                    parsed = json.loads(line)
                 except json.JSONDecodeError as exc:
                     raise DomainError(
                         "JOB_STATE_INVALID",
                         "批量采集结果文件损坏",
                         details={"job_id": job_id, "line": index},
                     ) from exc
+                if not isinstance(parsed, dict):
+                    raise DomainError(
+                        "JOB_STATE_INVALID",
+                        "批量采集结果项格式无效",
+                        details={"job_id": job_id, "line": index},
+                    )
+                item = dict(parsed)
+                registered = self._remember_resources(
+                    [_batch_item_resource(item)], include_summary=True
+                )
+                if registered:
+                    item["resource_id"] = registered[0]["resource_id"]
+                items.append(item)
         total = max(_safe_int(job.get("total")), _safe_int(job.get("completed")))
         status = str(job.get("status") or "")
         return {

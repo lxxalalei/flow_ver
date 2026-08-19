@@ -168,7 +168,7 @@ Trafilatura
 `resource_id` 只在当前 MCP 进程内有效：
 
 ```text
-resource_id -> 当前搜索/导入得到的资源对象
+resource_id -> 当前搜索/导入/BatchRead 得到的资源对象
 ```
 
 稳定资源身份仍是 URL、平台原生稳定 ID 等。句柄失效时优先按已知 URL/平台 ID 重定位同一资源，不重跑整个研究任务。
@@ -203,7 +203,7 @@ Resource 是用户选择的逻辑对象；Representation 是 Inspect 确认的�
 
 SmartEdu 课程是当前第一个明确的复合资源案例：课程 detail 可以同时确认主视频、PDF 资料和伴随音频；同一视频的 MP4/HLS/码率变体只选择一个当前主版本，而独立文档/音频保留为 attachment/companion。SmartEdu Downloader 已可为一个课程 Resource 返回多个真实文件，Job 的 `files` / `failures` 是最终事实。
 
-用户已明确选定资源并要求下载时直接：
+用户已明确选定普通候选并要求下载时直接：
 
 ```text
 resource_download(resource_ids=[...])
@@ -211,7 +211,15 @@ resource_download(resource_ids=[...])
 
 下载内部 fresh Inspect，并路由到当前 exact Provider；失败返回真实失败，不静默切换不等价 Provider。
 
-完整枚举使用 `resource_batch_collect`，默认不传 `max_items`，直到来源真实结束；`resource_batch_read` 的分页大小只控制单次 Tool Result。Batch 当前解决完整发现/枚举，不自动等同于“把结果里的每个资源全部下载”；如真实使用需要 Catalog → 大批量 acquisition 的直接衔接，再单独增加最小能力，不恢复工作流状态机。
+完整枚举使用 `resource_batch_collect`，默认不传 `max_items`，直到来源真实结束；`resource_batch_read` 的分页大小只控制单次 Tool Result。**Batch 结果始终只是候选集合，不等于用户已经选择下载。**
+
+当前 Batch 与 Download 的衔接不增加新 Tool：
+
+- 用户只选择 batch 中的一部分 → `resource_batch_read` 读取必要页，每个返回候选获得当前进程 `resource_id`，再用现有 `resource_download(resource_ids=[...])`；
+- 用户明确选择一个完整 `succeeded` batch 的全部结果 → 直接 `resource_download(batch_job_id="...")`，MCP 从该 batch 的 `results.jsonl` 恢复资源事实并提交一个普通多资源 Download Job；Agent 不需要为了下载全部而分页搬运每个 URL；
+- batch 若为 `partial` / `failed` / `cancelled`，不能通过 `batch_job_id` 把当前部分结果冒充“全部”。用户仍可明确选择已经展示的个别候选并按 `resource_id` 下载。
+
+这只是把已选择资源的机械循环留在 MCP 后台；用户选择仍属于 Skill/Agent，不创建 Selection/Confirm 状态对象。
 
 Archive 只移动真实下载 Job 已产生的文件；分类语义由 Agent 决定。
 
@@ -250,7 +258,8 @@ mcp/education-resources/
 5. Host Web URL → Import 是否能恢复明确的平台身份；
 6. Generic Web 是否同时保留 `source.html` 与 Trafilatura 可读表示；
 7. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
-8. Download / Batch / Archive 其他既有行为是否未被多文件语义破坏；
-9. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 选择 → 下载 → 文件。
+8. BatchRead 子集候选是否能得到 `resource_id`，完整 succeeded batch 是否能在用户明确选择全部后直接交给现有 Download Job；
+9. Download / Batch / Archive 其他既有行为是否未被多文件/批量衔接语义破坏；
+10. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且批量枚举不会自动触发下载。
 
-后端测试不能替代第 9 项。
+后端测试不能替代第 10 项。

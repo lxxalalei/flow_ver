@@ -123,8 +123,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "platform session. Public operations must not be forced through login merely because "
             "the platform also has authenticated capabilities. A logical resource may naturally "
             "materialize to more than one file; do not infer that a landing webpage is the only "
-            "downloadable form or invent a file format to make it downloadable. Resource handles "
-            "are process-local; download and batch operations return persistent job handles."
+            "downloadable form or invent a file format to make it downloadable. Batch collection "
+            "only enumerates candidates and never grants download intent: download a complete "
+            "batch_job_id only after the user explicitly selects all of that batch; use resource_ids "
+            "for an explicitly selected subset. Resource handles are process-local; download and "
+            "batch operations return persistent job handles."
         ),
     )
 
@@ -200,8 +203,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             str,
             Field(
                 description=(
-                    "Search/Browse/Import 返回的当前进程内 resource_id；"
-                    "返回当前可访问性、可获取表示及已解析资源事实。"
+                    "Search/Browse/Import/BatchRead 返回的当前进程内 resource_id；"
+                    "只在未知事实会影响选择或获取时调用，返回当前可访问性、可获取内容及已解析资源事实。"
                 )
             ),
         ]
@@ -211,15 +214,25 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     @server.tool(structured_output=True)
     def resource_download(
         resource_ids: Annotated[
-            list[str],
+            list[str] | None,
             Field(
-                min_length=1,
                 description=(
-                    "要下载的当前进程内 resource_id 列表；调用返回 download job_id。"
+                    "用户已经明确选中的当前进程内 resource_id 列表。选择批量结果中的部分资源时，"
+                    "先用 resource_batch_read 获取这些候选的 resource_id。与 batch_job_id 二选一。"
                     "一个 resource_id 可能自然产生一个或多个真实文件。"
                 ),
             ),
-        ],
+        ] = None,
+        batch_job_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "仅当用户明确选择一个已完整 succeeded 的 batch_collect 结果中的全部资源时传入；"
+                    "MCP 会把该 results.jsonl 作为下载来源，无需 Agent 分页搬运所有 URL。"
+                    "批量枚举完成本身不等于用户选择了全部。与 resource_ids 二选一。"
+                )
+            ),
+        ] = "",
         preferred_container: Annotated[
             str,
             Field(
@@ -233,8 +246,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     ) -> dict[str, Any]:
         return _call(
             lambda: resource_service.download(
-                resource_ids, preferred_container=preferred_container
-            )
+                resource_ids,
+                batch_job_id=batch_job_id,
+                preferred_container=preferred_container,
+            ),
+            batch_job_id=batch_job_id,
         )
 
     @server.tool(structured_output=True)
@@ -266,7 +282,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(
                 description=(
                     "creator_full=完整枚举创作者；time_range_search=Bilibili 日期范围搜索；"
-                    "catalog_expand=SmartEdu 教材规格展开。"
+                    "catalog_expand=SmartEdu 教材规格展开。只负责候选完整枚举，不自动下载。"
                 )
             ),
         ] = "creator_full",
@@ -324,8 +340,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(
                 ge=1,
                 description=(
-                    "本页读取条数，默认 20，单页最多返回 50；"
-                    "分页大小不截断磁盘上的完整结果集。"
+                    "本页读取条数，默认 20，单页最多返回 50；分页大小不截断磁盘上的完整结果集。"
+                    "每个返回候选会获得当前进程内 resource_id，供用户选择其中一部分后直接下载。"
                 ),
             ),
         ] = 20,

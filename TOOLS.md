@@ -45,6 +45,33 @@ MCP 的资源级能力允许：
 
 不要因为输入 URL 本身是 landing webpage 就判断“该资源不能下载”，也不要为了让它可下载而自行补 `mp4` / `pdf`。只有用户明确要求某个具体格式时才传 `preferred_container`；指定格式必须真实存在，不能找不到后静默退回其他格式。
 
+## 用户选择与 Batch 下载
+
+Batch 是完整枚举能力，不是下载授权。`resource_batch_collect` 成功只说明候选集合已经收集完成；在用户明确选择“全部”或其中一部分之前，不调用下载副作用。
+
+用户选择部分 Batch 候选时：
+
+```text
+resource_batch_read(...)
+  -> 每个本页候选附带当前进程 resource_id
+  -> 用户明确选择其中若干
+  -> resource_download(resource_ids=[...])
+```
+
+只需要读取足以确定用户所选对象的页，不为了下载几项而把整个结果集搬进上下文。
+
+用户明确说“全部”“整套都下载”等，且对应 Batch 已完整 `succeeded` 时：
+
+```text
+resource_download(batch_job_id="...")
+```
+
+MCP 会从该 Batch 的完整 `results.jsonl` 恢复资源事实并复用现有多 Resource Download Job。Agent 不需要逐页读取全部 URL，也不需要逐个 Import/Download。
+
+`resource_ids` 与 `batch_job_id` 二选一。`partial` / `failed` / `cancelled` Batch 不能通过 `batch_job_id` 冒充“全部”；如果用户只想获取其中已经看到的资源，应按那些候选的 `resource_id` 下载。
+
+这个能力只是减少后台机械循环，不把用户选择搬进 MCP，也不恢复 Selection / Confirm / Plan 状态。
+
 ## Session 是辅助能力，不是前置流程
 
 当前 Session Tool 与资源 Tool 由同一个 MCP 暴露：
