@@ -88,7 +88,7 @@ unknown             -> generic
 
 ### Decision 003 — Web 不做 benchmark-first，直接采用 Trafilatura
 
-原计划准备先建设完整 extractor benchmark。当前改为：
+当前生产路径：
 
 ```text
 BoundedWebFetcher
@@ -117,15 +117,15 @@ BoundedWebFetcher
 - [x] 浏览器宽捕获先按平台规则筛选，再保存 canonical session。
 - [x] 保留原子写入和 Windows DPAPI。
 - [x] 不再对完整 capture 做先于平台筛选的总字节门禁。
-- [ ] 真实 Windows 捕获/保存仍需 OpenClaw 复测。
+- [ ] 真实 Windows 浏览器捕获 / 保存 / 重试仍需 OpenClaw 复测。
 
 ### AC-03 — Host Web URL → 专门平台
 
 - [x] Import 不再无条件 `platform="generic"`。
 - [x] 已加入 Bilibili / Zhihu / SmartEdu 明确 URL 路由。
 - [x] 未知 URL 保持 `generic`。
-- [x] 没有新增 Registry/Resolver framework。
-- [ ] 真实 Host Web → Import → Download 仍需 OpenClaw 复测。
+- [x] 没有新增 Registry / Resolver framework。
+- [ ] 真实 Host Web → Import → 专门 Inspector / Downloader → 文件仍需 OpenClaw 复测。
 
 ### AC-04 — Web Resource
 
@@ -135,28 +135,31 @@ BoundedWebFetcher
 - [x] 删除生产路径自研 `web_blocks.py`。
 - [x] 不接 Monolith / SingleFile / ArchiveBox。
 - [x] 网络响应超出真实 fetch 上限时显式失败，不静默裁剪。
-- [ ] 真实网页人工检查仍需本机复测。
+- [ ] 真实网页产物仍需本机人工检查。
 
 ### AC-05 — active 文档
 
-- [x] `CURRENT_ARCHITECTURE.md` 改为一个 MCP。
-- [x] `TOOLS.md` 改为 14 Tool 和嵌入 Session。
+- [x] `CURRENT_ARCHITECTURE.md` 描述一个 MCP。
+- [x] `TOOLS.md` 描述 14 Tool 和嵌入 Session。
 - [x] 根 `README.md` / MCP README / `DEVELOPMENT_PLAN.md` 已同步。
 - [x] `AGENTS.md` 不再把 standalone session-manager 当 active 组件。
 - [x] 0029 / 0041 已从 active plans 移入 archive。
+- [x] 0051 / 0052 / 0054 / 0056 / 0057 / 0059 已移入 archive；历史原文保留，剩余真实验收统一转交 0028。
+- [x] 顶层 `.agent/plans/` 只保留本计划、0028 和计划管理 README。
 
 ### AC-06 — 真实 OpenClaw 闭环
 
-仍需用户本机实际完成：
+仍需用户本机实际完成，详细队列以 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) 为单一验收入口：
 
 1. Host Web 找到已接入平台 URL → Import → 专门 Inspector/Downloader → 文件；
-2. SmartEdu 已保存 session 环境下公共 Search 仍匿名；
+2. SmartEdu 已保存 session 环境下公共 Search 仍匿名，并能区分真实 AUTH_REQUIRED 与 IP/网络出口限制；
 3. Anna/Libgen 不触发登录；
 4. 一个真实 `AUTH_REQUIRED` 平台 → 用户浏览器登录/捕获 → `resource_session_save` → 重试；
-5. 一个 Generic Web 页面得到 `source.html + index.html + content.md` 并人工检查；
-6. 一个此前易 compaction 的 Douyin 长任务完整完成或暴露具体剩余失败。
+5. 一个 Generic Web 页面得到 source snapshot + readable views 并人工检查；
+6. 一个此前易 compaction 的 Douyin 长任务完整完成或暴露具体剩余失败；
+7. Windows gateway restart 下 Job durability 得到真实结论。
 
-后端测试不能替代以上六项。
+后端测试不能替代以上用户链。
 
 ## Milestones
 
@@ -167,30 +170,40 @@ BoundedWebFetcher
 - [x] M4 — Trafilatura 直接接入，取消 benchmark-first
 - [x] M5 — `source.html` 与可读表示分离
 - [x] M6 — active 文档/计划收敛
-- [ ] in_progress：M7 — 静态/子系统验证 + 真实 OpenClaw 用户验收
+- [ ] in_progress：M7 — 后端验证已完成；等待 0028 的真实 Windows/OpenClaw 用户验收
 
 ## Validation
 
-### 已完成的事实核对
+### 已完成的后端验证
 
-- 已复核 Trafilatura 官方 `extract()` API，确认支持 HTML/Markdown 输出和 `include_tables/include_images/include_links` 参数。
-- 已按当前树删除 standalone session-manager、bridge 和旧生产 `web_blocks.py`。
-- 已增加针对 Session 先筛选、Import 平台路由、Web source snapshot 的 focused regression tests。
+当前 release-ready 基线提交：`8ce531274edbec482e913b73dd33313283c322b1`。
 
-### 尚未完成
+| Validation | Result | What it proves | What it does NOT prove |
+| --- | --- | --- | --- |
+| compileall | passed | Python 源码、测试和脚本可编译 | 真实平台行为 |
+| full pytest | 205 passed | 当前 MCP 后端回归基线 | Windows/OpenClaw/真实平台 |
+| runtime verifier | passed（0.4.0） | 安装元数据和运行依赖一致 | 用户环境 |
+| MCP stdio probe | passed（14 Tools） | MCP 能启动并暴露当前公共 Tool 面 | 真实调用成功 |
+| Markdown links / diff check | passed | 当时 active 文档和补丁结构 | 后续真实用户链 |
 
-当前执行环境无法直接安装/运行该仓库的 Python 依赖，也无法连接用户 Windows OpenClaw，因此：
+这取代历史计划里“51 个既有失败”“7 Tool / 9 Tool”等阶段性基线；那些数字只保留在 archive 作为实施历史。
 
-- focused pytest 尚未实际执行；
-- MCP stdio probe 尚未实际执行；
-- 真实 Windows DPAPI/login capture 尚未实际执行；
-- 真实平台/OpenClaw E2E 尚未实际执行。
+### 尚未完成的真实验证
 
-在这些验证实际完成前，不把本计划标记为 completed。
+- Windows DPAPI / browser login capture；
+- Host Web → Import → 专门平台真实下载；
+- SmartEdu 当前网络出口下的 detail/media 获取，尤其 IP/平台策略失败定位；
+- Anna/Libgen 匿名真实下载；
+- Generic Web 真实产物人工检查；
+- Douyin 长任务 / creator browse compaction 复测；
+- Windows gateway restart 下 detached Job 行为。
+
+这些由 0028 统一记录。在完成前本计划保持 `in_progress`。
 
 ## Remaining risks
 
-1. Trafilatura 不同输出格式对链接/图片结构的可见程度可能不同；硬保证是原始 `source.html` 保留，而不是宣称每个衍生格式必然保留所有 DOM 语义。
-2. 旧 standalone session 加密记录不做双读，升级后可能需要一次重新登录/捕获。
-3. 当前 URL 平台识别故意只覆盖有明确证据的代表性 URL；后续只能根据真实遗漏逐个补，不扩成猜测型通用识别器。
-4. Python focused tests 尚未实际运行，必须在可安装依赖的环境补上。
+1. SmartEdu 的公开搜索、详情接口和媒体 CDN具有不同访问边界；用户环境出现的 IP/网络出口限制必须按真实失败阶段判断，不能统一解释为登录问题。
+2. Trafilatura 不同输出格式对链接/图片结构的可见程度可能不同；硬保证是原始 `source.html` 保留，而不是宣称每个衍生格式必然保留所有 DOM 语义。
+3. 旧 standalone session 加密记录不做双读，升级后可能需要一次重新登录/捕获。
+4. 当前 URL 平台识别故意只覆盖有明确证据的代表性 URL；后续只能根据真实遗漏逐个补，不扩成猜测型通用识别器。
+5. 后端 205 tests 和 stdio probe 已通过，但真实 OpenClaw/平台可靠性仍以 0028 的用户证据为准。

@@ -1,30 +1,40 @@
 # 已归档计划
 
-本目录保存已经完成、被替代或仅用于历史交接/证据追溯的计划文件。归档不表示可以把未完成工作伪装为已完成。
+本目录保存已经完成、被替代或只用于历史交接/证据追溯的计划文件。归档不表示可以把未完成工作伪装为已完成；对于实现已结束但仍需真实用户验收的历史计划，剩余验收会明确转交当前 active 计划。
 
 ## 阅读规则
 
-- 顶层 `.agent/plans/` 只放当前仍需跟踪的 `in_progress`、`blocked` 和 `pending` 计划；已完成或已被替代的计划移入本目录。
-- `archive/` 不是默认必读目录。正常接手任务先看顶层当前计划，只有追溯历史决策、验证证据、迁移边界或回滚信息时再进入本目录。
-- 计划的唯一标识是完整文件名（含数字前缀和主题 slug），不能只使用数字前缀。
-- 计划移动或重命名后，所有 Markdown 链接应指向新路径。
+- 顶层 `.agent/plans/` 只放当前仍需直接跟踪的 `in_progress`、`blocked` 和 `pending` 计划。
+- `archive/` 不是默认必读目录。正常接手任务先看顶层当前计划，只有追溯历史决策、平台事实、验证证据、迁移边界或回滚信息时再进入本目录。
+- 计划的唯一标识是完整文件名（含数字前缀和主题 slug）。
+- 历史计划中的架构术语以其创建时为准；与当前代码/`CURRENT_ARCHITECTURE.md` 冲突时，不得用历史计划覆盖当前事实。
 
 ## 当前顶层计划
 
-- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — in_progress，真实 OpenClaw/平台验收
-- [0051-yixi-video-acquisition.md](../0051-yixi-video-acquisition.md) — in_progress，一席真实视频获取闭环
-- [0052-zjer-course-video-acquisition.md](../0052-zjer-course-video-acquisition.md) — in_progress，之江汇 experimental 课程视频获取链
-- [0054-douyin-creator-id-exposure.md](../0054-douyin-creator-id-exposure.md) — in_progress，抖音 creator_id 与 browse_creator 验收
-- [0056-download-job-subprocess-durability.md](../0056-download-job-subprocess-durability.md) — in_progress，下载 Job 子进程/文件状态验收
-- [0057-native-batch-capability-parity.md](../0057-native-batch-capability-parity.md) — in_progress，批量能力原生化验收
-- [0058-system-convergence-and-resource-fidelity.md](../0058-system-convergence-and-resource-fidelity.md) — in_progress，Session 合并、Import 接通、Trafilatura Web Resource 与最终 E2E
+当前只保留两份直接执行计划：
 
-## 本轮新增归档
+- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — `in_progress`，统一承接真实 Windows OpenClaw、平台、Session、Job、Batch 用户验收；
+- [0058-system-convergence-and-resource-fidelity.md](../0058-system-convergence-and-resource-fidelity.md) — `in_progress`，系统收敛的最后 M7，最终由 0028 的真实用户证据完成验收。
+
+## 2026-08-19 active 面收敛
+
+以下计划从顶层移入归档。原文件内容保持不变，便于追溯当时实现和证据；其中出现的 `Prepare / Confirm / Start / Asset`、独立 session-manager、旧 Tool 数量或旧 pytest 基线均属于历史语境，不再是当前运行架构。
+
+| 文件 | 原状态 | 归档说明 / 剩余事项 |
+| --- | --- | --- |
+| [0051-yixi-video-acquisition.md](0051-yixi-video-acquisition.md) | in_progress | Yixi 工程实现历史；旧 Prepare/Start/Asset 获取链已失效。剩余 `speech_id=1435` 真实 OpenClaw MP4 验收转交 0028 |
+| [0052-zjer-course-video-acquisition.md](0052-zjer-course-video-acquisition.md) | in_progress | Zjer experimental 课程视频实现历史；旧确认/Start/Asset 与 broad Registry 收口要求不再作为当前架构门槛。剩余 `courseCateId=34941` 用户链转交 0028 |
+| [0054-douyin-creator-id-exposure.md](0054-douyin-creator-id-exposure.md) | in_progress | `creator_sec_uid` 实现、聚焦测试、部署 probe 与底层真实调用已有证据；剩余 OpenClaw creator/compaction 复测统一转交 0028 |
+| [0056-download-job-subprocess-durability.md](0056-download-job-subprocess-durability.md) | in_progress | detached worker / file-backed Job 实现和进程级验证历史；旧“51 failures 基线”已被最新 205 tests 全过取代。剩余 Windows gateway restart 验收转交 0028 |
+| [0057-native-batch-capability-parity.md](0057-native-batch-capability-parity.md) | in_progress | Batch、SmartEdu tabs/catalog、Bilibili time range 等原生化实现历史；旧 9 Tool、独立 session-manager 复用和 51 failures 等描述只作历史。代表性真实 Batch 用户链转交 0028 |
+| [0059-post-convergence-review-fixes.md](0059-post-convergence-review-fixes.md) | completed | release-ready 收尾已完成：205 tests、compileall、runtime verifier、14 Tool stdio probe；按计划管理规范归档 |
+
+## 0058 已替代的计划
 
 | 文件 | 原状态 | 归档说明 |
 | --- | --- | --- |
 | [0029-retrieval-benchmark-release-gate.md](0029-retrieval-benchmark-release-gate.md) | pending | 语义检索 benchmark 思路保留为历史参考；不再作为 active release gate，后续质量判断以真实 OpenClaw 与 `learning-resource-flow` 当前语义规则为准 |
-| [0041-web-content-extraction-benchmark.md](0041-web-content-extraction-benchmark.md) | pending | benchmark-first 路线被 0058 直接采用 Trafilatura 的最小方案替代 |
+| [0041-web-content-extraction-benchmark.md](0041-web-content-extraction-benchmark.md) | pending | benchmark-first 路线被 0058 的 raw source + Trafilatura 最小方案替代 |
 
 ## 历史归档索引
 

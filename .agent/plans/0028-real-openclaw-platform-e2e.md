@@ -2,28 +2,44 @@
 
 - 状态：in_progress
 - 创建日期：2026-08-08
-- 更新日期：2026-08-16
-- 负责人：用户执行真实 Windows OpenClaw 测试；Coding Agent 根据真实失败修代码
+- 更新日期：2026-08-19
+- 负责人：用户执行真实 Windows OpenClaw 测试；Coding Agent 只根据真实失败修具体能力
 
 ## Objective
 
-验证当前**薄 MCP**在 OpenClaw 中能否稳定完成真实资源任务，而不是验证旧 Flow/Contract 状态机。
+验证当前 `learning-resource-flow + education-resources MCP` 能否在 Windows OpenClaw 中稳定完成真实资源任务。
 
-fixture、单元测试、Provider 类存在都不能替代真实用户闭环。
+本计划只跟踪**真实 Agent / 用户链路**。平台实现历史、局部单测、fixture、stdio 能启动、Provider 存在都不能替代这里的验收。
+
+## 当前后端基线
+
+当前 release-ready 基线为：
+
+```text
+commit: 8ce531274edbec482e913b73dd33313283c322b1
+MCP: education-resources 0.4.0
+Tool surface: 14 tools
+full pytest: 205 passed
+compileall: passed
+runtime verifier: passed
+MCP stdio probe: passed
+```
+
+这些证据证明当前后端与 Tool 表面可运行，但**不证明真实 OpenClaw、真实平台登录、真实网络出口或真实下载可用**。
 
 ## 当前真实链路
 
 ```text
 自然语言需求
-  -> resource_search / resource_browse_creator
+  -> resource_search / Host Web Search / resource_browse_creator
   -> Agent 判断候选
-  -> 可选 resource_inspect / 补搜
-  -> Agent 在对话中展示
+  -> 必要时 resource_import_url / resource_inspect / 补搜
   -> 用户选择
   -> 用户明确要求下载
   -> resource_download
   -> resource_job_status
-  -> files / failures
+  -> real files / failures
+  -> 可选 resource_archive
 ```
 
 没有：
@@ -36,19 +52,95 @@ Selection
 Prepare
 confirmation token
 Start
-Asset/Archive 状态链
+Asset / Outcome 状态链
 ```
 
-## 重点观察
+`resource_id` 只是进程内临时句柄；Download / Batch 的 `job_id` 才是文件型运行状态。
 
-当前最重要的问题来自 2026-08-16 的真实使用：OpenClaw 在一个任务中频繁 compaction/中断，无法完成完整工作。
+## 当前真实验收队列
 
-因此每次测试优先记录：
+按实际使用需要选择，不要求固定顺序。
+
+### 1. Host Web -> 已接入平台
+
+验证 Host Web 找到 Bilibili / Zhihu / SmartEdu 等明确 URL 后：
+
+```text
+Host Web Search
+-> resource_import_url
+-> 正确平台身份
+-> 对应 Inspector / Downloader
+```
+
+不能再次全部落成 `generic`。
+
+### 2. SmartEdu
+
+分别记录三个边界：
+
+- 公共 Search / Catalog 在已保存 session 环境下仍应匿名；
+- 具体 Detail / Download 如果真实需要登录，才进入 Session；
+- 如果出现 IP / 网络出口限制，记录失败发生在 detail、media URL、m3u8、segment、key 哪一级，不把它误报成“补 token 即可”。
+
+当前视频/PDF/音频实现存在不等于当前网络出口可用。
+
+### 3. Anna / Libgen
+
+匿名镜像链不得触发 Anna 会员登录；验证搜索、Inspect、下载最终文件。
+
+### 4. AUTH_REQUIRED -> Session
+
+找一个真实需要登录的平台，验证：
+
+```text
+真实资源能力返回 AUTH_REQUIRED
+-> 用户浏览器登录
+-> resource_session_save
+-> 重试原资源能力
+```
+
+Session Tool 不是 Search / Download 的固定前置步骤。
+
+### 5. Generic Web
+
+验证普通网页最终真实得到：
+
+```text
+source.html
+index.html
+content.md
+metadata.json
+webbundle.zip
+```
+
+人工检查 source snapshot 与 Trafilatura 可读表示；正文抽取失败不能删除已经取得的 source HTML。
+
+### 6. Douyin creator 长任务
+
+复测“停云小阁”场景：搜索/Inspect 直接得到 `creator_sec_uid`，再进入 `resource_browse_creator` 或批量枚举。Agent 不应再为了找 creator_id 读取大型源码/旧 Contract 并触发 compaction。
+
+### 7. Yixi
+
+使用历史真实样本 `speech_id=1435`《教育就是生长》，验证公开 MP4 从候选走到实际文件。0051 的实现历史已归档，不再使用其中的 Prepare / Start / Asset 术语。
+
+### 8. Zjer
+
+使用 `courseCateId=34941` 验证 experimental 课程视频：稳定课程/课时身份 -> fresh Inspect -> 下载时刷新临时签名 URL -> 实际 MP4 文件。普通关键词搜索在原生接口未确认前继续如实 `FEATURE_NOT_SUPPORTED`。
+
+### 9. Job durability
+
+在真实 Windows 计划任务网关环境验证：下载进行中执行实际 `sync-to-openclaw.ps1` / gateway restart 后，文件型 Job 状态仍诚实可读；worker 存活则继续，真实中断则显示 `interrupted`，不得伪造成功。
+
+### 10. Batch
+
+批量能力的实现历史已经归档；这里只验证真实用户链需要的代表场景，例如 Bilibili creator/time-range、SmartEdu catalog expand。全量结果必须留在 `results.jsonl`，对话只分页读取；损坏 JSONL 必须显式失败。
+
+## 每次测试最少记录
 
 ```text
 User request:
-Platform:
-Search completed: yes/no
+Platform / route:
+Search or discovery completed: yes/no
 Inspect needed/completed: yes/no
 Download requested: yes/no
 Job terminal status:
@@ -56,64 +148,43 @@ Actual files:
 Compaction happened: yes/no
 Task interrupted: yes/no
 Observed error:
+Failure stage (if known):
 ```
 
-不要为了记录完整而要求用户提供内部 ID、digest、Plan、Outcome 等已删除状态。
+不要为了记录完整而要求用户提供 digest、Plan、Outcome 等已删除状态。
 
-## 当前平台队列
+## 必须保持的边界
 
-按用户想测的资源直接选平台，不要求固定顺序：
+- Agent 只有在用户已经明确表达下载意图时调用 `resource_download`；
+- 不制造 Prepare / confirmation token / Start；
+- 下载内部 fresh Inspect，并使用当前 exact Provider；
+- Provider 失败返回真实失败，不 silent fallback 到不等价来源；
+- `AUTH_REQUIRED`、网络阻断、平台风控、内容变化和文件校验失败必须区分；
+- 没有真实文件不得报告成功；
+- 平台真实问题优先修 Adapter / Inspector / Downloader，不增加通用状态机掩盖问题。
 
-1. **Douyin**：重点复测“搜索停云小阁 → 获取 creator_id → Browse Creator 全部视频”，观察上下文是否还会因为 Tool Result/源码恢复而爆炸；需要登录时真实返回认证问题。
-2. **Bilibili**：搜索/Inspect/DASH 下载/ffmpeg 合并。
-3. **SmartEdu**：PDF、MP4、MP3/M4A。
-4. **Ximalaya**：具体 track 下载，不把 album 静默换成第一首。
-5. **Shuge**：公开文档搜索与直接下载。
-6. **Yixi**：可继续使用 `speech_id=1435`《教育就是生长》样本验证公开 MP4。
-7. **Zjer**：可继续使用 `courseCateId=34941` 验证 experimental 课程视频。
-8. **Anna's Archive**：复测此前元数据 Inspect 修复后的真实电子书链。
-9. **Generic Web**：单独验证网页搜索、Inspect 和 HTML 保存质量。
+## 历史计划接管
 
-## 必须保持的真实边界
+以下实现计划已移入 `archive/`，剩余真实用户验收统一由本计划接管：
 
-- Agent 只有在用户已经明确说要下载时才调用 `resource_download`；
-- 不再为了确认再创建后端 Plan/token；
-- 下载前 Service fresh Inspect；
-- 选中的实际 Downloader 失败时返回真实失败，不 silent fallback；
-- AUTH_REQUIRED / unavailable / policy blocked 如实返回；
-- 没有真实文件不得报告成功。
+- `0051-yixi-video-acquisition.md` -> Yixi 1435；
+- `0052-zjer-course-video-acquisition.md` -> Zjer 34941；
+- `0054-douyin-creator-id-exposure.md` -> Douyin creator / compaction；
+- `0056-download-job-subprocess-durability.md` -> Windows gateway restart；
+- `0057-native-batch-capability-parity.md` -> 代表性 Batch 用户链；
+- `0059-post-convergence-review-fixes.md` 已完成，只作为 release-ready 后端验证历史。
 
-## Coding Agent 工作方式
-
-- 不代替用户做 OpenClaw 用户验收；
-- 不主动重启用户 Windows gateway；
-- 不为每次失败先加新架构或新状态；
-- 优先根据真实失败定位搜索脚本、Inspector 或 Downloader；
-- 一个小修只跑相关测试；
-- 不让已删除的旧 Contract/Flow 测试迫使实现恢复旧架构。
-
-## 已知真实事故
-
-### Douyin 登录与上下文爆炸
-
-2026-08-15 曾出现两类问题：
-
-1. Agent 错用 page `document.cookie`，拿不到 httpOnly Cookie；随后又把大 Cookie 对象经模型转述，导致输出截断。后续确认 OpenClaw 原生 browser cookies 本身能通过 Playwright context 获取完整 Cookie，自建 CDP 方案已撤销。
-2. “拉取停云小阁全部视频清单”时缺 creator_id 来源，Agent 转而读多个大型源码/Contract，输入上下文被推高并触发 compaction。0054 已让真实搜索/Inspect 返回 creator handle。
-
-本轮 MCP 简化进一步删除了 Flow/Contract/Registry 状态体系，目标之一就是避免 Agent 为恢复内部协议再去读源码。
-
-### Anna's Archive Inspect
-
-2026-08-14 Search 能返回候选，但 Inspector 误访问合成 Anna 详情页并将 403 判为 AUTH_REQUIRED。0049 已改成合法 MD5 元数据 Inspect；仍需真实复测下载。
-
-更详细的历史定位保留在 Git 历史和 `.agent/plans/archive/`，本计划不复制整套旧架构说明。
+旧计划中的 Prepare / Confirm / Start / Asset、独立 session-manager、旧测试基线等文字仅代表当时历史，不再是当前架构依据。
 
 ## Completion criteria
 
-至少完成以下两件事：
+本计划至少满足：
 
-1. 一个真实平台在 Windows OpenClaw 中从自然语言搜索走到实际下载文件；
-2. 一个此前容易中断的较长任务（优先 Douyin creator browse 场景）能完成，或能明确定位剩余中断来自哪里。
+1. 一个真实平台在 Windows OpenClaw 中从自然语言需求走到实际下载文件；
+2. Host Web -> 已接入平台 URL -> Import -> 专门能力真实通过一次；
+3. Generic Web 真实生成 source snapshot + readable views 并人工检查；
+4. 一个此前易 compaction 的长任务完整完成，或剩余中断已定位到具体能力/平台；
+5. Windows gateway restart 下 Job durability 得到真实结论；
+6. 登录相关测试能区分真实 `AUTH_REQUIRED` 与 IP/网络出口/平台策略问题。
 
-如果仍然失败，下一步根据实际 Search/Inspect/Download 错误修具体能力，不再恢复通用工作流状态机。
+如果失败，只根据实际 Search / Inspect / Download / Job 错误修具体能力，不恢复通用工作流状态机。
