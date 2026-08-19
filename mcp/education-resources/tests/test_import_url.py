@@ -84,6 +84,24 @@ class ImportUrlTests(unittest.TestCase):
                 self.assertEqual(expected, resource["platform"])
                 self.assertEqual(expected, self.seen[-1])
 
+    def test_import_backfills_resolved_resource_type(self) -> None:
+        # 导入默认 resource_type 是"网页"（article），不回填检查结果的话
+        # 下载路由永远匹配不到平台下载器。
+        result = self.service.import_url(
+            "https://www.bilibili.com/video/BV1xx411c7mD"
+        )
+        resource = self.service._get_resource(result["resource_id"])
+        self.assertEqual("video", resource["resource_type"])
+        self.assertEqual("bilibili imported resource", resource["title"])
+
+        smart = self.service.import_url(
+            "https://basic.smartedu.cn/tchMaterial/detail?contentId=abc"
+        )
+        # probe 对 smartedu 返回 article，按解析结果回填而不是停留在"网页"
+        self.assertEqual(
+            "article", self.service._get_resource(smart["resource_id"])["resource_type"]
+        )
+
     def test_invalid_url_rejected_loudly(self) -> None:
         for bad in ("", "not-a-url", "ftp://example.org/x", "javascript:alert(1)"):
             with self.assertRaises(DomainError) as ctx:

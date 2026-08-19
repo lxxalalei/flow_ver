@@ -40,6 +40,8 @@ def public_item(resource: dict[str, Any]) -> dict[str, Any]:
         "resource_type": resource.get("resource_type"),
         "url": resource.get("source_url"),
     }
+    if resource.get("summary") not in (None, ""):
+        item["summary"] = resource["summary"]
     for key in ("author", "published_at", "language", "download_feasibility"):
         if isinstance(metadata, dict) and metadata.get(key) not in (None, ""):
             item[key] = metadata[key]

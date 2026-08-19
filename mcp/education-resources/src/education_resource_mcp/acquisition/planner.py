@@ -74,7 +74,7 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ProviderSpec(
         "smartedu", "primary_resource", "video", "primary",
         AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
-        frozenset({"mp4"}), frozenset({"course", "video"}),
+        frozenset({"mp4", "m3u8"}), frozenset({"course", "video"}),
     ),
     ProviderSpec(
         "smartedu", "primary_resource", "audio", "primary",

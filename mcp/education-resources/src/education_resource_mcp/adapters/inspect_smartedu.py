@@ -179,6 +179,10 @@ class SmartEduInspector(_PlatformWebInspector):
         if resource_format == "mp4":
             kind = "video"
             container = resource_format
+        elif resource_format == "m3u8":
+            # HLS 流的交付物是经 ffmpeg 无损封装的 MP4。
+            kind = "video"
+            container = resource_format
         elif resource_format in {"mp3", "m4a"}:
             kind = "audio"
             container = resource_format
@@ -187,7 +191,8 @@ class SmartEduInspector(_PlatformWebInspector):
             container = resource_format
         else:
             return None
-        return kind, container, _MIME_TYPES.get(resource_format)
+        mime = "video/mp4" if resource_format == "m3u8" else _MIME_TYPES.get(resource_format)
+        return kind, container, mime
 
     def _primary_representation(
         self,

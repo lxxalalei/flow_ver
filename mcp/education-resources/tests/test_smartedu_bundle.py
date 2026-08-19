@@ -8,12 +8,14 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from urllib.error import HTTPError
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from education_resource_mcp.adapters import smartedu_download as sd
 from education_resource_mcp.adapters.smartedu_download import (
     SmartEduDownloader,
     _SmartEduHttpClient,
@@ -215,6 +217,46 @@ def _valid_bytes(fmt: str) -> bytes:
     }[fmt]
 
 
+_HLS_PLAIN = (
+    b"#EXTM3U\n"
+    b"#EXT-X-VERSION:3\n"
+    b"#EXTINF:4.0,\n"
+    b"seg0.ts\n"
+    b"#EXTINF:4.0,\n"
+    b"seg1.ts\n"
+    b"#EXT-X-ENDLIST\n"
+)
+
+_AES_KEY = bytes(range(16))
+_AES_IV = bytes.fromhex("00000000000000000000000000000001")
+_AES_PLAIN = b"0123456789abcdef" * 4
+_HLS_AES = (
+    b"#EXTM3U\n"
+    b"#EXT-X-KEY:METHOD=AES-128,URI=\"secret.key\",IV=0x00000000000000000000000000000001\n"
+    b"#EXTINF:4.0,\n"
+    b"seg0.ts\n"
+    b"#EXTINF:4.0,\n"
+    b"seg1.ts\n"
+    b"#EXT-X-ENDLIST\n"
+)
+
+
+class _FakeFfmpegResult:
+    returncode = 0
+    stderr = b""
+
+
+def _fake_ffmpeg_capture(captured: dict) -> "type":
+    """subprocess.run stub: record the remux input, write a valid MP4."""
+
+    def run(cmd, **_kwargs):  # type: ignore[no-untyped-def]
+        captured["ts"] = Path(cmd[5]).read_bytes()
+        Path(cmd[-1]).write_bytes(_valid_bytes("mp4"))
+        return _FakeFfmpegResult()
+
+    return run  # type: ignore[return-value]
+
+
 def _batch_parts(value: object) -> tuple[list[DownloadResult], list[object]]:
     if isinstance(value, DownloadBatchResult):
         return list(value.results), list(value.failures)
@@ -243,6 +285,7 @@ class SmartEduBundleTests(unittest.TestCase):
         failure_formats: set[str] | None = None,
         cancel_on_format: str | None = None,
         cancel_event: threading.Event | None = None,
+        extra_bodies: dict[str, bytes] | None = None,
     ) -> tuple[object, _Transport]:
         invalid_formats = invalid_formats or set()
         failure_formats = failure_formats or set()
@@ -266,7 +309,14 @@ class SmartEduBundleTests(unittest.TestCase):
                     "upstream failed at https://evil.test/private?token=secret-token",
                     retryable=True,
                 )
-            body = b"<html>login</html>" if suffix in invalid_formats else _valid_bytes(suffix)
+            if suffix in invalid_formats:
+                body = b"<html>login</html>"
+            else:
+                # 注意不能写成 .get(suffix, _valid_bytes(suffix))：默认值会被
+                # 无条件求值，未知后缀直接 KeyError。
+                body = (extra_bodies or {}).get(suffix)
+                if body is None:
+                    body = _valid_bytes(suffix)
             return _Response(body, url=url)
 
         transport = _Transport(handler)
@@ -318,6 +368,62 @@ class SmartEduBundleTests(unittest.TestCase):
                 planned_container="mp4",
             )
         self.assertEqual("CONTENT_VALIDATION_FAILED", context.exception.code)
+        self.assertFalse((self.settings.jobs_dir / "job-1").exists())
+
+    def test_course_m3u8_primary_materializes_mp4(self) -> None:
+        captured: dict = {}
+        with mock.patch.object(sd.shutil, "which", return_value="ffmpeg"), \
+                mock.patch.object(
+                    sd.subprocess, "run", side_effect=_fake_ffmpeg_capture(captured)
+                ):
+            raw, transport = self._download(
+                _course_detail(include_mp4=False),
+                planned_container="m3u8",
+                extra_bodies={"m3u8": _HLS_PLAIN, "ts": b"TSSEGMENT0PAYLOAD"},
+            )
+        results, failures = _batch_parts(raw)
+
+        self.assertEqual([], failures)
+        self.assertEqual(["primary", "attachment", "companion"], [item.role for item in results])
+        self.assertEqual([True, False, False], [item.required for item in results])
+        self.assertEqual("video/mp4", results[0].media_type)
+        self.assertTrue(results[0].filename.endswith(".mp4"))
+        requested = [request.full_url for request, _timeout in transport.requests]
+        self.assertTrue(any(".m3u8" in url for url in requested))
+        self.assertEqual(2, sum(".ts" in url for url in requested))
+        self.assertEqual(b"TSSEGMENT0PAYLOAD" * 2, captured["ts"])
+
+    def test_course_m3u8_aes128_segments_are_decrypted(self) -> None:
+        from Crypto.Cipher import AES
+
+        cipher = AES.new(_AES_KEY, AES.MODE_CBC, _AES_IV)
+        encrypted = cipher.encrypt(_AES_PLAIN + bytes([16]) * 16)
+        captured: dict = {}
+        with mock.patch.object(sd.shutil, "which", return_value="ffmpeg"), \
+                mock.patch.object(
+                    sd.subprocess, "run", side_effect=_fake_ffmpeg_capture(captured)
+                ):
+            raw, _transport = self._download(
+                _course_detail(include_mp4=False),
+                planned_container="m3u8",
+                extra_bodies={"m3u8": _HLS_AES, "ts": encrypted, "key": _AES_KEY},
+            )
+        results, failures = _batch_parts(raw)
+
+        self.assertEqual([], failures)
+        self.assertEqual("video/mp4", results[0].media_type)
+        self.assertEqual(_AES_PLAIN * 2, captured["ts"])
+
+    def test_course_m3u8_without_ffmpeg_fails_fast(self) -> None:
+        with mock.patch.object(sd.shutil, "which", return_value=None):
+            with self.assertRaises(DomainError) as context:
+                self._download(
+                    _course_detail(include_mp4=False),
+                    planned_container="m3u8",
+                    extra_bodies={"m3u8": _HLS_PLAIN, "ts": b"TSSEGMENT0PAYLOAD"},
+                )
+        self.assertEqual("DOWNLOAD_FAILED", context.exception.code)
+        self.assertIn("ffmpeg", context.exception.message)
         self.assertFalse((self.settings.jobs_dir / "job-1").exists())
 
     def test_companion_failure_is_partial_and_redacted(self) -> None:
@@ -456,6 +562,53 @@ class SmartEduHttpSecurityTests(unittest.TestCase):
                 timeout=1,
             )
         self.assertEqual("REDIRECT_BLOCKED", context.exception.code)
+
+
+class SmartEduHlsRoutingTests(unittest.TestCase):
+    def test_inspector_maps_m3u8_to_video_representation(self) -> None:
+        from education_resource_mcp.adapters.inspect_smartedu import SmartEduInspector
+
+        shape = SmartEduInspector._representation_shape({"format": "m3u8"})
+        self.assertEqual(("video", "m3u8", "video/mp4"), shape)
+
+    def test_m3u8_representation_routes_to_smartedu_provider(self) -> None:
+        from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
+        from education_resource_mcp.acquisition.models import AcquisitionStrategy
+        from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+
+        router = AcquisitionRouter(
+            (
+                ProviderRegistration(
+                    provider_id="smartedu-resource",
+                    provider=object(),
+                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                    scopes=("primary_resource",),
+                ),
+            )
+        )
+        route = AcquisitionPlanner(router).route(
+            {
+                "platform": "smartedu",
+                "resource_type": "course",
+                "source_url": "https://basic.smartedu.cn/syncClassroom/classActivity?activityId=1",
+            },
+            {
+                "resolved_resource": {
+                    "representations": [
+                        {
+                            "representation_id": "repr_1",
+                            "scope": "primary_resource",
+                            "kind": "video",
+                            "role": "primary",
+                            "container": "m3u8",
+                            "materializable": True,
+                        }
+                    ]
+                }
+            },
+        )
+        self.assertEqual("smartedu-resource", route["provider_id"])
+        self.assertEqual("m3u8", route["container"])
 
 
 if __name__ == "__main__":

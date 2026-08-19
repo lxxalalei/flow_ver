@@ -178,6 +178,7 @@ class BilibiliSearchAdapter:
             author=item.get("author"),
             creator_mid=str(item["mid"]) if item.get("mid") else None,
             published_at=published_at,
+            language="zh",
             download_feasibility="中",
             platform_signals=signals or None,
         )

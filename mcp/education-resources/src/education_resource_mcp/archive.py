@@ -7,6 +7,7 @@ from functools import lru_cache
 from importlib.resources import files as package_files
 import json
 import logging
+import os
 from pathlib import Path
 import re
 import shutil
@@ -16,6 +17,10 @@ from .errors import DomainError
 
 
 LOGGER = logging.getLogger(__name__)
+
+# 归档台账对用户不可见：Unix 靠点前缀，Windows 另加隐藏属性。
+MANIFEST_NAME = ".manifest.jsonl"
+LEGACY_MANIFEST_NAME = "manifest.jsonl"
 
 _VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 _AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
@@ -111,6 +116,34 @@ def format_directory(media_type: str, filename: str) -> str:
     }[_resource_format(media_type, filename)]
 
 
+def _hide_on_windows(path: Path) -> None:
+    """Set the Hidden attribute; on Windows a dot prefix alone does not hide."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        FILE_ATTRIBUTE_HIDDEN = 0x2
+        ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+    except OSError:  # 可见性是锦上添花，失败不影响归档
+        LOGGER.debug("could not hide %s", path, exc_info=True)
+
+
+def _manifest_path(root: Path) -> Path:
+    """Return the hidden ledger path, migrating a legacy visible copy once."""
+    current = root / MANIFEST_NAME
+    legacy = root / LEGACY_MANIFEST_NAME
+    if legacy.is_file():
+        if current.is_file():
+            with legacy.open("rb") as source, current.open("ab") as target:
+                shutil.copyfileobj(source, target)
+            legacy.unlink()
+        else:
+            legacy.replace(current)
+        _hide_on_windows(current)
+    return current
+
+
 def _available_target(path: Path) -> Path:
     if not path.exists():
         return path
@@ -189,27 +222,38 @@ def archive_downloaded_files(
         archived.append(archived_item)
 
     if archived:
-        record = {
-            "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "domain_id": domain_id,
-            "topic": topic,
-            "files": [
-                {
-                    key: item.get(key)
-                    for key in (
-                        "resource_id", "platform", "source_url", "title", "author",
-                        "filename", "path", "media_type", "size_bytes",
-                    )
-                }
-                for item in archived
-            ],
-        }
+        archived_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # 标准逐行 JSONL：每个归档文件一行，归档上下文平铺到每行；
+        # 描述类字段统一出现，缺失时留空字符串，保持 schema 一致。
+        records = [
+            {
+                "archived_at": archived_at,
+                "domain_id": domain_id,
+                "topic": topic,
+                "resource_id": item.get("resource_id"),
+                "platform": item.get("platform"),
+                "source_url": item.get("source_url"),
+                "title": str(item.get("title") or ""),
+                "author": str(item.get("author") or ""),
+                "summary": str(item.get("summary") or ""),
+                "published_at": str(item.get("published_at") or ""),
+                "language": str(item.get("language") or ""),
+                "filename": item.get("filename"),
+                "path": item.get("path"),
+                "media_type": item.get("media_type"),
+                "size_bytes": item.get("size_bytes"),
+            }
+            for item in archived
+        ]
         try:
-            with (root / "manifest.jsonl").open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            manifest = _manifest_path(root)
+            with manifest.open("a", encoding="utf-8") as handle:
+                for record in records:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            _hide_on_windows(manifest)
         except OSError:
             LOGGER.warning(
-                "archive succeeded but manifest.jsonl could not be updated",
+                "archive succeeded but %s could not be updated", MANIFEST_NAME,
                 exc_info=True,
             )
 

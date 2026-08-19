@@ -81,6 +81,7 @@ class PlatformSearchAdapterTests(unittest.TestCase):
         self.assertEqual(1, len(results))
         self.assertEqual("bilibili", results[0]["platform"])
         self.assertEqual("英语启蒙动画", results[0]["title"])
+        self.assertEqual("zh", results[0]["metadata"]["language"])
         self.assertEqual(
             "https://www.bilibili.com/video/BV1xx411c7mD",
             results[0]["source_url"],
@@ -126,6 +127,7 @@ class PlatformSearchAdapterTests(unittest.TestCase):
 
         self.assertIsNone(error)
         self.assertEqual(1, len(results))
+        self.assertEqual("zh", results[0]["metadata"]["language"])
         self.assertEqual(
             "MS4wLjABAAAAtest_sec_uid_0001",
             results[0]["metadata"]["creator_sec_uid"],

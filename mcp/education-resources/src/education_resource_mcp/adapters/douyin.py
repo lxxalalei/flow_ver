@@ -219,6 +219,7 @@ class DouyinSearchAdapter:
             author=author,
             creator_sec_uid=sec_uid or None,
             published_at=published_at,
+            language="zh",
             download_feasibility="中",
             platform_signals=signals or None,
         )

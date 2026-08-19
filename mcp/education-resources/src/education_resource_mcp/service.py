@@ -458,9 +458,18 @@ class ResourceService:
 
         resolution = self._inspect_raw(resource)
         resolved = resolution.get("resolved_resource") or {}
-        if isinstance(resolved, dict) and resolved.get("title"):
+        updates: dict[str, Any] = {}
+        if isinstance(resolved, dict):
+            if resolved.get("title"):
+                updates["title"] = str(resolved["title"])[:120]
+            # 检查确认的类型必须回填到句柄：句柄若停留在导入默认"网页"，
+            # 下载路由按 article 匹配平台下载器会全部落空（CAPABILITY_NOT_DECLARED）。
+            resolved_type = _resource_type(resolved.get("resource_type"))
+            if resolved_type != "other":
+                updates["resource_type"] = resolved_type
+        if updates:
             with self._lock:
-                self._resources[resource_id]["title"] = str(resolved["title"])
+                self._resources[resource_id].update(updates)
         return {
             "resource_id": resource_id,
             **self._public_inspection(resource_id, resolution),
@@ -920,6 +929,9 @@ class ResourceService:
                 "source_url": resource.get("source_url"),
                 "title": resource.get("title"),
                 "author": (resource.get("metadata") or {}).get("author"),
+                "summary": resource.get("summary"),
+                "published_at": (resource.get("metadata") or {}).get("published_at"),
+                "language": (resource.get("metadata") or {}).get("language"),
             }
             for artifact in acquisition.bundle.artifacts
             if artifact.path.is_file()

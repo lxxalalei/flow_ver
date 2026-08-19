@@ -12,6 +12,8 @@ import base64
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any, TypeAlias
@@ -45,7 +47,7 @@ _DOCUMENT_FORMATS = frozenset({
 _SUBTITLE_FORMATS = frozenset({"srt", "vtt", "ass", "ssa", "lrc"})
 _IMAGE_FORMATS = frozenset({"jpg", "jpeg", "png", "webp", "gif"})
 _COURSE_TYPES = frozenset({"national_lesson", "quality_course", "thematic_course"})
-_ACTIVE_PRIMARY_FORMATS = frozenset({"pdf", "mp4", "mp3", "m4a"})
+_ACTIVE_PRIMARY_FORMATS = frozenset({"pdf", "mp4", "mp3", "m4a", "m3u8"})
 _SMARTEDU_DETAIL_HOSTS = frozenset(
     {
         "s-file-1.ykt.cbern.com.cn",
@@ -235,12 +237,189 @@ def _read_json_object(response: Any, max_bytes: int, *, label: str) -> dict[str,
     return parsed
 
 
+_HLS_PLAYLIST_MAX_BYTES = 2 * 1024 * 1024
+_HLS_SEGMENT_MAX_BYTES = 64 * 1024 * 1024
+_HLS_SEGMENT_RETRIES = 3
+
+
+def _hls_attrs(raw: str) -> dict[str, str]:
+    return {
+        match.group(1).upper(): match.group(2).strip('"')
+        for match in re.finditer(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)', raw)
+    }
+
+
+def _hls_fetch(client: Any, url: str, token: str, *, limit: int, label: str) -> bytes:
+    request = Request(url, headers=_smartedu_headers(token))
+    with client.open(request, timeout=30) as resp:
+        _raise_for_http_status(resp)
+        return _read_bounded(resp, limit, label=label)
+
+
+def _hls_master_variant(text: str, base_url: str) -> str:
+    """Return the highest-bandwidth variant URL of a master playlist."""
+
+    best_url, best_bandwidth = "", -1
+    pending: int | None = None
+    for line in (raw.strip() for raw in text.splitlines()):
+        if not line:
+            continue
+        if line.startswith("#EXT-X-STREAM-INF:"):
+            try:
+                pending = int(_hls_attrs(line.split(":", 1)[1]).get("BANDWIDTH") or 0)
+            except ValueError:
+                pending = 0
+        elif not line.startswith("#") and pending is not None:
+            if pending > best_bandwidth:
+                best_bandwidth, best_url = pending, urljoin(base_url, line)
+            pending = None
+    if best_bandwidth < 0:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED", "HLS 主播放列表没有可选码率", retryable=False
+        )
+    return best_url
+
+
+def _hls_media_segments(
+    text: str, base_url: str
+) -> tuple[list[str], dict[str, str] | None]:
+    """Return media segment URLs plus the active AES-128 key descriptor."""
+
+    segments: list[str] = []
+    key: dict[str, str] | None = None
+    for line in (raw.strip() for raw in text.splitlines()):
+        if not line:
+            continue
+        if line.startswith("#EXT-X-KEY:"):
+            attrs = _hls_attrs(line.split(":", 1)[1])
+            if str(attrs.get("METHOD") or "").upper() == "AES-128":
+                uri = str(attrs.get("URI") or "")
+                key = {"uri": urljoin(base_url, uri), "iv": str(attrs.get("IV") or "")}
+            else:
+                key = None
+        elif not line.startswith("#"):
+            segments.append(urljoin(base_url, line))
+    if not segments:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED", "HLS 播放列表没有媒体分片", retryable=False
+        )
+    return segments, key
+
+
+def _hls_decrypt(key: bytes, iv: bytes, payload: bytes) -> bytes:
+    from Crypto.Cipher import AES  # lazy: only encrypted streams need it
+
+    usable = len(payload) // 16 * 16
+    plain = AES.new(key, AES.MODE_CBC, iv).decrypt(payload[:usable])
+    pad = plain[-1] if plain else 0
+    if 1 <= pad <= 16 and plain.endswith(bytes([pad]) * pad):
+        plain = plain[:-pad]
+    return plain
+
+
+def _download_hls_to_mp4(
+    url: str,
+    destination: Path,
+    cancel_event: threading.Event,
+    token: str,
+    http_client: Any,
+) -> None:
+    """Materialize one HLS stream: fetch segments, then remux to MP4 via ffmpeg.
+
+    MP4 is the required deliverable; without a usable ffmpeg there is no
+    fallback container.
+    """
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise DomainError(
+            "DOWNLOAD_FAILED", "ffmpeg 未安装，无法将 HLS 视频封装为 MP4", retryable=False
+        )
+
+    text = _hls_fetch(
+        http_client, url, token, limit=_HLS_PLAYLIST_MAX_BYTES, label="HLS 播放列表"
+    ).decode("utf-8", "replace")
+    if "#EXT-X-STREAM-INF" in text:
+        url = _hls_master_variant(text, url)
+        text = _hls_fetch(
+            http_client, url, token, limit=_HLS_PLAYLIST_MAX_BYTES, label="HLS 变体播放列表"
+        ).decode("utf-8", "replace")
+    segments, key = _hls_media_segments(text, url)
+
+    cipher_key: bytes | None = None
+    explicit_iv: bytes | None = None
+    if key is not None:
+        cipher_key = _hls_fetch(
+            http_client, key["uri"], token, limit=64, label="HLS 密钥"
+        )
+        if len(cipher_key) != 16:
+            raise DomainError(
+                "CONTENT_VALIDATION_FAILED", "HLS 密钥长度非法", retryable=False
+            )
+        if key["iv"]:
+            try:
+                raw_iv = bytes.fromhex(key["iv"].removeprefix("0x").removeprefix("0X"))
+            except ValueError:
+                raw_iv = b""
+            if len(raw_iv) == 16:
+                explicit_iv = raw_iv
+
+    ts_path = destination.with_suffix(".ts.tmp")
+    destination.unlink(missing_ok=True)
+    try:
+        with ts_path.open("wb") as handle:
+            for index, segment_url in enumerate(segments):
+                if cancel_event.is_set():
+                    raise DomainError("JOB_CANCELLED", "下载已取消")
+                payload: bytes | None = None
+                for _attempt in range(_HLS_SEGMENT_RETRIES):
+                    try:
+                        payload = _hls_fetch(
+                            http_client,
+                            segment_url,
+                            token,
+                            limit=_HLS_SEGMENT_MAX_BYTES,
+                            label="HLS 媒体分片",
+                        )
+                        break
+                    except DomainError:
+                        raise
+                    except Exception:
+                        continue
+                if payload is None:
+                    raise DomainError(
+                        "DOWNLOAD_FAILED", "HLS 媒体分片下载失败", retryable=True
+                    )
+                if cipher_key is not None:
+                    iv = explicit_iv or index.to_bytes(16, "big")
+                    payload = _hls_decrypt(cipher_key, iv, payload)
+                handle.write(payload)
+        result = subprocess.run(
+            [
+                ffmpeg, "-y", "-loglevel", "error",
+                "-i", str(ts_path),
+                "-c", "copy", "-movflags", "+faststart", "-f", "mp4",
+                str(destination),
+            ],
+            capture_output=True,
+        )
+        if result.returncode != 0 or not destination.is_file():
+            detail = result.stderr.decode("utf-8", "replace")[-200:]
+            raise DomainError(
+                "DOWNLOAD_FAILED", f"ffmpeg 封装 MP4 失败: {detail}", retryable=False
+            )
+    finally:
+        ts_path.unlink(missing_ok=True)
+
+
 def _media_type_for_format(fmt: str) -> str:
     return {
         "pdf": "application/pdf",
         "mp3": "audio/mpeg",
         "m4a": "audio/mp4",
         "mp4": "video/mp4",
+        # HLS 流交付的是经 ffmpeg 无损封装的 MP4。
+        "m3u8": "video/mp4",
     }.get(fmt, "application/octet-stream")
 
 
@@ -826,8 +1005,9 @@ def _is_video(candidate: dict[str, Any]) -> bool:
     )
 
 
-def _video_quality(candidate: dict[str, Any]) -> tuple[int, int]:
-    """Rank explicit provider quality flags, then keep source order stable."""
+def _video_quality(candidate: dict[str, Any]) -> tuple[int, int, int]:
+    """Rank explicit provider quality flags; prefer a direct file over HLS at
+    equal quality, then keep source order stable."""
 
     flag = _flag_text(candidate)
     quality = 0
@@ -835,7 +1015,8 @@ def _video_quality(candidate: dict[str, Any]) -> tuple[int, int]:
         if marker in flag:
             quality = score
             break
-    return quality, -int(candidate.get("source_order") or 0)
+    direct = 1 if str(candidate.get("format") or "").casefold() == "mp4" else 0
+    return quality, direct, -int(candidate.get("source_order") or 0)
 
 
 def _is_content_candidate(candidate: dict[str, Any]) -> bool:
@@ -1208,9 +1389,9 @@ def _decrypt_segment(data: bytes, key: bytes, iv: bytes) -> bytes:
 class SmartEduDownloader:
     """Download resources from SmartEdu via the public CDN detail API.
 
-    Active route supports PDF, direct MP4, MP3, and M4A concrete primaries.
-    HLS remains internal-only until a Windows-compatible remux path produces
-    a verified MP4 container.
+    Active route supports PDF, direct MP4, MP3, and M4A concrete primaries,
+    plus HLS (m3u8) streams that are remuxed losslessly to MP4 with the
+    system ffmpeg.
     """
 
     def __init__(
@@ -1255,6 +1436,14 @@ class SmartEduDownloader:
             raise DomainError(
                 "CONTENT_VALIDATION_FAILED",
                 "SmartEdu 下载缺少受支持的已确认格式",
+                retryable=False,
+            )
+        if planned_container == "m3u8" and not shutil.which("ffmpeg"):
+            # MP4 是硬性交付物：没有 ffmpeg 就没有可交付容器，提前失败而不是
+            # 下载完分片后才在条目层报错。
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                "ffmpeg 未安装，无法将 HLS 视频封装为 MP4",
                 retryable=False,
             )
 
@@ -1436,13 +1625,23 @@ class SmartEduDownloader:
                 ensure_within_root(destination, self.settings.jobs_dir)
                 destination.unlink(missing_ok=True)
                 fmt = str(candidate.get("format") or "").casefold()
-                _stream_download(
-                    str(candidate["url"]),
-                    destination,
-                    cancel_event,
-                    token,
-                    http_client=self.storage_client,
-                )
+                if fmt == "m3u8":
+                    # HLS 物化：分片顺序拼接后经 ffmpeg 无损封装为 MP4。
+                    _download_hls_to_mp4(
+                        str(candidate["url"]),
+                        destination,
+                        cancel_event,
+                        token,
+                        http_client=self.storage_client,
+                    )
+                else:
+                    _stream_download(
+                        str(candidate["url"]),
+                        destination,
+                        cancel_event,
+                        token,
+                        http_client=self.storage_client,
+                    )
                 media_type = _media_type_for_format(fmt)
                 byte_size = destination.stat().st_size
                 if byte_size <= 0:

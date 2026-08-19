@@ -228,6 +228,9 @@ class ArchiveManifestTests(unittest.TestCase):
                     "source_url": "https://annas.example/seeds/report",
                     "title": "某报告",
                     "author": "某人",
+                    "summary": "报告摘要",
+                    "published_at": "2026-08-01T08:00:00+08:00",
+                    "language": "zh",
                     "filename": "report.pdf",
                     "path": str(media),
                     "media_type": "application/pdf",
@@ -238,13 +241,61 @@ class ArchiveManifestTests(unittest.TestCase):
             )
             self.assertEqual([], failures)
             self.assertEqual(1, len(archived))
-            manifest = root / "library" / "manifest.jsonl"
+            manifest = root / "library" / ".manifest.jsonl"
             self.assertTrue(manifest.is_file())
-            record = json.loads(manifest.read_text(encoding="utf-8").splitlines()[-1])
-            (entry,) = record["files"]
+            entry = json.loads(manifest.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual("溯源测试", entry["topic"])
             self.assertEqual("annas-archive", entry["platform"])
             self.assertEqual("https://annas.example/seeds/report", entry["source_url"])
             self.assertEqual("某人", entry["author"])
+            self.assertEqual("报告摘要", entry["summary"])
+            self.assertEqual("2026-08-01T08:00:00+08:00", entry["published_at"])
+            self.assertEqual("zh", entry["language"])
+            self.assertEqual(archived[0]["path"], entry["path"])
+            stat = manifest.stat()
+            if hasattr(stat, "st_file_attributes"):
+                self.assertTrue(stat.st_file_attributes & 0x2)
+
+    def test_manifest_migrates_legacy_visible_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            library.mkdir()
+            legacy = library / "manifest.jsonl"
+            legacy.write_text(
+                '{"archived_at": "2026-01-01T00:00:00+00:00", "files": []}\n',
+                encoding="utf-8",
+            )
+            download_dir = root / "jobs" / ("job_" + "e" * 32)
+            download_dir.mkdir(parents=True)
+            media = download_dir / "old.mp4"
+            media.write_bytes(b"video")
+            archive_downloaded_files(
+                [{
+                    "resource_id": "res_2",
+                    "platform": "douyin",
+                    "source_url": "https://www.douyin.com/video/1",
+                    "title": "旧记录",
+                    "author": "作者",
+                    "filename": "old.mp4",
+                    "path": str(media),
+                    "media_type": "video/mp4",
+                }],
+                library_root=library,
+                domain_id="",
+                topic="迁移",
+            )
+            self.assertFalse(legacy.is_file())
+            manifest = library / ".manifest.jsonl"
+            lines = manifest.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(2, len(lines))
+            self.assertEqual("2026-01-01T00:00:00+00:00", json.loads(lines[0])["archived_at"])
+            self.assertEqual("res_2", json.loads(lines[1])["resource_id"])
+            self.assertEqual("迁移", json.loads(lines[1])["topic"])
+            # schema 统一：缺失的描述字段留空而不是消失
+            self.assertEqual("", json.loads(lines[1])["summary"])
+            self.assertEqual("", json.loads(lines[1])["published_at"])
+            self.assertEqual("", json.loads(lines[1])["language"])
 
 
 class QueryTuningTests(unittest.TestCase):
