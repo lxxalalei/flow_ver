@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -42,6 +43,34 @@ class UnifiedSessionStoreTests(unittest.TestCase):
             self.assertEqual(result["stored_credential_count"], 1)
             self.assertEqual(
                 {"tokens": {"accessToken": "TOKEN"}},
+                store.get_session_data("smartedu"),
+            )
+
+    def test_smartedu_double_wrapped_token_is_extracted(self) -> None:
+        # 真实页面里 ND_UC_AUTH-...&token 的值是 {"value": "{...}"}：
+        # access_token 在第二层 JSON 字符串内部，只解一层拿不到。
+        inner = json.dumps(
+            {
+                "source_token_account_type": "passport-xedu",
+                "access_token": "INNER-TOKEN",
+                "x-nd-auth": "mac-credentials",
+            }
+        )
+        wrapped = json.dumps({"value": inner})
+        with tempfile.TemporaryDirectory() as d:
+            store = SessionStore(Path(d))
+            result = store.save(
+                "smartedu",
+                {
+                    "storage_origin": "https://basic.smartedu.cn",
+                    "local_storage": {
+                        "ND_UC_AUTH-7b15f2a8&ncet-xedu&token": wrapped
+                    },
+                },
+            )
+            self.assertEqual("stored", result["status"])
+            self.assertEqual(
+                {"tokens": {"accessToken": "INNER-TOKEN", "x-nd-auth": "mac-credentials"}},
                 store.get_session_data("smartedu"),
             )
 

@@ -420,16 +420,26 @@ class SessionStore:
         return result
 
     @staticmethod
-    def _nested_strings(value: Any, wanted: set[str]) -> dict[str, str]:
+    def _nested_strings(value: Any, wanted: set[str], depth: int = 0) -> dict[str, str]:
         found: dict[str, str] = {}
+        if isinstance(value, str):
+            # SmartEdu 的 token 会再包一层 JSON 字符串（{"value": "{...}"}），
+            # access_token 在字符串内部：只按结构递归解不到，字符串也要剥。
+            stripped = value.strip()
+            if depth >= 3 or stripped[:1] not in "{[":
+                return found
+            try:
+                value = json.loads(stripped)
+            except ValueError:
+                return found
         if isinstance(value, dict):
             for key, child in value.items():
                 if key in wanted and isinstance(child, str) and child:
                     found.setdefault(key, child)
-                found.update(SessionStore._nested_strings(child, wanted))
+                found.update(SessionStore._nested_strings(child, wanted, depth + 1))
         elif isinstance(value, list):
             for child in value:
-                found.update(SessionStore._nested_strings(child, wanted))
+                found.update(SessionStore._nested_strings(child, wanted, depth + 1))
         return found
 
     def _sanitize_smartedu_payload(
