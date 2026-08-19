@@ -250,17 +250,32 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="批量枚举目标平台 id；具体 mode 只在支持的平台有效。"),
         ],
         mode: Annotated[
-            Literal["creator_full", "time_range_search", "catalog_expand"],
+            Literal[
+                "creator_full",
+                "time_range_search",
+                "catalog_expand",
+                "collection_expand",
+            ],
             Field(
                 description=(
                     "creator_full=完整枚举创作者；time_range_search=Bilibili 日期范围搜索；"
-                    "catalog_expand=SmartEdu 教材规格展开。只负责候选完整枚举，不自动下载。"
+                    "catalog_expand=SmartEdu 教材规格展开；collection_expand=Bilibili 合集/系列完整展开。"
+                    "只负责候选完整枚举，不自动下载。"
                 )
             ),
         ] = "creator_full",
         creator_id: Annotated[
             str,
             Field(description="creator_full 使用：resource_id、原生 creator id 或主页 URL。"),
+        ] = "",
+        collection_url: Annotated[
+            str,
+            Field(
+                description=(
+                    "collection_expand 使用：Bilibili 合集/系列完整 URL，例如 "
+                    "https://space.bilibili.com/<mid>/lists/<sid>?type=season|series。"
+                )
+            ),
         ] = "",
         keyword: Annotated[
             str, Field(description="time_range_search 使用：Bilibili 搜索关键词。")
@@ -289,7 +304,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             lambda: resource_service.batch_collect(
                 platform,
                 mode=mode,
-                creator_id=creator_id,
+                creator_id=(collection_url if mode == "collection_expand" else creator_id),
                 keyword=keyword,
                 start_day=start_day,
                 end_day=end_day,

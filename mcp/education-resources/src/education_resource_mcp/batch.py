@@ -27,7 +27,9 @@ from .job_state import (
 LOGGER = logging.getLogger(__name__)
 
 RESULTS_NAME = "results.jsonl"
-BATCH_MODES = frozenset({"creator_full", "time_range_search", "catalog_expand"})
+BATCH_MODES = frozenset(
+    {"creator_full", "time_range_search", "catalog_expand", "collection_expand"}
+)
 
 
 def public_item(resource: dict[str, Any]) -> dict[str, Any]:
@@ -203,6 +205,13 @@ def _iterator_for_request(
             service,
             platform,
             list(request.get("specs") or []),
+            cancel,
+        )
+    if mode == "collection_expand":
+        return _iter_collection_expand(
+            service,
+            platform,
+            str(request.get("collection_url") or request.get("creator_id") or ""),
             cancel,
         )
     raise DomainError("INVALID_ARGUMENT", f"未知批量模式 {mode!r}")
@@ -384,6 +393,33 @@ def _iter_catalog_expand(
                 }
             )
     except Exception as exc:
+        converted = _adapter_error(exc)
+        if converted is not None:
+            raise converted from exc
+        raise
+
+
+def _iter_collection_expand(
+    service: Any, platform: str, collection_url: str, cancel: Any
+) -> Iterator[dict[str, Any]]:
+    if platform != "bilibili":
+        raise DomainError(
+            "FEATURE_NOT_SUPPORTED", "collection_expand 当前仅支持 bilibili"
+        )
+    if not collection_url:
+        raise DomainError("INVALID_ARGUMENT", "collection_expand 需要 collection_url")
+    adapter = _adapter_for(service, "bilibili")
+    iter_collection = getattr(adapter, "iter_collection", None) if adapter else None
+    if not callable(iter_collection):
+        raise DomainError("FEATURE_NOT_SUPPORTED", "bilibili 适配器不支持合集/系列展开")
+    try:
+        for resource in iter_collection(collection_url, cancel_event=cancel):
+            item = public_item(resource)
+            if item.get("title") and item.get("url"):
+                yield item
+    except Exception as exc:
+        if isinstance(exc, DomainError):
+            raise
         converted = _adapter_error(exc)
         if converted is not None:
             raise converted from exc

@@ -88,9 +88,15 @@ class McpStdioTests(unittest.TestCase):
             "education-resources",
             initialize_response["result"]["serverInfo"]["name"],
         )
-        self.assertEqual(
-            EXPECTED_TOOLS,
-            {item["name"] for item in tools_response["result"]["tools"]},
+        tools = tools_response["result"]["tools"]
+        self.assertEqual(EXPECTED_TOOLS, {item["name"] for item in tools})
+
+        batch_tool = next(item for item in tools if item["name"] == "resource_batch_collect")
+        properties = batch_tool["inputSchema"]["properties"]
+        self.assertIn("collection_url", properties)
+        self.assertIn(
+            "collection_expand",
+            json.dumps(properties["mode"], ensure_ascii=False),
         )
 
 
