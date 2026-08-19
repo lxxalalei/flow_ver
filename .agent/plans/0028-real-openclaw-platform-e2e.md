@@ -25,7 +25,7 @@ runtime verifier: passed
 MCP stdio probe: passed
 ```
 
-这些证据证明当前后端与 Tool 表面可运行，但**不证明真实 OpenClaw、真实平台登录、真实网络出口或真实下载可用**。
+这些证据证明当前后端与 Tool 表面可运行，但**不证明真实 OpenClaw、真实平台登录、真实网络出口或真实下载可用**。后续真实反馈修正必须重新验证受影响链路，不能借用该基线冒充新 diff 已通过。
 
 ## 当前真实链路
 
@@ -55,7 +55,7 @@ Start
 Asset / Outcome 状态链
 ```
 
-`resource_id` 只是进程内临时句柄；Download / Batch 的 `job_id` 才是文件型运行状态。
+`resource_id` 只是进程内临时句柄；Download / Batch 的 `job_id` 才是文件型运行状态。一个逻辑 Resource 可以自然产生多个 File，不要求一一对应。
 
 ## 当前真实验收队列
 
@@ -76,11 +76,14 @@ Host Web Search
 
 ### 2. SmartEdu
 
-分别记录三个边界：
+分别记录四个边界：
 
 - 公共 Search / Catalog 在已保存 session 环境下仍应匿名；
 - 具体 Detail / Download 如果真实需要登录，才进入 Session；
-- 如果出现 IP / 网络出口限制，记录失败发生在 detail、media URL、m3u8、segment、key 哪一级，不把它误报成“补 token 即可”。
+- 如果出现 IP / 网络出口限制，记录失败发生在 detail、media URL、m3u8、segment、key 哪一级，不把它误报成“补 token 即可”；
+- 课程链接是逻辑 Course Resource，不等于单网页/单文件。包含视频 + PDF/音频等内容时，Inspect 应公开主表示与 attachment/companion；用户未指定格式时直接 `resource_download(..., original)`，Agent 不应自行补 `mp4` 来绕过“网页不可下载”。Job 的多个 `files` / `failures` 才是课程交付事实。
+
+2026-08-19 真实事故：用户批量获取 SmartEdu 课程时，Agent 将课程 URL 降维为 webpage，随后人为补了格式才继续下载；但同一课程链接实际包含视频和文档。修正由 `0060-resource-multifile-delivery.md` 跟踪。
 
 当前视频/PDF/音频实现存在不等于当前网络出口可用。
 
@@ -135,6 +138,8 @@ webbundle.zip
 
 批量能力的实现历史已经归档；这里只验证真实用户链需要的代表场景，例如 Bilibili creator/time-range、SmartEdu catalog expand。全量结果必须留在 `results.jsonl`，对话只分页读取；损坏 JSONL 必须显式失败。
 
+SmartEdu `catalog_expand` 当前解决完整枚举，不等于已经提供“把整个 catalog 自动全部下载”的资源工作流；若真实需求确认需要直接衔接，再另做最小批量 acquisition 能力，不把这次课程包修正扩大成新状态机。
+
 ## 每次测试最少记录
 
 ```text
@@ -158,6 +163,8 @@ Failure stage (if known):
 - Agent 只有在用户已经明确表达下载意图时调用 `resource_download`；
 - 不制造 Prepare / confirmation token / Start；
 - 下载内部 fresh Inspect，并使用当前 exact Provider；
+- 一个 Resource 可以产生多个真实文件；primary 只是 Provider 路由锚点，不是“一资源只能一个文件”的声明；
+- 默认 `original` 不制造格式要求，Agent 不因 landing webpage 自行猜扩展名；
 - Provider 失败返回真实失败，不 silent fallback 到不等价来源；
 - `AUTH_REQUIRED`、网络阻断、平台风控、内容变化和文件校验失败必须区分；
 - 没有真实文件不得报告成功；
@@ -174,6 +181,8 @@ Failure stage (if known):
 - `0057-native-batch-capability-parity.md` -> 代表性 Batch 用户链；
 - `0059-post-convergence-review-fixes.md` 已完成，只作为 release-ready 后端验证历史。
 
+当前新的 `0060-resource-multifile-delivery.md` 是由 2026-08-19 真实 SmartEdu 用户反馈产生的局部修正，不是旧计划恢复。
+
 旧计划中的 Prepare / Confirm / Start / Asset、独立 session-manager、旧测试基线等文字仅代表当时历史，不再是当前架构依据。
 
 ## Completion criteria
@@ -185,6 +194,7 @@ Failure stage (if known):
 3. Generic Web 真实生成 source snapshot + readable views 并人工检查；
 4. 一个此前易 compaction 的长任务完整完成，或剩余中断已定位到具体能力/平台；
 5. Windows gateway restart 下 Job durability 得到真实结论；
-6. 登录相关测试能区分真实 `AUTH_REQUIRED` 与 IP/网络出口/平台策略问题。
+6. 登录相关测试能区分真实 `AUTH_REQUIRED` 与 IP/网络出口/平台策略问题；
+7. 一个包含至少主视频 + 文档附件的 SmartEdu 课程，在不指定格式的情况下通过 `original` 产生符合真实内容的多文件 Job，Agent 不再自行补格式。
 
 如果失败，只根据实际 Search / Inspect / Download / Job 错误修具体能力，不恢复通用工作流状态机。

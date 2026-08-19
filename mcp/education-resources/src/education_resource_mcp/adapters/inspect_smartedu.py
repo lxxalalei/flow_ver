@@ -14,6 +14,7 @@ from ..policy import NetworkPolicy, PolicyViolation
 from .inspect_bilibili import _PlatformWebInspector
 from .smartedu_download import (
     _ACTIVE_PRIMARY_FORMATS,
+    _COURSE_TYPES,
     _SMARTEDU_DETAIL_HOSTS,
     _SmartEduHttpClient,
     _close_response,
@@ -22,6 +23,8 @@ from .smartedu_download import (
     _primary_candidate,
     _raise_for_http_status,
     _resolve_content,
+    _role_for_candidate,
+    _select_course_files,
     _smartedu_representation_id,
     _smartedu_headers,
 )
@@ -194,11 +197,14 @@ class SmartEduInspector(_PlatformWebInspector):
         mime = "video/mp4" if resource_format == "m3u8" else _MIME_TYPES.get(resource_format)
         return kind, container, mime
 
-    def _primary_representation(
+    def _representation(
         self,
         resource: Mapping[str, Any],
         payload: Mapping[str, Any],
         candidate: Mapping[str, Any],
+        *,
+        role: str,
+        scope: str,
     ) -> dict[str, Any] | None:
         shape = self._representation_shape(candidate)
         if shape is None:
@@ -208,8 +214,8 @@ class SmartEduInspector(_PlatformWebInspector):
             "representation_id": _smartedu_representation_id(resource, candidate),
             "kind": kind,
             "container": container,
-            "scope": "primary_resource",
-            "role": "primary",
+            "scope": scope,
+            "role": role,
             "technical_availability": "available",
             "materializable": True,
         }
@@ -222,8 +228,8 @@ class SmartEduInspector(_PlatformWebInspector):
         representation.update(
             build_representation_authority(
                 resource,
-                scope="primary_resource",
-                role="primary",
+                scope=scope,
+                role=role,
                 technical_availability="available",
                 source="provider",
                 observed_at=inspected_at if isinstance(inspected_at, str) else None,
@@ -261,17 +267,23 @@ class SmartEduInspector(_PlatformWebInspector):
             payload["failures"] = [*payload.get("failures", []), failure]
         else:
             assert detail is not None and content_type is not None
+            active_files = [
+                candidate
+                for candidate in _find_files(detail)
+                if str(candidate.get("format") or "").casefold()
+                in _ACTIVE_PRIMARY_FORMATS
+            ]
+            selected = (
+                _select_course_files(active_files)
+                if content_type in _COURSE_TYPES
+                else list(active_files)
+            )
             primary = _primary_candidate(
-                _find_files(detail),
+                selected,
                 content_type,
                 supported_formats=_ACTIVE_PRIMARY_FORMATS,
             )
-            representation = (
-                self._primary_representation(resource, payload, primary)
-                if primary is not None
-                else None
-            )
-            if representation is None:
+            if primary is None:
                 payload["resolution_status"] = "partial"
                 resolved["availability"] = {"status": "unknown"}
                 payload["failures"] = [
@@ -284,13 +296,55 @@ class SmartEduInspector(_PlatformWebInspector):
                     ),
                 ]
             else:
-                representations.insert(0, representation)
-                resolved["availability"] = {"status": "available"}
-                resolved["resource_type"] = {
-                    "document": "document",
-                    "video": "course" if content_type in {"national_lesson", "quality_course", "thematic_course"} else "video",
-                    "audio": "audio",
-                }[representation["kind"]]
+                # 非课程资源继续只公开主文件；课程资源则公开自然交付包中的
+                # 主视频/主文件 + 文档附件 + 伴随音频。一个 Resource 可以自然
+                # 物化成多个文件，不要求 Agent 先猜一个扩展名。
+                if content_type not in _COURSE_TYPES:
+                    selected = [primary]
+                primary_key = str(primary.get("item_key") or "")
+                concrete: list[dict[str, Any]] = []
+                for candidate in selected:
+                    role = _role_for_candidate(
+                        candidate,
+                        primary_key=primary_key,
+                        content_type=content_type,
+                    )
+                    scope = "primary_resource" if role == "primary" else "representation"
+                    representation = self._representation(
+                        resource,
+                        payload,
+                        candidate,
+                        role=role,
+                        scope=scope,
+                    )
+                    if representation is not None:
+                        concrete.append(representation)
+                if not any(item.get("role") == "primary" for item in concrete):
+                    payload["resolution_status"] = "partial"
+                    resolved["availability"] = {"status": "unknown"}
+                    payload["failures"] = [
+                        *payload.get("failures", []),
+                        self._failure(
+                            resource,
+                            "CONTENT_VALIDATION_FAILED",
+                            "SmartEdu 主文件无法形成可下载表示",
+                            False,
+                        ),
+                    ]
+                else:
+                    representations = [*concrete, *representations]
+                    resolved["availability"] = {"status": "available"}
+                    primary_representation = next(
+                        item for item in concrete if item.get("role") == "primary"
+                    )
+                    if content_type in _COURSE_TYPES:
+                        resolved["resource_type"] = "course"
+                    else:
+                        resolved["resource_type"] = {
+                            "document": "document",
+                            "video": "video",
+                            "audio": "audio",
+                        }[primary_representation["kind"]]
 
         resolved["representations"] = representations
         payload["resolved_resource"] = resolved

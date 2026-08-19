@@ -11,10 +11,11 @@
 
 ## 当前顶层计划
 
-当前只保留两份直接执行计划：
+当前保留三份直接跟踪计划：
 
 - [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — `in_progress`，统一承接真实 Windows OpenClaw、平台、Session、Job、Batch 用户验收；
-- [0058-system-convergence-and-resource-fidelity.md](../0058-system-convergence-and-resource-fidelity.md) — `in_progress`，系统收敛的最后 M7，最终由 0028 的真实用户证据完成验收。
+- [0058-system-convergence-and-resource-fidelity.md](../0058-system-convergence-and-resource-fidelity.md) — `in_progress`，系统收敛的最后 M7，最终由真实用户证据完成验收；
+- [0060-resource-multifile-delivery.md](../0060-resource-multifile-delivery.md) — `in_progress`，真实 SmartEdu 课程反馈触发的 Resource→多文件自然交付语义修正；不引入 Bundle/Component 状态层。
 
 ## 2026-08-19 active 面收敛
 
@@ -28,6 +29,8 @@
 | [0056-download-job-subprocess-durability.md](0056-download-job-subprocess-durability.md) | in_progress | detached worker / file-backed Job 实现和进程级验证历史；旧“51 failures 基线”已被最新 205 tests 全过取代。剩余 Windows gateway restart 验收转交 0028 |
 | [0057-native-batch-capability-parity.md](0057-native-batch-capability-parity.md) | in_progress | Batch、SmartEdu tabs/catalog、Bilibili time range 等原生化实现历史；旧 9 Tool、独立 session-manager 复用和 51 failures 等描述只作历史。代表性真实 Batch 用户链转交 0028 |
 | [0059-post-convergence-review-fixes.md](0059-post-convergence-review-fixes.md) | completed | release-ready 收尾已完成：205 tests、compileall、runtime verifier、14 Tool stdio probe；按计划管理规范归档 |
+
+后续真实使用产生新的局部修正（例如 0060）可以重新出现在顶层；这不表示把上表历史实施计划重新激活。
 
 ## 0058 已替代的计划
 

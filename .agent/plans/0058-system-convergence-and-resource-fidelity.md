@@ -145,14 +145,14 @@ BoundedWebFetcher
 - [x] `AGENTS.md` 不再把 standalone session-manager 当 active 组件。
 - [x] 0029 / 0041 已从 active plans 移入 archive。
 - [x] 0051 / 0052 / 0054 / 0056 / 0057 / 0059 已移入 archive；历史原文保留，剩余真实验收统一转交 0028。
-- [x] 顶层 `.agent/plans/` 只保留本计划、0028 和计划管理 README。
+- [x] 收敛阶段结束时顶层只保留本计划、0028 和计划管理 README；此后由真实用户反馈产生的新局部任务可以另立 active 计划。0060 即属于这种后续能力修正，不恢复旧架构。
 
 ### AC-06 — 真实 OpenClaw 闭环
 
-仍需用户本机实际完成，详细队列以 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) 为单一验收入口：
+仍需用户本机实际完成，详细队列以 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) 为主验收入口；局部真实问题可由对应 active 计划补充记录：
 
 1. Host Web 找到已接入平台 URL → Import → 专门 Inspector/Downloader → 文件；
-2. SmartEdu 已保存 session 环境下公共 Search 仍匿名，并能区分真实 AUTH_REQUIRED 与 IP/网络出口限制；
+2. SmartEdu 已保存 session 环境下公共 Search 仍匿名，并能区分真实 AUTH_REQUIRED 与 IP/网络出口限制；SmartEdu 课程多文件自然交付由 `0060-resource-multifile-delivery.md` 跟踪；
 3. Anna/Libgen 不触发登录；
 4. 一个真实 `AUTH_REQUIRED` 平台 → 用户浏览器登录/捕获 → `resource_session_save` → 重试；
 5. 一个 Generic Web 页面得到 source snapshot + readable views 并人工检查；
@@ -186,24 +186,26 @@ BoundedWebFetcher
 | MCP stdio probe | passed（14 Tools） | MCP 能启动并暴露当前公共 Tool 面 | 真实调用成功 |
 | Markdown links / diff check | passed | 当时 active 文档和补丁结构 | 后续真实用户链 |
 
-这取代历史计划里“51 个既有失败”“7 Tool / 9 Tool”等阶段性基线；那些数字只保留在 archive 作为实施历史。
+这取代历史计划里“51 个既有失败”“7 Tool / 9 Tool”等阶段性基线；那些数字只保留在 archive 作为实施历史。后续 0060 等真实反馈修正必须重新跑其直接受影响的聚焦验证，不能借用该基线冒充新 diff 已通过。
 
 ### 尚未完成的真实验证
 
 - Windows DPAPI / browser login capture；
 - Host Web → Import → 专门平台真实下载；
 - SmartEdu 当前网络出口下的 detail/media 获取，尤其 IP/平台策略失败定位；
+- SmartEdu 课程 `original` 多文件交付复测（由 0060 跟踪）；
 - Anna/Libgen 匿名真实下载；
 - Generic Web 真实产物人工检查；
 - Douyin 长任务 / creator browse compaction 复测；
 - Windows gateway restart 下 detached Job 行为。
 
-这些由 0028 统一记录。在完成前本计划保持 `in_progress`。
+主 E2E 由 0028 统一记录。在完成前本计划保持 `in_progress`。
 
 ## Remaining risks
 
 1. SmartEdu 的公开搜索、详情接口和媒体 CDN具有不同访问边界；用户环境出现的 IP/网络出口限制必须按真实失败阶段判断，不能统一解释为登录问题。
-2. Trafilatura 不同输出格式对链接/图片结构的可见程度可能不同；硬保证是原始 `source.html` 保留，而不是宣称每个衍生格式必然保留所有 DOM 语义。
-3. 旧 standalone session 加密记录不做双读，升级后可能需要一次重新登录/捕获。
-4. 当前 URL 平台识别故意只覆盖有明确证据的代表性 URL；后续只能根据真实遗漏逐个补，不扩成猜测型通用识别器。
-5. 后端 205 tests 和 stdio probe 已通过，但真实 OpenClaw/平台可靠性仍以 0028 的用户证据为准。
+2. SmartEdu 课程的 Resource→多文件自然交付语义正在由 0060 根据真实反馈修正，需聚焦测试和 OpenClaw 实测证明 Agent 不再自行补格式。
+3. Trafilatura 不同输出格式对链接/图片结构的可见程度可能不同；硬保证是原始 `source.html` 保留，而不是宣称每个衍生格式必然保留所有 DOM 语义。
+4. 旧 standalone session 加密记录不做双读，升级后可能需要一次重新登录/捕获。
+5. 当前 URL 平台识别故意只覆盖有明确证据的代表性 URL；后续只能根据真实遗漏逐个补，不扩成猜测型通用识别器。
+6. 后端 release-ready 基线和 stdio probe 已通过，但真实 OpenClaw/平台可靠性仍以 0028/对应局部计划的用户证据为准。

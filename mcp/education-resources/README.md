@@ -40,6 +40,22 @@ Session 辅助能力：
 
 Session Tool 不应在每次资源操作前调用。只有真实资源能力返回 `AUTH_REQUIRED`，或用户主动要求管理平台会话时才使用。
 
+## Resource 与 File
+
+当前资源模型明确允许：
+
+```text
+1 Resource -> 0..N files
+```
+
+Resource 是用户选中的逻辑资源；Representation 是 Inspect 确认的可获取形态/组成事实；最终 File 是 Downloader 真正产生的产物。一个资源产生多个文件不需要额外的 Bundle/Component 状态机。
+
+`primary` 表示资源主交付入口，用于 exact Provider 路由；`attachment`、`companion`、`subtitle` 等可以描述同一逻辑资源自然附带的文件。`resource_download(..., preferred_container="original")` 表示按资源自身的自然交付方式获取，而不是“只能下载一个原始扩展名”。
+
+例如 SmartEdu 一堂课程可以自然产生主视频 + PDF 资料 + 配套音频；Generic Web 页面也会自然产生 source/readable/metadata 等多个文件。Job 的 `files` / `failures` 才是最终交付事实。
+
+只有用户明确要求某个特定主格式时才传 `preferred_container=pdf/mp4/...`；指定格式不存在时应显式失败，不能静默忽略要求或自动改成别的格式。
+
 ## SessionStore
 
 SessionStore 与资源 Adapter 位于同一个 MCP 和同一个数据目录：
@@ -72,6 +88,14 @@ Import 会对明确的 URL 形态恢复专门平台身份：
 - 其他/无法明确识别 → `generic`
 
 这只是通用发现到现有专门 Inspector/Downloader 的薄桥接，不是第二套平台 Registry。
+
+## SmartEdu 课程资源
+
+SmartEdu 的课程 URL 是 landing page，同时也是一个逻辑 Course Resource 的稳定入口；它不等于单一网页文件。
+
+Inspect 会从当前 detail JSON 中确定主视频/主文件，并把自然交付中当前受支持的 PDF 附件、伴随音频等一并暴露为 Representation。多码率视频仍只选一个当前主版本，不把同一视频的 HLS/MP4 变体误当成两份课程内容。
+
+默认 `preferred_container="original"` 时，SmartEdu Downloader 按同一 detail 事实下载自然交付包；因此 Agent 不需要、也不应该为了“让课程可下载”先猜 `mp4`。具体 Detail / Download 如果真实返回 `AUTH_REQUIRED` 才进入 Session；IP/出口限制不能自动解释为登录问题。
 
 ## Generic Web Resource
 
@@ -114,7 +138,7 @@ resource_download(
 )
 ```
 
-下载前 fresh Inspect，再按当前真实 Representation 路由到 exact Provider。失败时返回真实失败，不静默换成不等价 Provider。
+下载前 fresh Inspect，再按当前真实 primary Representation 路由到 exact Provider。默认 `original` 允许 Provider 为一个 Resource 产生一个或多个真实文件；附件/伴随文件的成功与失败分别进入 Job 结果。Provider 失败时返回真实失败，不静默换成不等价 Provider。
 
 Job 使用薄文件状态：
 
@@ -135,6 +159,8 @@ worker 已死但 Job 未到终态时标记 `interrupted`；重新发起即可，
 小规模创作者浏览使用 `resource_browse_creator`；“全部作品 / 完整时间段 / 完整教材目录”等完整性任务使用 `resource_batch_collect`。
 
 完整枚举默认不传 `max_items`，直到来源真实结束。`resource_batch_read` 单页大小只控制 Tool Result，不截断磁盘上的完整结果。
+
+Batch 当前解决“完整枚举”，不自动等于“把结果中的每个资源都下载”。Catalog → 大批量 acquisition 的直接衔接如有真实需求再单独设计，不在本轮引入新的批量工作流状态机。
 
 ## Archive
 

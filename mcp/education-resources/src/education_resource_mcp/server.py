@@ -121,8 +121,10 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "or classification decisions. Session tools are not a preflight step: use them only "
             "after a concrete AUTH_REQUIRED result or when the user explicitly asks to manage a "
             "platform session. Public operations must not be forced through login merely because "
-            "the platform also has authenticated capabilities. Resource handles are process-local; "
-            "download and batch operations return persistent job handles."
+            "the platform also has authenticated capabilities. A logical resource may naturally "
+            "materialize to more than one file; do not infer that a landing webpage is the only "
+            "downloadable form or invent a file format to make it downloadable. Resource handles "
+            "are process-local; download and batch operations return persistent job handles."
         ),
     )
 
@@ -212,15 +214,19 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             list[str],
             Field(
                 min_length=1,
-                description="要下载的当前进程内 resource_id 列表；调用返回 download job_id。",
+                description=(
+                    "要下载的当前进程内 resource_id 列表；调用返回 download job_id。"
+                    "一个 resource_id 可能自然产生一个或多个真实文件。"
+                ),
             ),
         ],
         preferred_container: Annotated[
             str,
             Field(
                 description=(
-                    '表示容器偏好，默认 "original"。只有确实需要某个已有表示时'
-                    "才指定 pdf/mp4/mp3/html 等；它不是任意格式转换请求。"
+                    '主表示容器偏好，默认 "original"，表示按资源本身的自然交付方式获取；'
+                    "自然交付可以包含多个文件。只有用户确实要求某个当前已有主表示时才指定 "
+                    "pdf/mp4/mp3/html 等；不要因 landing URL 是网页而自行猜格式，也不是任意格式转换请求。"
                 )
             ),
         ] = "original",

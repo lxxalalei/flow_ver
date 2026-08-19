@@ -191,23 +191,37 @@ def _choose_representation(
     ]
     if not values:
         raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "资源当前没有可下载表示")
-    if len(values) == 1:
-        return values[0]
 
     primaries = [item for item in values if _scope(item) == "primary_resource"]
     pool = primaries or values
-    if preferred_container != "original":
-        matching = [
-            item for item in pool
-            if str(item.get("container") or "").lower() == preferred_container.lower()
-        ]
-        if len(matching) == 1:
-            return matching[0]
-    if len(pool) == 1:
-        return pool[0]
+
+    # original means "materialize the resource in its natural delivery form".
+    # A provider may produce multiple files from that one resource; the primary
+    # representation is only the routing anchor and does not imply a one-file
+    # result. Companion/attachment representations therefore do not make an
+    # otherwise single-primary resource ambiguous.
+    if preferred_container == "original":
+        if len(pool) == 1:
+            return pool[0]
+        raise AcquisitionPlanningError(
+            "REPRESENTATION_AMBIGUOUS",
+            "资源存在多个主表示，无法自动确定自然交付入口",
+        )
+
+    matching = [
+        item for item in pool
+        if str(item.get("container") or "").lower() == preferred_container.lower()
+    ]
+    if len(matching) == 1:
+        return matching[0]
+    if not matching:
+        raise AcquisitionPlanningError(
+            "REPRESENTATION_UNAVAILABLE",
+            f"资源没有可用的 {preferred_container} 主表示",
+        )
     raise AcquisitionPlanningError(
         "REPRESENTATION_AMBIGUOUS",
-        "资源有多个可下载格式，请指定 preferred_container",
+        f"资源存在多个 {preferred_container} 主表示，无法自动选择",
     )
 
 

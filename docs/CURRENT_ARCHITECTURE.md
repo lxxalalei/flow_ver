@@ -191,6 +191,18 @@ $EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/<job_id>/
 
 Inspect 只在未知事实会改变推荐、选择或获取决策时使用，不是固定步骤。
 
+资源与最终文件不是一一对应：
+
+```text
+1 Resource -> 0..N Files
+```
+
+Resource 是用户选择的逻辑对象；Representation 是 Inspect 确认的当前可获取形态/组成事实；File 是 Provider 真正产生的交付物。`primary` Representation 用来确定 exact Provider / acquisition route，`attachment` / `companion` 等可以描述同一逻辑资源自然附带的其他文件。这里不新增 Component/Bundle 持久状态。
+
+`preferred_container="original"` 表示按资源自身的自然交付方式获取。自然交付可以是一个文件，也可以是多个文件；Agent 不应因为 landing URL 本身是 webpage 就判断资源不可下载，也不应为了让它“可下载”自行补一个扩展名。只有用户明确要求当前真实存在的某个主表示时才指定容器；指定不存在的主格式应显式失败。
+
+SmartEdu 课程是当前第一个明确的复合资源案例：课程 detail 可以同时确认主视频、PDF 资料和伴随音频；同一视频的 MP4/HLS/码率变体只选择一个当前主版本，而独立文档/音频保留为 attachment/companion。SmartEdu Downloader 已可为一个课程 Resource 返回多个真实文件，Job 的 `files` / `failures` 是最终事实。
+
 用户已明确选定资源并要求下载时直接：
 
 ```text
@@ -199,7 +211,7 @@ resource_download(resource_ids=[...])
 
 下载内部 fresh Inspect，并路由到当前 exact Provider；失败返回真实失败，不静默切换不等价 Provider。
 
-完整枚举使用 `resource_batch_collect`，默认不传 `max_items`，直到来源真实结束；`resource_batch_read` 的分页大小只控制单次 Tool Result。
+完整枚举使用 `resource_batch_collect`，默认不传 `max_items`，直到来源真实结束；`resource_batch_read` 的分页大小只控制单次 Tool Result。Batch 当前解决完整发现/枚举，不自动等同于“把结果里的每个资源全部下载”；如真实使用需要 Catalog → 大批量 acquisition 的直接衔接，再单独增加最小能力，不恢复工作流状态机。
 
 Archive 只移动真实下载 Job 已产生的文件；分类语义由 Agent 决定。
 
@@ -237,7 +249,8 @@ mcp/education-resources/
 4. Anna/Libgen 是否不触发登录；
 5. Host Web URL → Import 是否能恢复明确的平台身份；
 6. Generic Web 是否同时保留 `source.html` 与 Trafilatura 可读表示；
-7. Download / Batch / Archive 原有行为是否未被此次收敛破坏；
-8. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 选择 → 下载 → 文件。
+7. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
+8. Download / Batch / Archive 其他既有行为是否未被多文件语义破坏；
+9. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 选择 → 下载 → 文件。
 
-后端测试不能替代第 8 项。
+后端测试不能替代第 9 项。

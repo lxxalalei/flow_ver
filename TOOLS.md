@@ -31,6 +31,20 @@ resource_archive
 
 用户已经明确选中资源并要求下载/保存时，可以直接使用 `resource_download`，不创建 `prepare -> confirm -> start` 二次确认流程。
 
+### Resource 与 File 不是一一对应
+
+MCP 的资源级能力允许：
+
+```text
+1 Resource -> 0..N real files
+```
+
+`resource_inspect` 中的 `primary` 用来确定资源主表示和下载路由；`attachment` / `companion` 等表示可以描述同一逻辑资源自然附带的其他内容。它们不是要求 Agent 把一个课程拆成多个独立“资源”。
+
+`resource_download(..., preferred_container="original")` 表示按资源本身的自然交付方式获取。自然交付可能是单文件，也可能是多文件，例如 SmartEdu 课程可以同时产生主视频、PDF 资料和伴随音频；Generic Web 也会产生 source/readable/metadata 等多个文件。
+
+不要因为输入 URL 本身是 landing webpage 就判断“该资源不能下载”，也不要为了让它可下载而自行补 `mp4` / `pdf`。只有用户明确要求某个具体格式时才传 `preferred_container`；指定格式必须真实存在，不能找不到后静默退回其他格式。
+
 ## Session 是辅助能力，不是前置流程
 
 当前 Session Tool 与资源 Tool 由同一个 MCP 暴露：
@@ -56,6 +70,8 @@ resource_session_delete
 SmartEdu 公共搜索和公共教材索引匿名访问，不自动携带已保存 token。公共搜索若返回 `NETWORK_BLOCKED` / `PLATFORM_UNAVAILABLE`，按当前网络出口/IP 风控/平台访问失败处理，不通过重新登录或补 token 自动重试。
 
 具体 Inspect / Download 真实返回 `AUTH_REQUIRED` 时才进入 Session Tool。
+
+SmartEdu 课程是逻辑复合资源：Inspect 应同时暴露当前自然交付中受支持的主视频/主文件以及附件、伴随内容；默认 `original` 交给 SmartEdu Downloader 按当前详情事实产生一个或多个文件，而不是让 Agent 从课程 URL 猜一个扩展名。
 
 ### Anna's Archive
 
