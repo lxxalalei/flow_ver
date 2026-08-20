@@ -12,7 +12,7 @@ import zipfile
 
 from education_resource_mcp.errors import DomainError
 from education_resource_mcp.acquisition.models import AcquisitionRequest, AcquisitionStrategy
-from education_resource_mcp.acquisition.web_fetch import FetchResult
+from education_resource_mcp.acquisition.web_fetch import FetchResult, ImageFormat
 from education_resource_mcp.acquisition.web_materializer import MaterializerConfig, WebMaterializer
 
 
@@ -20,10 +20,19 @@ class FakeFetcher:
     def __init__(self, body: bytes) -> None:
         self.body = body
         self.calls = 0
+        self.image_calls = 0
+        self.image_body = b"\x89PNG\r\n\x1a\nreader-image"
 
     def fetch_html(self, url: str, *, cancel_event=None) -> FetchResult:
         self.calls += 1
         return FetchResult(url, 200, "text/html", self.body, {})
+
+    def fetch_image(self, url: str, *, cancel_event=None):
+        self.image_calls += 1
+        return (
+            FetchResult(url, 200, "image/png", self.image_body, {}),
+            ImageFormat("png", "image/png", ".png"),
+        )
 
 
 def request(root: Path, url: str = "https://example.org/article") -> AcquisitionRequest:
@@ -58,7 +67,18 @@ class WebMaterializerTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_source_snapshot_is_exact_and_reader_view_is_standalone(self) -> None:
-        result = WebMaterializer(fetcher=FakeFetcher(self.html)).acquire(request(self.root))
+        fetcher = FakeFetcher(self.html)
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=[
+                "# Volcano Formation\n\nMagma rises and forms a volcano.",
+                '''<article><h1>Volcano Formation</h1>
+                <p>Magma rises and forms a volcano.</p>
+                <img src="https://cdn.example.org/volcano.jpg" alt="volcano">
+                </article>''',
+            ],
+        ):
+            result = WebMaterializer(fetcher=fetcher).acquire(request(self.root))
         self.assertTrue(result.ok)
         job = self.root / "job-web-001"
         self.assertEqual(self.html, (job / "source.html").read_bytes())
@@ -79,14 +99,23 @@ class WebMaterializerTests(unittest.TestCase):
         self.assertIn("MIT License", readable)
         self.assertIn("<style>", readable)
         self.assertNotIn('<link rel="stylesheet"', readable.casefold())
+        self.assertIn('src="data:image/png;base64,', readable)
+        self.assertNotIn("https://cdn.example.org/volcano.jpg", readable)
+        self.assertIn("img-src &#x27;self&#x27; data:", readable)
+        self.assertNotIn("http: https: data:", readable)
+        self.assertEqual(1, fetcher.image_calls)
 
         metadata = json.loads((job / "metadata.json").read_text(encoding="utf-8"))
         self.assertEqual("trafilatura", metadata["extractor"])
         self.assertEqual("succeeded", metadata["extraction_status"])
         self.assertEqual(len(self.html), metadata["source_bytes"])
-        self.assertEqual("clean-reader-v1", metadata["reader_template"])
+        self.assertEqual("clean-reader-v2", metadata["reader_template"])
         self.assertEqual("Simple.css 2.3.7", metadata["reader_theme"])
         self.assertTrue(metadata["reader_css_embedded"])
+        self.assertTrue(metadata["reader_images_embedded"])
+        self.assertEqual(1, metadata["embedded_image_count"])
+        self.assertEqual(0, metadata["failed_image_count"])
+        self.assertEqual(1, metadata["image_fetch_count"])
         self.assertTrue(metadata["links_requested"])
         self.assertTrue(metadata["images_requested"])
 
@@ -97,6 +126,107 @@ class WebMaterializerTests(unittest.TestCase):
             )
             bundled_reader = archive.read("index.html").decode("utf-8")
             self.assertIn("Reader base theme: Simple.css 2.3.7", bundled_reader)
+            self.assertIn('src="data:image/png;base64,', bundled_reader)
+
+    def test_duplicate_images_are_fetched_once(self) -> None:
+        html = b'''<html><body><article><h1>Images</h1>
+        <img src="/same.png" alt="first"><img src="/same.png" alt="second">
+        </article></body></html>'''
+        fetcher = FakeFetcher(html)
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=[
+                "# Images",
+                '''<article><h1>Images</h1><img src="/same.png" alt="first">
+                <img src="/same.png" alt="second"></article>''',
+            ],
+        ):
+            result = WebMaterializer(fetcher=fetcher).acquire(request(self.root))
+        self.assertTrue(result.ok)
+        self.assertEqual("complete", result.completion)
+        self.assertEqual(1, fetcher.image_calls)
+        readable = (self.root / "job-web-001" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(2, readable.count('src="data:image/png;base64,'))
+
+    def test_failed_image_is_replaced_and_reported_as_partial(self) -> None:
+        class FailingImageFetcher(FakeFetcher):
+            def fetch_image(self, url: str, *, cancel_event=None):
+                self.image_calls += 1
+                raise DomainError("RESOURCE_NOT_FOUND", "missing")
+
+        fetcher = FailingImageFetcher(self.html)
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=[
+                "# Volcano Formation",
+                '<article><img src="https://cdn.example.org/volcano.jpg" '
+                'alt="volcano"></article>',
+            ],
+        ):
+            result = WebMaterializer(fetcher=fetcher).acquire(request(self.root))
+        self.assertTrue(result.ok)
+        self.assertEqual("partial", result.completion)
+        self.assertIn("image_embedding_incomplete", result.warnings)
+        readable = (self.root / "job-web-001" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("https://cdn.example.org/volcano.jpg", readable)
+        self.assertIn("图片未能离线保存：volcano", readable)
+        metadata = json.loads(
+            (self.root / "job-web-001" / "metadata.json").read_text(encoding="utf-8")
+        )
+        self.assertFalse(metadata["reader_images_embedded"])
+        self.assertEqual(0, metadata["embedded_image_count"])
+        self.assertEqual(1, metadata["failed_image_count"])
+
+    def test_image_fetch_cancellation_is_not_downgraded_to_partial(self) -> None:
+        class CancelledImageFetcher(FakeFetcher):
+            def fetch_image(self, url: str, *, cancel_event=None):
+                raise DomainError("JOB_CANCELLED", "cancelled")
+
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=[
+                "# Volcano Formation",
+                '<article><img src="https://cdn.example.org/volcano.jpg"></article>',
+            ],
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                WebMaterializer(fetcher=CancelledImageFetcher(self.html)).acquire(
+                    request(self.root)
+                )
+        self.assertEqual("JOB_CANCELLED", ctx.exception.code)
+
+    def test_retryable_image_fetch_can_recover(self) -> None:
+        class RetryImageFetcher(FakeFetcher):
+            def fetch_image(self, url: str, *, cancel_event=None):
+                self.image_calls += 1
+                if self.image_calls == 1:
+                    raise DomainError("RATE_LIMITED", "retry", retryable=True)
+                return (
+                    FetchResult(url, 200, "image/png", self.image_body, {}),
+                    ImageFormat("png", "image/png", ".png"),
+                )
+
+        fetcher = RetryImageFetcher(self.html)
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=[
+                "# Volcano Formation",
+                '<article><img src="https://cdn.example.org/volcano.jpg"></article>',
+            ],
+        ), patch(
+            "education_resource_mcp.acquisition.web_materializer._wait_before_image_retry"
+        ):
+            result = WebMaterializer(fetcher=fetcher).acquire(request(self.root))
+        self.assertEqual("complete", result.completion)
+        self.assertEqual(2, fetcher.image_calls)
+        metadata = json.loads(
+            (self.root / "job-web-001" / "metadata.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(2, metadata["image_fetch_count"])
 
     def test_cleaned_document_wrapper_is_replaced_by_one_reader_shell(self) -> None:
         cleaned_html = """<!doctype html><html><head><title>Clean</title></head><body>

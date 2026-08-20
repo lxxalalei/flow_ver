@@ -25,6 +25,28 @@ resource_batch_read
 resource_archive
 ```
 
+### 平台运行时能力层级
+
+下表只汇总当前代码已经声明的直接能力，不代表平台此刻一定可访问，也不替代真实 Tool 返回。`Search` 命中只说明发现了候选；只有存在对应 Inspect 和 Download 路由时，原候选句柄才能直接进入获取闭环。
+
+| 平台 | Search / Browse | Inspect | Download | 完整 Batch |
+| --- | --- | --- | --- | --- |
+| Bilibili | 关键词、创作者预览 | 是 | MP4 | 创作者、日期范围 |
+| Douyin | 关键词、创作者预览 | 是 | MP4 | 创作者 |
+| SmartEdu | 关键词、分类 tabs | 是 | 课程自然交付：视频 / PDF / 音频 | 教材目录展开 |
+| Ximalaya | 关键词 | 是 | MP3 / M4A | — |
+| Anna / Libgen | 关键词 | 是 | 匿名镜像图书 / 文档 | — |
+| Shuge | 关键词、详情 URL | 是 | 公版文档 | — |
+| Yixi | 关键词 | 是 | 已确认公开 MP4 | — |
+| Zhihu | 关键词、创作者预览 | 是 | 网页物化 | — |
+| Zjer | 仅 `courseCateId` / 详情 URL；不支持普通关键词 | 是 | MP4 | — |
+| NLC | 关键词 | 是 | 无直接路由 | — |
+| Weibo | 关键词、创作者预览 | 否 | 无直接路由 | 创作者 |
+| CCTV / Kepu / Baidu Wenku / Runoob / Open163 / WeChat | 仅关键词发现 | 否 | 无直接路由 | — |
+| Generic | MCP 补充 Web Search、已知 URL Import | 是 | 直接文档 / MP4，或网页物化 | — |
+
+“无直接路由”不等于 URL 永远无法保存。用户明确选中公开 URL 时，可以调用 `resource_import_url`；未被识别为专门平台的 URL 会按 `generic` 重新 Inspect，是否能够获取以该次真实结果为准。不要把这个桥接解释成原平台已经具备专门下载器。
+
 普通 Web 发现优先使用宿主 Web Search。选中具体 URL 后交给 `resource_import_url`；Import 会识别明确的 Bilibili / Zhihu / SmartEdu URL，无法明确识别的网页才按 `generic` 处理。
 
 `resource_id` 是当前 MCP 进程内的临时操作句柄；URL、平台原生 ID 等才是稳定资源身份。`job_id` 只为真实长任务保存运行状态。

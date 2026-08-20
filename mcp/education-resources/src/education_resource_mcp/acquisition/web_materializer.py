@@ -9,6 +9,7 @@ or truncate the successfully fetched source snapshot.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
@@ -17,8 +18,9 @@ from io import BytesIO
 import json
 from pathlib import Path
 import re
+import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 import zipfile
 
 from bs4 import BeautifulSoup
@@ -41,7 +43,8 @@ _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 _HTTP_SCHEMES = frozenset({"http", "https"})
 _READER_THEME = "Simple.css"
 _READER_THEME_VERSION = "2.3.7"
-_READER_TEMPLATE = "clean-reader-v1"
+_READER_TEMPLATE = "clean-reader-v2"
+_IMAGE_FETCH_ATTEMPTS = 3
 _VENDOR_DIR = Path(__file__).with_name("vendor")
 _READER_OVERRIDES = """
 body {
@@ -101,6 +104,15 @@ body > header.reader-bar {
   box-shadow: 0 10px 30px rgb(0 0 0 / 10%);
   display: block;
   margin: 1.75rem auto;
+}
+.reader-image-missing {
+  background: var(--accent-bg);
+  border: var(--border-width) dashed var(--border);
+  color: var(--text-light);
+  display: block;
+  margin: 1.75rem 0;
+  padding: .85rem 1rem;
+  text-align: center;
 }
 .reader-main table {
   display: block;
@@ -276,6 +288,128 @@ def _cleaned_body(fragment: str) -> str:
     return "".join(str(node) for node in container.contents).strip()
 
 
+def _image_data_url(body: bytes, media_type: str) -> str:
+    payload = base64.b64encode(body).decode("ascii")
+    return f"data:{media_type};base64,{payload}"
+
+
+def _wait_before_image_retry(delay: float, cancel_event: Any) -> None:
+    deadline = time.monotonic() + delay
+    while True:
+        _check_cancel(cancel_event)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.1, remaining))
+
+
+def _fetch_image_data_url(
+    fetcher: Any,
+    source_url: str,
+    cancel_event: Any,
+) -> tuple[str | None, int]:
+    fetch_image = getattr(fetcher, "fetch_image", None)
+    if not callable(fetch_image):
+        return None, 0
+    attempts = 0
+    for attempt in range(_IMAGE_FETCH_ATTEMPTS):
+        attempts += 1
+        try:
+            response, image_format = fetch_image(
+                source_url,
+                cancel_event=cancel_event,
+            )
+            return _image_data_url(response.body, image_format.media_type), attempts
+        except DomainError as exc:
+            if exc.code == "JOB_CANCELLED":
+                raise
+            if not exc.retryable or attempt + 1 >= _IMAGE_FETCH_ATTEMPTS:
+                return None, attempts
+            _wait_before_image_retry(0.5 * (2**attempt), cancel_event)
+    return None, attempts
+
+
+def _embed_reader_images(
+    fragment: str,
+    *,
+    source_url: str,
+    fetcher: Any,
+    cancel_event: Any,
+) -> tuple[str, int, int, int]:
+    """Embed cleaned raster images and remove every remote responsive source."""
+
+    extracted = fragment.strip()
+    if not extracted:
+        return "", 0, 0, 0
+    soup = BeautifulSoup(extracted, "html.parser")
+    cache: dict[str, str | None] = {}
+    embedded = 0
+    failed = 0
+    requests = 0
+
+    # A remote ``source`` can override the embedded ``img`` inside ``picture``.
+    # Trafilatura has already selected the readable body, so retain the fallback
+    # image and remove alternate network candidates.
+    for source in soup.find_all("source"):
+        source.decompose()
+
+    for image in list(soup.find_all("img")):
+        _check_cancel(cancel_event)
+        raw_source = next(
+            (
+                str(image.get(name) or "").strip()
+                for name in ("src", "data-src", "data-original")
+                if str(image.get(name) or "").strip()
+            ),
+            "",
+        )
+        for name in ("srcset", "data-src", "data-srcset", "data-original"):
+            image.attrs.pop(name, None)
+
+        if raw_source.casefold().startswith(
+            (
+                "data:image/jpeg;base64,",
+                "data:image/png;base64,",
+                "data:image/gif;base64,",
+                "data:image/webp;base64,",
+            )
+        ):
+            image["src"] = raw_source
+            embedded += 1
+            continue
+
+        resolved = urljoin(source_url, raw_source) if raw_source else ""
+        if resolved not in cache:
+            data_url, attempts = _fetch_image_data_url(
+                fetcher,
+                resolved,
+                cancel_event,
+            )
+            requests += attempts
+            cache[resolved] = data_url
+
+        data_url = cache[resolved]
+        if data_url is not None:
+            image["src"] = data_url
+            embedded += 1
+            continue
+
+        failed += 1
+        placeholder = soup.new_tag("span")
+        placeholder["class"] = "reader-image-missing"
+        alt = str(image.get("alt") or "").strip()
+        placeholder.string = f"图片未能离线保存{f'：{alt}' if alt else ''}"
+        image.replace_with(placeholder)
+
+    container = soup.body if soup.body is not None else soup
+    return (
+        "".join(str(node) for node in container.contents).strip(),
+        embedded,
+        failed,
+        requests,
+    )
+
+
 def _readable_document(fragment: str, *, title: str, source_url: str) -> str:
     """Render cleaned Trafilatura HTML inside the stable Reader shell."""
 
@@ -293,7 +427,7 @@ def _readable_document(fragment: str, *, title: str, source_url: str) -> str:
             "</div>"
         )
     csp = (
-        "default-src 'none'; img-src 'self' http: https: data:; "
+        "default-src 'none'; img-src 'self' data:; "
         "style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; "
         "frame-src 'none'; base-uri 'none'; form-action 'none'"
     )
@@ -355,11 +489,14 @@ class WebMaterializer:
         settings: Any = None,
         config: MaterializerConfig | None = None,
     ) -> None:
-        self.fetcher = fetcher
         self.settings = settings
         self.config = config or MaterializerConfig()
         self.timeout_seconds = float(
             _value(settings, "download_timeout_seconds", 30) if settings is not None else 30
+        )
+        self.fetcher = fetcher or BoundedWebFetcher(
+            timeout_seconds=self.timeout_seconds,
+            max_bytes=self.config.max_html_bytes,
         )
 
     def __call__(self, request: Any) -> Any:
@@ -369,10 +506,7 @@ class WebMaterializer:
         return self.acquire(request)
 
     def _fetch_html(self, url: str, cancel_event: Any) -> FetchResult:
-        fetcher = self.fetcher or BoundedWebFetcher(
-            timeout_seconds=self.timeout_seconds,
-            max_bytes=self.config.max_html_bytes,
-        )
+        fetcher = self.fetcher
         if hasattr(fetcher, "fetch_html"):
             return fetcher.fetch_html(url, cancel_event=cancel_event)
         if hasattr(fetcher, "fetch"):
@@ -444,6 +578,17 @@ class WebMaterializer:
             if "content_extraction_failed" not in warnings:
                 warnings.append("content_extraction_empty")
 
+        readable_fragment, embedded_images, failed_images, image_fetches = (
+            _embed_reader_images(
+                readable_fragment,
+                source_url=response.url,
+                fetcher=self.fetcher,
+                cancel_event=cancel_event,
+            )
+        )
+        if failed_images:
+            warnings.append("image_embedding_incomplete")
+
         title = str(resource.get("title") or "教育资源")
         if not markdown.strip():
             markdown = (
@@ -469,6 +614,10 @@ class WebMaterializer:
             "reader_template": _READER_TEMPLATE,
             "reader_theme": f"{_READER_THEME} {_READER_THEME_VERSION}",
             "reader_css_embedded": True,
+            "reader_images_embedded": failed_images == 0,
+            "embedded_image_count": embedded_images,
+            "failed_image_count": failed_images,
+            "image_fetch_count": image_fetches,
             "links_requested": True,
             "images_requested": True,
             "warnings": warnings,
@@ -514,8 +663,15 @@ class WebMaterializer:
                 "extraction_status": extraction_status,
                 "reader_template": _READER_TEMPLATE,
                 "reader_theme": f"{_READER_THEME} {_READER_THEME_VERSION}",
+                "reader_images_embedded": failed_images == 0,
+                "embedded_image_count": embedded_images,
+                "failed_image_count": failed_images,
             },
-            completion="complete" if extraction_status == "succeeded" else "partial",
+            completion=(
+                "complete"
+                if extraction_status == "succeeded" and failed_images == 0
+                else "partial"
+            ),
         )
 
 

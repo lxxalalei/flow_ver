@@ -60,9 +60,9 @@ def urlopen_with_fallback(
     """Open URL with urllib, falling back to Windows curl for local CA issues.
 
     ``curl_on_status`` optionally lists HTTP status codes (e.g. ``403``) for
-    which a Windows curl retry is attempted when the primary urllib request
-    is rejected, e.g. by Cloudflare bot fingerprinting.  A failed curl retry
-    surfaces the original HTTP error behaviour (HTTPError is re-raised).
+    which a system curl retry is attempted when the primary urllib request is
+    rejected, e.g. by bot fingerprinting. A failed curl retry preserves the
+    normal HTTP error behaviour.
     """
 
     try:
@@ -126,13 +126,16 @@ def probe_with_cookies(
 
 
 def _curl_available() -> bool:
-    if os.name != "nt":
-        return False
-    return shutil.which("curl.exe") is not None
+    binary = "curl.exe" if os.name == "nt" else "curl"
+    return shutil.which(binary) is not None
 
 
 def _should_try_curl_fallback(exc: URLError) -> bool:
     if os.environ.get("LRS_HTTP_DISABLE_CURL_FALLBACK"):
+        return False
+    # Preserve the original Windows-only certificate workaround. Other
+    # platforms use curl only when a caller explicitly opts into a status code.
+    if os.name != "nt":
         return False
     if not _curl_available():
         return False
@@ -163,11 +166,12 @@ def _curl_open(
         body_file = temp_path / "body.bin"
         data_file = temp_path / "request.bin"
         command = [
-            "curl.exe",
-            "--ssl-no-revoke",
+            "curl.exe" if os.name == "nt" else "curl",
             "--silent",
             "--show-error",
         ]
+        if os.name == "nt":
+            command.append("--ssl-no-revoke")
         if follow_redirects:
             command.append("--location")
         command.extend(

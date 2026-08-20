@@ -127,6 +127,7 @@ class ServiceRoutingTests(unittest.TestCase):
         class StaticMaterializer:
             def __init__(self) -> None:
                 self.called = False
+                self.partial = False
 
             def materialize(self, request):
                 self.called = True
@@ -148,6 +149,8 @@ class ServiceRoutingTests(unittest.TestCase):
                 return AcquisitionResult.success(
                     AcquisitionStrategy.WEB_MATERIALIZE,
                     ArtifactBundle((artifact,)),
+                    warnings=("image_embedding_incomplete",) if self.partial else (),
+                    completion="partial" if self.partial else "complete",
                 )
 
         static = StaticMaterializer()
@@ -177,7 +180,7 @@ class ServiceRoutingTests(unittest.TestCase):
             [{"platform": "generic", "queries": [{"query": "天文"}]}], limit=10
         )
         resource_id = search["candidates"][0]["resource_id"]
-        files = service.download_resource(
+        files, failures = service.download_resource(
             "job-routing-0001",
             service._get_resource(resource_id),
             "html",
@@ -187,6 +190,26 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertFalse(service._fake_renderer.called)  # type: ignore[attr-defined]
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0]["media_type"], "application/zip")
+        self.assertEqual([], failures)
+        service.shutdown()
+
+    def test_partial_materialization_is_exposed_to_job_worker(self) -> None:
+        service = self._make_service()
+        service._fake_static_materializer.partial = True  # type: ignore[attr-defined]
+        search = service.search(
+            [{"platform": "generic", "queries": [{"query": "天文"}]}], limit=10
+        )
+        resource_id = search["candidates"][0]["resource_id"]
+        files, failures = service.download_resource(
+            "job-routing-0002",
+            service._get_resource(resource_id),
+            "html",
+            threading.Event(),
+        )
+        self.assertEqual(1, len(files))
+        self.assertEqual(1, len(failures))
+        self.assertEqual("PARTIAL_FAILURE", failures[0]["code"])
+        self.assertIn("部分正文图片", failures[0]["message"])
         service.shutdown()
 
 

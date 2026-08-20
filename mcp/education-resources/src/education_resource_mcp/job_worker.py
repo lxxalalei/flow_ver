@@ -58,11 +58,11 @@ def run(directory: Path) -> int:
             if cancel.is_set():
                 break
             try:
-                files.extend(
-                    service.download_resource(
-                        job_id, resource, preferred_container, cancel
-                    )
+                resource_files, resource_failures = service.download_resource(
+                    job_id, resource, preferred_container, cancel
                 )
+                files.extend(resource_files)
+                failures.extend(resource_failures)
             except (DomainError, AcquisitionPlanningError) as exc:
                 failures.append(
                     {

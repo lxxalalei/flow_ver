@@ -11,6 +11,21 @@ from .errors import DomainError
 from .service import ResourceService
 
 
+PLATFORM_CAPABILITY_GUIDANCE = (
+    "运行时能力分层："
+    "bilibili/douyin/smartedu/ximalaya/annas-archive/shuge/yixi/zhihu "
+    "已声明 Search + Inspect + Download 路由；"
+    "zjer 只接受 courseCateId 或详情 URL，支持 Inspect/Download，不支持普通关键词；"
+    "nlc 支持 Search + Inspect，但没有 Download 路由；"
+    "weibo 支持 Search 和创作者完整枚举，但没有 Inspect/Download 路由；"
+    "cctv/kepu/baiduwenku/runoob/open163/wechat 当前仅提供 Search 发现；"
+    "generic 支持补充 Web Search，以及已知 URL 的 Inspect/Download。"
+    "仅发现平台返回的原 resource_id 不能直接 Inspect/Download；"
+    "若用户选中其公开 URL，可通过 resource_import_url 按 generic 网页重新检查，"
+    "但是否可获取仍以真实 Inspect 结果为准。"
+)
+
+
 class SearchTask(BaseModel):
     """One platform plus its search phrases for resource_search."""
 
@@ -20,6 +35,7 @@ class SearchTask(BaseModel):
             "kepu、baiduwenku、runoob、nlc、open163、annas-archive、weibo、"
             "wechat、shuge、zjer、generic（下划线会自动归一为连字符）。"
             "普通网页发现通常由宿主 Web Search 完成；generic 是 MCP 内补充网页搜索。"
+            + PLATFORM_CAPABILITY_GUIDANCE
         )
     )
     queries: list[str] = Field(

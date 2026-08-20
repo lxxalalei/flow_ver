@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import io
+import os
+import shutil
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request
 
-from education_resource_mcp.adapters.http_client import CurlResponse, urlopen_with_fallback
+from education_resource_mcp.adapters.http_client import (
+    CurlResponse,
+    _curl_available,
+    urlopen_with_fallback,
+)
 
 
 def _http_error(url: str, code: int) -> HTTPError:
@@ -62,6 +68,12 @@ class UrlopenWithFallbackCurlOnStatusTests(unittest.TestCase):
                     self.request, timeout=5, curl_on_status=frozenset({403})
                 )
         mocked.assert_not_called()
+
+    def test_curl_availability_uses_platform_binary_name(self) -> None:
+        expected = "curl.exe" if os.name == "nt" else "curl"
+        with patch.object(shutil, "which", return_value="/usr/bin/curl") as mocked:
+            self.assertTrue(_curl_available())
+        mocked.assert_called_once_with(expected)
 
     def test_403_without_curl_binary_raises(self) -> None:
         with patch(

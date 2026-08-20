@@ -176,7 +176,7 @@ Trafilatura
      Simple.css 2.3.7 (vendored, MIT)
      + 少量本项目阅读样式
           ↓
-       index.html                    # 单文件可读 HTML，CSS 内联
+       index.html                    # 单文件可读 HTML，CSS 与正文图片内嵌
 
 metadata.json                        # 获取 / 抽取 / Reader 事实
 webbundle.zip
@@ -187,14 +187,16 @@ webbundle.zip
 - `source.html` 与正文抽取解耦；抽取失败不能删除已经取得的源响应；
 - Trafilatura 继续负责成熟的正文/结构抽取，不继续扩展自研 `web_blocks.py`；
 - Reader 只包装 Trafilatura 的清洗后派生 HTML，不参与正文判断，也不反向修改 `source.html` / `content.md`；
-- Reader 基础主题使用 vendored Simple.css 2.3.7，保留 MIT 许可证；生成的 CSS 直接内联进 `index.html`，不依赖 CDN、npm、JS 或在线字体；
+- 当前单文件模板标识为 `clean-reader-v2`；
+- Reader 基础主题使用 vendored Simple.css 2.3.7，保留 MIT 许可证；生成的 CSS 和正文图片直接内嵌进 `index.html`，不依赖 CDN、npm、JS 或在线字体；
 - Reader 统一处理正文宽度、中文/英文系统字体、标题层级、链接、图片、表格、引用、代码块、移动端、dark mode 与打印；
 - Trafilatura 抽取失败时仍生成同一个 Reader 外壳，并明确提示原始响应位于 `source.html`；Job 仍保持 partial，不把模板成功误报为正文抽取成功；
-- 链接、图片和表格继续以 Trafilatura 清洗后的真实内容为准；当前不会下载并重写所有远程图片，因此不声称浏览器级完整离线镜像；
+- 链接、图片和表格继续以 Trafilatura 清洗后的真实内容为准；清洗后保留的有效栅格图片会经同一网络与格式校验边界获取并转换为 `data:` URL，重复地址只获取一次；
+- 图片无法获取或格式不支持时，不保留会继续联网的图片地址，而是写入可读占位，并将 Job 标记为 partial、在 metadata/warnings 中显式记录；Reader 不克隆原网页脚本、广告、视频、原站 CSS 或浏览器运行状态，因此它是“清洗正文的单文件离线阅读页”，不是完整网页镜像；
 - 当前不接 Monolith / SingleFile / ArchiveBox，不追求任意动态网页的自包含浏览器级镜像；
 - 单个 HTTP 响应仍有真实获取字节上限，超出时显式失败，不截成看似完整的资源。
 
-如果后续真实用户明确需要“离线打开仍尽量完整还原 CSS/图片”的单文件网页，再单独评估 Monolith，不提前引入。
+单文件 Reader 的图片内嵌使用现有 Python 网络边界和标准库 Base64，不引入 Monolith、浏览器运行时或新的第三方依赖。
 
 ## 7. `resource_id` 与 Job
 
@@ -294,7 +296,7 @@ mcp/education-resources/
 5. SmartEdu 保存过 session 时公共 Search 是否仍匿名；
 6. Anna/Libgen 是否不触发登录；
 7. Host Web URL → Import 是否能恢复明确的平台身份；
-8. Generic Web 是否同时保留原始 `source.html`、Trafilatura `content.md`，并把清洗 HTML 放进无 CDN/JS 依赖的统一 Reader `index.html`；
+8. Generic Web 是否同时保留原始 `source.html`、Trafilatura `content.md`，并把清洗 HTML 与正文图片放进无 CDN/JS/远程图片依赖的统一 Reader `index.html`；
 9. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
 10. BatchRead 子集候选是否能得到 `resource_id`，完整 succeeded batch 是否能在用户明确选择全部后直接交给现有 Download Job；
 11. Download / Batch / Archive 其他既有行为是否未被多文件/批量衔接语义破坏；

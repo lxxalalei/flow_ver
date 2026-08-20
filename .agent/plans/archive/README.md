@@ -29,6 +29,10 @@
 | [0056-download-job-subprocess-durability.md](0056-download-job-subprocess-durability.md) | in_progress | detached worker / file-backed Job 实现和进程级验证历史；旧“51 failures 基线”已被最新 205 tests 全过取代。剩余 Windows gateway restart 验收转交 0028 |
 | [0057-native-batch-capability-parity.md](0057-native-batch-capability-parity.md) | in_progress | Batch、SmartEdu tabs/catalog、Bilibili time range 等原生化实现历史；旧 9 Tool、独立 session-manager 复用和 51 failures 等描述只作历史。代表性真实 Batch 用户链转交 0028 |
 | [0059-post-convergence-review-fixes.md](0059-post-convergence-review-fixes.md) | completed | release-ready 收尾已完成：205 tests、compileall、runtime verifier、14 Tool stdio probe；按计划管理规范归档 |
+| [0062-baiduwenku-search-repair.md](0062-baiduwenku-search-repair.md) | completed | 百度文库搜索切换到服务端返回结果的移动公开页，并为显式 403 启用跨平台 curl fallback；真实联网两条查询返回 10 个候选、0 failures |
+| [0063-live-search-platform-smoke.md](0063-live-search-platform-smoke.md) | completed | 17 路真实搜索审计：12 个专用平台正常、4 个受登录/授权限制；Generic Web 失效且静默吞错误，WeChat 存在 HTML 实体清洗缺陷 |
+| [0064-wechat-search-html-entities.md](0064-wechat-search-html-entities.md) | completed | 微信公众号搜索标题、摘要、公众号名和 Sogou 跳转 URL 的 HTML 实体清洗完成；真实联网返回 3 条且无实体残留 |
+| [0065-live-web-materialization-smoke.md](0065-live-web-materialization-smoke.md) | completed | 网页物化真实链：未压缩 HTML 成功生成 5 个产物；python.org gzip HTML 因 fetcher 未解压而失败，现有 19 项相关测试未覆盖该网络条件 |
 
 后续真实使用产生新的局部修正（例如 0060）可以重新出现在顶层；这不表示把上表历史实施计划重新激活。
 

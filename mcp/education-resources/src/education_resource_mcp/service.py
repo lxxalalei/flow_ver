@@ -978,7 +978,7 @@ class ResourceService:
         resource: dict[str, Any],
         preferred_container: str,
         cancel_event: threading.Event,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         resolution = self._inspect_raw(resource)
         route = self.planner.route(
             resource,
@@ -1033,7 +1033,25 @@ class ResourceService:
         ]
         if not files:
             raise DomainError("DOWNLOAD_FAILED", "下载器没有产生可用文件")
-        return files
+        partial_failures: list[dict[str, Any]] = []
+        if acquisition.completion == "partial":
+            messages = {
+                "content_extraction_failed": "网页正文抽取未完整成功",
+                "content_extraction_empty": "网页正文未抽取到可读内容",
+                "image_embedding_incomplete": "部分正文图片未能嵌入单文件 HTML",
+            }
+            warning_text = "；".join(
+                messages.get(warning, str(warning)) for warning in acquisition.warnings
+            ) or "资源仅部分物化成功"
+            partial_failures.append(
+                {
+                    "resource_id": resource.get("resource_id"),
+                    "code": "PARTIAL_FAILURE",
+                    "message": warning_text,
+                    "retryable": False,
+                }
+            )
+        return files, partial_failures
 
     def _get_resource(self, resource_id: str) -> dict[str, Any]:
         with self._lock:

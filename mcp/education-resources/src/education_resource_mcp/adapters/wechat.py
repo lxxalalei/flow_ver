@@ -7,6 +7,7 @@ reliable access and blocks anonymous scraping.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from typing import Any
@@ -27,7 +28,8 @@ UA = (
 
 
 def _clean(text: Any) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", str(text or ""))).strip()
+    value = html.unescape(str(text or ""))
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", value)).strip()
 
 
 class WechatSearchAdapter:
@@ -71,7 +73,7 @@ class WechatSearchAdapter:
             )
             if not title_link:
                 continue
-            href = title_link.group(1).strip()
+            href = html.unescape(title_link.group(1).strip())
             # Sogou uses /link?url= redirect links; keep as-is
             if href.startswith("/"):
                 href = urljoin("https://weixin.sogou.com", href)

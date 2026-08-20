@@ -19,6 +19,7 @@ if str(SRC) not in sys.path:
 
 from education_resource_mcp.config import Settings
 from education_resource_mcp.errors import DomainError
+from education_resource_mcp.server import SearchTask
 from education_resource_mcp.service import ResourceService
 
 
@@ -53,6 +54,20 @@ class SearchContractTests(unittest.TestCase):
         self._tmp.cleanup()
 
     # -- accepted forms -------------------------------------------------
+
+    def test_platform_schema_explains_capability_levels(self) -> None:
+        description = SearchTask.model_json_schema()["properties"]["platform"][
+            "description"
+        ]
+        for fact in (
+            "Search + Inspect + Download",
+            "zjer 只接受 courseCateId 或详情 URL",
+            "nlc 支持 Search + Inspect，但没有 Download 路由",
+            "weibo 支持 Search 和创作者完整枚举",
+            "当前仅提供 Search 发现",
+            "仅发现平台返回的原 resource_id 不能直接 Inspect/Download",
+        ):
+            self.assertIn(fact, description)
 
     def test_string_queries_are_normalized_to_legacy_shape(self) -> None:
         self.service.search(
