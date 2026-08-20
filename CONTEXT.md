@@ -6,7 +6,7 @@
 
 1. OpenClaw 运行时实际暴露的 MCP Tool schema 与真实返回；
 2. `docs/CURRENT_ARCHITECTURE.md`；
-3. `skills/learning-resource-flow/SKILL.md` 及 active references；
+3. `skills/SKILL.md` 及 active references；
 4. 本文件仅作术语辅助。
 
 ## 领域词汇

@@ -34,7 +34,7 @@ Session 是 `education-resources` 内的一组辅助能力，不再拥有独立 
 
 ## 2. Active 组件
 
-### `skills/learning-resource-flow/`
+### `skills/`
 
 唯一用户入口和语义决策层，负责：
 
@@ -261,7 +261,7 @@ Archive 只移动真实下载 Job 已产生的文件；分类语义由 Agent 决
 ## 9. 当前核心目录
 
 ```text
-skills/learning-resource-flow/
+skills/
 
 mcp/education-resources/
 └── src/education_resource_mcp/

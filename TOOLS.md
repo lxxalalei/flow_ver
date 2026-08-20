@@ -154,4 +154,4 @@ webbundle.zip
 
 复杂检索可以使用宿主原生 sub-agent 做临时语义规划，但 child 只提出搜索角度、来源职责、query 和不确定性；Main Agent 必须重新判断。不要恢复 Flow、ResultSet、Selection、Plan 或固定 child 数量的持久架构。
 
-当前语义规则见 `skills/learning-resource-flow/SKILL.md`；当前实现边界见 `docs/CURRENT_ARCHITECTURE.md`。
+当前语义规则见 `skills/SKILL.md`；当前实现边界见 `docs/CURRENT_ARCHITECTURE.md`。

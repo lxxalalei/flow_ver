@@ -12,7 +12,7 @@
 
 当前 active 产品部分只有：
 
-- `skills/learning-resource-flow/`：唯一用户入口和语义决策层；
+- `skills/`（SKILL.md + references + examples）：唯一用户入口和语义决策层；
 - `mcp/education-resources/`：唯一 MCP，提供资源能力和辅助 Session Tool。
 
 `legacy/skill-pipeline-v1/` 只用于审计、参考和显式回滚，不参与正常运行。
@@ -56,7 +56,7 @@ Failure modes introduced:
 
 ## 修改边界
 
-- 顶层 `skills/` 只允许存在 `learning-resource-flow`；不要把 legacy Skill 复制回 active 目录。
+- 顶层 `skills/` 直接放置 active Skill（SKILL.md、references、examples），不再有二级 Skill 目录；不要把 legacy Skill 复制回来。
 - 未经明确授权，不删除 `legacy/`。
 - 不提交凭据、Cookie、Token、浏览器档案、下载产物、SQLite 运行库或测试会话数据。
 - 测试运行数据只写入 `.openclaw-test/` 或测试临时目录；正式运行数据使用用户级受控目录。

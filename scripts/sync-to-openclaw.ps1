@@ -109,7 +109,7 @@ function CheckExists([string[]]$Paths) {
 Section 'Pre-flight checks'
 CheckExists @(
     "$Repo\mcp\education-resources\src",
-    "$Repo\skills\learning-resource-flow\SKILL.md",
+    "$Repo\skills\SKILL.md",
     $EduPy
 )
 Ok 'All source and venv paths verified'
@@ -150,7 +150,7 @@ Ok 'Import smoke test passed'
 # 2. Skills
 # ---------------------------------------------------------------------------
 Section 'Syncing learning-resource-flow skill'
-MirrorDir "$Repo\skills\learning-resource-flow" $LrfSkillTarget
+MirrorDir "$Repo\skills" $LrfSkillTarget
 Ok "Skill synced to $LrfSkillTarget"
 
 # ---------------------------------------------------------------------------

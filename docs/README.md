@@ -12,7 +12,7 @@
 | 当前正在执行什么任务 | [`.agent/plans/`](../.agent/plans/README.md) |
 | MCP 当前公共工具与运行参数 | [TOOLS.md](../TOOLS.md) |
 | MCP 服务如何安装、启动和验证 | [`mcp/education-resources/README.md`](../mcp/education-resources/README.md) |
-| Agent 运行时如何理解、检索、核验和获取资源 | [`skills/learning-resource-flow/`](../skills/learning-resource-flow/SKILL.md) |
+| Agent 运行时如何理解、检索、核验和获取资源 | [`skills/`](../skills/SKILL.md) |
 | 历史方案与阶段性规划 | [`archive/`](archive/README.md) |
 
 ## 文档权威边界

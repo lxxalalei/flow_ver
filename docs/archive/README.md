@@ -12,7 +12,7 @@
 | --- | --- | --- | --- | --- |
 | [flow_ver 下一阶段详尽规划与执行计划](flow_ver_下一阶段详尽规划与执行计划_2026-08-08.md) | `docs/flow_ver_下一阶段详尽规划与执行计划_2026-08-08.md` | 2026-08-08 | 针对 0017–0024 的阶段性收口规划、审计记录和后续交接 | [当前架构](../CURRENT_ARCHITECTURE.md)、[开发路线图](../DEVELOPMENT_PLAN.md)、[0027 平台获取能力接入](../../.agent/plans/archive/0027-platform-acquisition-enablement.md) |
 | [flow_ver 资源检索系统 v2 总体规划与执行计划](flow_ver_资源检索系统_v2_总体规划与执行计划.md) | `docs/flow_ver_资源检索系统_v2_总体规划与执行计划.md` | 2026-08-07（执行记录始于 2026-08-08） | 早期总体设计、阶段执行日志和迁移背景 | [当前架构](../CURRENT_ARCHITECTURE.md)、[开发路线图](../DEVELOPMENT_PLAN.md) |
-| [Resource Retrieval Agent 系统设计与实现方案](Resource_Retrieval_Agent_系统设计与实现方案.md) | `docs/Resource_Retrieval_Agent_系统设计与实现方案.md` | 2026-08-07 | 独立的早期产品/系统设计蓝图，描述 Intent → Plan → Search → Evaluate → Fetch → Archive | [当前架构](../CURRENT_ARCHITECTURE.md)、[开发路线图](../DEVELOPMENT_PLAN.md)、[active Skill](../../skills/learning-resource-flow/SKILL.md) 与 [MCP 契约](../../mcp/education-resources/contracts/README.md) |
+| [Resource Retrieval Agent 系统设计与实现方案](Resource_Retrieval_Agent_系统设计与实现方案.md) | `docs/Resource_Retrieval_Agent_系统设计与实现方案.md` | 2026-08-07 | 独立的早期产品/系统设计蓝图，描述 Intent → Plan → Search → Evaluate → Fetch → Archive | [当前架构](../CURRENT_ARCHITECTURE.md)、[开发路线图](../DEVELOPMENT_PLAN.md)、[active Skill](../../skills/SKILL.md) 与 [MCP 契约](../../mcp/education-resources/contracts/README.md) |
 
 ## 历史 Skill reference 路径
 
@@ -27,6 +27,6 @@
 | `acquisition-strategy.md`、`mcp-workflow.md` | `acquisition.md` |
 | `library-structure.md` | `library.md` |
 
-现行入口均位于 [`skills/learning-resource-flow/references/`](../../skills/learning-resource-flow/references/)；历史正文不回写为当前设计，以免篡改当时的审计与规划记录。
+现行入口均位于 [`skills/references/`](../../skills/references/)；历史正文不回写为当前设计，以免篡改当时的审计与规划记录。
 
 历史完成计划另见 [计划归档索引](../../.agent/plans/archive/README.md)；已完成计划和本目录都不是默认必读内容。

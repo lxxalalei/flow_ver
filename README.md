@@ -4,7 +4,7 @@
 
 ```text
 用户自然语言
-  -> skills/learning-resource-flow/
+  -> skills/
   -> Host Web Search / mcp/education-resources/
   -> 搜索 / 必要检查 / 下载 / Batch / Archive
 ```
@@ -12,7 +12,7 @@
 ## Active 结构
 
 ```text
-skills/learning-resource-flow/       # 用户入口：理解需求、搜索规划、候选判断
+skills/                              # 用户入口：理解需求、搜索规划、候选判断
 mcp/education-resources/              # 唯一 stdio MCP：资源 + 辅助 Session 能力
 docs/                                # 当前架构与开发路线
 .agent/plans/                         # 当前执行计划
