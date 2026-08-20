@@ -44,13 +44,16 @@ SmartEdu 课程
   -> 配套音频
 
 Generic Web 页面
-  -> source.html
-  -> index.html
+  -> index.html       # CSS 与正文栅格图片内嵌的单文件离线阅读页
+  -> source.html      # 原始 HTML 响应
   -> content.md
   -> metadata.json
+  -> webbundle.zip    # 上述四个文件的打包交付
 ```
 
 因此 `resource_inspect` 看到 landing webpage，不代表这个逻辑资源只能按网页保存；应继续依据同一次 Inspect 返回的真实可获取内容判断。
+
+Generic Web 的 `index.html` 是清洗正文的主要交付物，不依赖 CDN、在线字体或远程正文图片，但它不是对原站脚本、广告、视频和浏览器状态的完整克隆。正文图片无法获取或格式不受支持时，Reader 会写入占位并让 Job 保持 `partial`；Agent 应按最终 `files` / `failures` 说明哪些文件仍可使用。
 
 默认 `preferred_container="original"` 表示：**按资源本身的自然交付方式获取**。自然交付可以是一个文件，也可以是同一资源的一组文件。Agent 不要为了让后端“看起来可下载”而自行猜 `mp4`、`pdf` 等扩展名。
 
@@ -104,6 +107,10 @@ Batch discovery
 
 只有工具实际产生可用文件，才能说下载成功。
 
+`resource_download` 和 `resource_batch_collect` 都会先返回持久 `job_id` 与 `queued` 状态。开始后必须继续用 `resource_job_status` 查看进度，直到进入 `succeeded`、`partial`、`failed`、`cancelled` 或 `interrupted` 之一；`queued`、`running`、`cancelling` 都不是最终结果。
+
+只有到达终态后才能根据真实 `files` / `failures` 说明结果或执行归档。Batch 也只有完整 `succeeded` 时才能作为“全部结果”继续交给下载；其他终态仍按本文件前述部分结果语义处理。
+
 一个资源产生多个文件时，以 Job 的真实 `files` / `failures` 为准；不要因为主视频成功就自动声称课程包全部成功。多个 Resource 的批量 Job 也同理：部分资源成功不等于整批成功。
 
 以下都不能等同于成功：
@@ -126,6 +133,10 @@ Batch discovery
 - 用户真正需要的是替代资源，而不是继续折腾同一个文件。
 
 是否寻找替代资源重新回到语义判断，不要由下载器自动决定。
+
+如果真实资源操作返回 `AUTH_REQUIRED`，不要把 Session 检查变成所有搜索或下载的前置步骤。先使用当前 Session 登录引导，让用户自行完成登录；浏览器捕获结果作为 opaque `capture` 原样交给 Session 保存能力，再重试原操作。
+
+Agent 不索取或代填密码、验证码、短信码或 MFA，也不手工挑选、拼接 Cookie/Token。用户不希望登录或登录仍失败时，如实说明限制，再判断是否需要同职责替代来源；不要为了隐藏认证失败静默切换到不等价资源。
 
 ## 9. 取消
 

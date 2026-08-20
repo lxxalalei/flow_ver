@@ -33,6 +33,7 @@
 | [0063-live-search-platform-smoke.md](0063-live-search-platform-smoke.md) | completed | 17 路真实搜索审计：12 个专用平台正常、4 个受登录/授权限制；Generic Web 失效且静默吞错误，WeChat 存在 HTML 实体清洗缺陷 |
 | [0064-wechat-search-html-entities.md](0064-wechat-search-html-entities.md) | completed | 微信公众号搜索标题、摘要、公众号名和 Sogou 跳转 URL 的 HTML 实体清洗完成；真实联网返回 3 条且无实体残留 |
 | [0065-live-web-materialization-smoke.md](0065-live-web-materialization-smoke.md) | completed | 网页物化真实链：未压缩 HTML 成功生成 5 个产物；python.org gzip HTML 因 fetcher 未解压而失败，现有 19 项相关测试未覆盖该网络条件 |
+| [0066-skill-doc-drift-fixes.md](0066-skill-doc-drift-fixes.md) | completed | 最小补齐异步 Job、AUTH_REQUIRED、Inspect 能力约束和 Reader v2 交付语义，并修复 Tool 列表脚本失效导入 |
 
 后续真实使用产生新的局部修正（例如 0060）可以重新出现在顶层；这不表示把上表历史实施计划重新激活。
 
