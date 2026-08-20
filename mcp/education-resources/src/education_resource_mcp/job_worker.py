@@ -1,14 +1,4 @@
-"""Detached download worker.
-
-Usage::
-
-    python -m education_resource_mcp.job_worker <job_dir>
-
-The parent process writes ``request.json`` plus a queued ``job.json`` into the
-job directory and then spawns this module detached (see ``jobs.spawn_worker``).
-While alive the worker owns ``job.json`` and updates progress after each
-resource. Everything it prints lands in ``worker.log`` next to the job state.
-"""
+"""Detached worker for Download, Expand and legacy internal batch jobs."""
 
 from __future__ import annotations
 
@@ -34,10 +24,19 @@ LOGGER = logging.getLogger(__name__)
 
 def run(directory: Path) -> int:
     request = read_request(directory)
-    if str(request.get("kind") or "") == "batch_collect":
+    kind = str(request.get("kind") or "")
+    if kind == "resource_expand":
+        from .expand import run_expand
+
+        return run_expand(directory)
+    # Kept as an internal compatibility path while the public MCP no longer
+    # exposes platform-specific batch modes. It can be removed separately
+    # after old tests/callers are migrated.
+    if kind == "batch_collect":
         from .batch import run_batch_collect
 
         return run_batch_collect(directory)
+
     job_id = str(request["job_id"])
     resources = list(request.get("resources") or [])
     preferred_container = str(request.get("preferred_container") or "original")

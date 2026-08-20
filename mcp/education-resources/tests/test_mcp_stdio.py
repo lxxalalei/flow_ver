@@ -15,14 +15,13 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 SRC = SERVICE_ROOT / "src"
 EXPECTED_TOOLS = {
     "resource_search",
-    "resource_browse_creator",
+    "resource_expand",
     "resource_import_url",
     "resource_inspect",
     "resource_download",
     "resource_job_status",
     "resource_job_cancel",
-    "resource_batch_collect",
-    "resource_batch_read",
+    "resource_job_read",
     "resource_archive",
     "resource_session_status",
     "resource_session_login_guide",
@@ -67,16 +66,14 @@ class McpStdioTests(unittest.TestCase):
             process.stdin.flush()
             initialize_response = json.loads(process.stdout.readline())
 
-            initialized = {
+            process.stdin.write(json.dumps({
                 "jsonrpc": "2.0",
                 "method": "notifications/initialized",
                 "params": {},
-            }
-            list_tools = {
+            }) + "\n")
+            process.stdin.write(json.dumps({
                 "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}
-            }
-            process.stdin.write(json.dumps(initialized) + "\n")
-            process.stdin.write(json.dumps(list_tools) + "\n")
+            }) + "\n")
             process.stdin.flush()
             tools_response = json.loads(process.stdout.readline())
             process.stdin.close()
@@ -91,13 +88,25 @@ class McpStdioTests(unittest.TestCase):
         tools = tools_response["result"]["tools"]
         self.assertEqual(EXPECTED_TOOLS, {item["name"] for item in tools})
 
-        batch_tool = next(item for item in tools if item["name"] == "resource_batch_collect")
-        properties = batch_tool["inputSchema"]["properties"]
-        self.assertIn("collection_url", properties)
-        self.assertIn(
+        search_tool = next(item for item in tools if item["name"] == "resource_search")
+        search_schema = json.dumps(search_tool["inputSchema"], ensure_ascii=False)
+        self.assertNotIn('"tabs"', search_schema)
+
+        expand_tool = next(item for item in tools if item["name"] == "resource_expand")
+        expand_properties = expand_tool["inputSchema"]["properties"]
+        self.assertEqual({"resource_id", "source_url"}, set(expand_properties))
+
+        all_schema = json.dumps(tools, ensure_ascii=False)
+        for removed in (
+            "creator_full",
+            "time_range_search",
+            "catalog_expand",
             "collection_expand",
-            json.dumps(properties["mode"], ensure_ascii=False),
-        )
+            "start_day",
+            "end_day",
+            '"specs"',
+        ):
+            self.assertNotIn(removed, all_schema)
 
 
 if __name__ == "__main__":
