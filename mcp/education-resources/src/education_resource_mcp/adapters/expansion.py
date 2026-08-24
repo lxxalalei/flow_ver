@@ -31,34 +31,35 @@ def expand_resource(
     """Expand one container Resource using platform-owned mechanics."""
 
     platform = str(target.get("platform") or "").strip()
-    adapters = getattr(search_provider, "_adapters", None) or {}
-    adapter = adapters.get(platform)
+    adapter = (getattr(search_provider, "_adapters", None) or {}).get(platform)
     if adapter is None:
         raise DomainError(
             "FEATURE_NOT_SUPPORTED",
             f"平台 {platform or 'generic'} 当前没有结构展开能力",
         )
 
-    if platform == "bilibili":
-        yield from _expand_bilibili(adapter, target, cancel_event=cancel_event)
-        return
-    if platform == "douyin":
-        yield from _expand_douyin(adapter, target, cancel_event=cancel_event)
-        return
-    if platform == "ximalaya":
-        yield from _expand_ximalaya(adapter, target, cancel_event=cancel_event)
-        return
-    if platform == "smartedu":
-        yield from _expand_smartedu(adapter, target, cancel_event=cancel_event)
-        return
-    if platform == "zjer":
-        yield from _expand_zjer(adapter, target, cancel_event=cancel_event)
-        return
+    handlers = {
+        "bilibili": _expand_bilibili,
+        "douyin": _expand_douyin,
+        "ximalaya": _expand_ximalaya,
+        "smartedu": _expand_smartedu,
+        "zjer": _expand_zjer,
+    }
+    handler = handlers.get(platform)
+    if handler is None:
+        raise DomainError(
+            "FEATURE_NOT_SUPPORTED",
+            f"平台 {platform} 当前没有结构展开能力",
+        )
+    yield from handler(adapter, target, cancel_event=cancel_event)
 
-    raise DomainError(
-        "FEATURE_NOT_SUPPORTED",
-        f"平台 {platform or 'generic'} 当前没有结构展开能力",
-    )
+
+def _kind(target: Mapping[str, Any]) -> str:
+    return str(target.get("resource_type") or "").strip().casefold()
+
+
+def _url(target: Mapping[str, Any]) -> str:
+    return str(target.get("source_url") or "").strip()
 
 
 def _expand_bilibili(
@@ -67,35 +68,25 @@ def _expand_bilibili(
     *,
     cancel_event: Any = None,
 ) -> Iterator[dict[str, Any]]:
-    url = str(target.get("source_url") or "").strip()
-    kind = str(target.get("resource_type") or "").strip().casefold()
-
-    if kind == "creator" or (
-        "space.bilibili.com" in url
-        and "/lists/" not in url
-        and "/channel/collectiondetail" not in url
-        and "/channel/seriesdetail" not in url
-    ):
-        iterator = getattr(adapter, "iter_creator", None)
-        if not callable(iterator):
-            raise DomainError("FEATURE_NOT_SUPPORTED", "Bilibili 创作者展开不可用")
-        yield from iterator(url, cancel_event=cancel_event)
-        return
-
-    if kind == "collection" or (
-        "space.bilibili.com" in url
-        and (
-            "/lists/" in url
-            or "/channel/collectiondetail" in url
-            or "/channel/seriesdetail" in url
-        )
-    ):
+    url = _url(target)
+    kind = _kind(target)
+    is_collection_url = "space.bilibili.com" in url and (
+        "/lists/" in url
+        or "/channel/collectiondetail" in url
+        or "/channel/seriesdetail" in url
+    )
+    if kind == "collection" or is_collection_url:
         iterator = getattr(adapter, "iter_collection", None)
         if not callable(iterator):
             raise DomainError("FEATURE_NOT_SUPPORTED", "Bilibili 合集展开不可用")
         yield from iterator(url, cancel_event=cancel_event)
         return
-
+    if kind == "creator" or ("space.bilibili.com" in url and not is_collection_url):
+        iterator = getattr(adapter, "iter_creator", None)
+        if not callable(iterator):
+            raise DomainError("FEATURE_NOT_SUPPORTED", "Bilibili 创作者展开不可用")
+        yield from iterator(url, cancel_event=cancel_event)
+        return
     raise DomainError(
         "FEATURE_NOT_SUPPORTED",
         "Bilibili video 是叶子资源，没有可展开子资源",
@@ -108,22 +99,20 @@ def _expand_douyin(
     *,
     cancel_event: Any = None,
 ) -> Iterator[dict[str, Any]]:
-    url = str(target.get("source_url") or "").strip()
-    kind = str(target.get("resource_type") or "").strip().casefold()
-
+    url = _url(target)
+    kind = _kind(target)
+    if kind == "collection" or "/collection/" in url or "/mix/" in url:
+        iterator = getattr(adapter, "iter_collection", None)
+        if not callable(iterator):
+            raise DomainError("FEATURE_NOT_SUPPORTED", "Douyin 合集展开不可用")
+        yield from iterator(url, cancel_event=cancel_event)
+        return
     if kind == "creator" or "/user/" in url:
         iterator = getattr(adapter, "iter_creator", None)
         if not callable(iterator):
             raise DomainError("FEATURE_NOT_SUPPORTED", "Douyin 创作者展开不可用")
         yield from iterator(url, cancel_event=cancel_event)
         return
-
-    if kind == "collection" or "/collection/" in url:
-        raise DomainError(
-            "FEATURE_NOT_SUPPORTED",
-            "Douyin 合集完整枚举接口尚未确认",
-        )
-
     raise DomainError(
         "FEATURE_NOT_SUPPORTED",
         "Douyin video 是叶子资源，没有可展开子资源",
@@ -136,9 +125,8 @@ def _expand_ximalaya(
     *,
     cancel_event: Any = None,
 ) -> Iterator[dict[str, Any]]:
-    url = str(target.get("source_url") or "").strip()
-    kind = str(target.get("resource_type") or "").strip().casefold()
-
+    url = _url(target)
+    kind = _kind(target)
     if kind == "album" or re.search(r"/album/\d+", url):
         yield from _iter_ximalaya_album(
             url,
@@ -167,19 +155,15 @@ def _iter_ximalaya_album(
     if not match:
         raise DomainError("INVALID_ARGUMENT", "Ximalaya 专辑 URL 缺少 album id")
     album_id = match.group(1)
-    page_num = 1
-    page_size = 100
-    seen = 0
+    page_num, page_size, seen = 1, 100, 0
     total: int | None = None
 
     while total is None or seen < total:
         if cancel_event is not None and cancel_event.is_set():
             return
-        params = urlencode({
-            "albumId": album_id,
-            "pageNum": page_num,
-            "pageSize": page_size,
-        })
+        params = urlencode(
+            {"albumId": album_id, "pageNum": page_num, "pageSize": page_size}
+        )
         request = Request(
             f"{_XIMALAYA_TRACKS_URL}?{params}",
             headers={
@@ -214,10 +198,7 @@ def _iter_ximalaya_album(
             if not track_id or not title:
                 continue
             metadata: dict[str, Any] = {
-                "platform_signals": {
-                    "album_id": album_id,
-                    "track_id": track_id,
-                }
+                "platform_signals": {"album_id": album_id, "track_id": track_id}
             }
             duration = track.get("duration")
             if isinstance(duration, (int, float)) and duration >= 0:
@@ -242,9 +223,8 @@ def _expand_smartedu(
     *,
     cancel_event: Any = None,
 ) -> Iterator[dict[str, Any]]:
-    url = str(target.get("source_url") or "").strip()
-    kind = str(target.get("resource_type") or "").strip().casefold()
-
+    url = _url(target)
+    kind = _kind(target)
     if kind == "textbook" or "/tchMaterial/" in url:
         yield from _iter_smartedu_textbook(adapter, url, cancel_event=cancel_event)
         return
@@ -265,9 +245,9 @@ def _iter_smartedu_textbook(
     *,
     cancel_event: Any = None,
 ) -> Iterator[dict[str, Any]]:
-    parsed = urlsplit(source_url)
-    params = urllib.parse.parse_qs(parsed.query)
-    textbook_id = str((params.get("contentId") or [""])[0]).strip()
+    textbook_id = str(
+        (urllib.parse.parse_qs(urlsplit(source_url).query).get("contentId") or [""])[0]
+    ).strip()
     if not textbook_id:
         raise DomainError("INVALID_ARGUMENT", "SmartEdu 教材 URL 缺少 contentId")
 
@@ -298,18 +278,19 @@ def _iter_smartedu_textbook(
             resource_type = str(entry.get("resource_type_code") or "").strip()
             child_id = str(entry.get("id") or "").strip()
             title = str(entry.get("title") or "").strip()
-            if not child_id or not title or resource_type not in {"national_lesson", "elite_lesson"}:
+            if (
+                not child_id
+                or not title
+                or resource_type not in {"national_lesson", "elite_lesson"}
+            ):
                 continue
-            if resource_type == "national_lesson":
-                child_url = (
-                    "https://basic.smartedu.cn/syncClassroom/classActivity?activityId="
-                    + urllib.parse.quote(child_id)
-                )
-            else:
-                child_url = (
-                    "https://basic.smartedu.cn/qualityCourse?courseId="
-                    + urllib.parse.quote(child_id)
-                )
+            child_url = (
+                "https://basic.smartedu.cn/syncClassroom/classActivity?activityId="
+                + urllib.parse.quote(child_id)
+                if resource_type == "national_lesson"
+                else "https://basic.smartedu.cn/qualityCourse?courseId="
+                + urllib.parse.quote(child_id)
+            )
             yield {
                 "platform": "smartedu",
                 "title": title,
@@ -330,9 +311,7 @@ def _expand_zjer(
     *,
     cancel_event: Any = None,
 ) -> Iterator[dict[str, Any]]:
-    url = str(target.get("source_url") or "").strip()
-    kind = str(target.get("resource_type") or "").strip().casefold()
-    if kind not in {"course", "课程"}:
+    if _kind(target) not in {"course", "课程"}:
         raise DomainError(
             "FEATURE_NOT_SUPPORTED",
             "Zjer video 是叶子资源，没有可展开子资源",
@@ -347,7 +326,7 @@ def _expand_zjer(
         lessons,
     )
 
-    course_id = _course_id_from_query(url)
+    course_id = _course_id_from_query(_url(target))
     if course_id is None:
         raise DomainError("INVALID_ARGUMENT", "Zjer 课程 URL 缺少 courseCateId")
     data = fetch_course_detail(
