@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .adapters.inspect_annas_archive import AnnasArchiveInspector
+from .adapters.inspect_annas_archive import LibgenInspector
 from .adapters.inspect_bilibili import BilibiliInspector
 from .adapters.inspect_douyin import DouyinInspector
 from .adapters.inspect_generic import GenericWebInspector
@@ -36,7 +36,7 @@ def default_inspection_router(
             BilibiliInspector(session_store=session_store, **options),
             DouyinInspector(session_store=session_store),
             NlcInspector(**options),
-            AnnasArchiveInspector(**options),
+            LibgenInspector(**options),
             XimalayaInspector(session_store=session_store, **options),
             ZhihuInspector(**options),
             SmartEduInspector(session_store=session_store, **options),
