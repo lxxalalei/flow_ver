@@ -106,6 +106,7 @@ MCP 直接读取完整 `results.jsonl`。Expand 自身不产生下载授权。
 | Ximalaya | `creator`, `album` | `album[]` / `track[]` | `track` → MP3/M4A |
 | SmartEdu | `textbook`, `course` | `textbook → course[]`; `course → file[]` 尚未稳定落地 | course 可自然交付多文件 |
 | Zjer | `course` | `video[]` | `video` → MP4 |
+| CCTV | `column`, `series` | `video[]` | `video` → MP4（720P 上限） |
 | LibGen | 无 | — | `book` → ebook file，身份为 MD5 |
 | Generic Web | 无 | — | `webpage` → offline web bundle |
 | Generic File | 无 | — | `file` → 原文件 |
@@ -144,6 +145,18 @@ track   -> Download
 ```
 
 Downloader 只接受明确 `/sound/{track_id}`。专辑不会再静默退化成“第一集”，也不会从任意 URL 猜一个数字当 track id。
+
+## CCTV
+
+```text
+column (栏目 /lm/ 页) -> Expand -> video[]   # 经 cctv-dl list
+series (纪录片系列页) -> Expand -> video[]   # 页面内嵌剧集链接
+video               -> Download MP4          # 经 cctv-dl，guid 为下载键
+```
+
+免登录。搜索双路：`ifsearch.php` 站内视频（叶子）+ `api.cntv.cn` 栏目目录（容器，A-Z 扫描后本地过滤）。单集/系列共用 `/YYYY/MM/DD/VID*.shtml` URL 形态，是否系列由页面真实剧集链接数（≥2）判定，不按 URL 猜测。画质上限 2000 档 720P。
+
+依赖本地 `cctv-dl` 二进制（CCTVVideoDownloader）：路径用环境变量 `CCTV_DL_EXE` 覆盖，画质用 `CCTV_QUALITY`（默认 0=最高档）；缺失时显式 `PROVIDER_UNAVAILABLE`。下载产物经 ffmpeg 全片解码体检（错误行 ≤100），坏文件删除重试至多 3 次。已知边界：2021 年老视频的 h5e 确定性解密失败本 MCP 不做 WASM 备用降级，如实报错提示人工处理。
 
 ## SmartEdu
 

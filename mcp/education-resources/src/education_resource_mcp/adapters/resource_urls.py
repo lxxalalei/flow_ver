@@ -69,6 +69,13 @@ def identify_resource_url(source_url: str) -> dict[str, Any]:
     if host == "k.zjer.cn" and ("/courseAfter/" in path or "courseCateId" in query or "id" in query):
         return resource("zjer", "course", "Zjer course")
 
+    if host in {"tv.cctv.com", "www.cctv.com", "cctv.com"}:
+        if path.startswith("/lm/"):
+            return resource("cctv", "column", "CCTV 栏目")
+        if re.search(r"/\d{4}/\d{2}/\d{2}/VID[A-Za-z0-9]+\.shtml", path):
+            return resource("cctv", "视频")
+        return resource("cctv", "网页")
+
     if host.startswith("libgen."):
         md5_match = _MD5_RE.search(url)
         signals = {"md5": md5_match.group(0).lower()} if md5_match else {}

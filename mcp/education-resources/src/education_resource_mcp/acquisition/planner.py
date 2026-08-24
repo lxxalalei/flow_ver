@@ -102,6 +102,11 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         frozenset({"mp4"}), frozenset({"video"}),
     ),
     ProviderSpec(
+        "cctv", "primary_resource", "video", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "cctv-video",
+        frozenset({"mp4"}), frozenset({"video"}),
+    ),
+    ProviderSpec(
         "zjer", "primary_resource", "video", "primary",
         AcquisitionStrategy.DIRECT_FILE, "zjer-video",
         frozenset({"mp4"}), frozenset({"video"}),

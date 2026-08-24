@@ -233,6 +233,8 @@ def _platform_from_import_url(url: str) -> str:
         return "zhihu"
     if host == "basic.smartedu.cn":
         return "smartedu"
+    if host in {"tv.cctv.com", "www.cctv.com", "cctv.com"}:
+        return "cctv"
     return "generic"
 
 
@@ -262,6 +264,7 @@ def _provider_registrations(
         ("bilibili_download", "BilibiliDownloader", "bilibili-video"),
         ("annas_archive_download", "AnnasArchiveDownloader", "annas-archive"),
         ("zjer_download", "ZjerVideoDownloader", "zjer-video"),
+        ("cctv_download", "CctvVideoDownloader", "cctv-video"),
     ):
         try:
             module = importlib.import_module(
