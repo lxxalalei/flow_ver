@@ -81,23 +81,10 @@ def _session_status(
 
 
 def _search(service: ResourceService, tasks: list[SearchTask], limit: int) -> dict[str, Any]:
-    # ``libgen`` is the public platform name. The existing provider modules
-    # still carry their historical internal id; keep that implementation
-    # detail out of the MCP contract until the pure internal rename is useful.
-    payload: list[dict[str, Any]] = []
-    for task in tasks:
-        item = task.model_dump()
-        platform = str(item.get("platform") or "").strip().replace("_", "-")
-        item["platform"] = "annas-archive" if platform == "libgen" else platform
-        payload.append(item)
-    result = service.search(payload, limit=limit)
-    for candidate in result.get("candidates") or []:
-        if candidate.get("platform") == "annas-archive":
-            candidate["platform"] = "libgen"
-    for failure in result.get("failures") or []:
-        if failure.get("platform") == "annas-archive":
-            failure["platform"] = "libgen"
-    return result
+    return service.search(
+        [task.model_dump() for task in tasks],
+        limit=limit,
+    )
 
 
 def _download(
