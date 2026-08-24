@@ -172,8 +172,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             str,
             Field(
                 description=(
-                    "要展开的当前进程内 resource_id。也可以直接传 source_url，二者只能选一个。"
-                    "对于 Bilibili/Douyin 已发现视频，若候选携带创作者身份，展开可直接枚举该创作者作品。"
+                    "要展开的容器 resource_id。也可以直接传 source_url，二者只能选一个。"
+                    "Expand 只向下展开结构；video/track/file 等叶子资源不可通过创作者元数据反向展开。"
                 )
             ),
         ] = "",
@@ -181,7 +181,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             str,
             Field(
                 description=(
-                    "已知容器资源 URL，例如创作者主页、Bilibili 合集、Ximalaya 专辑、"
+                    "已知容器资源 URL，例如创作者主页、Bilibili/Douyin 合集、Ximalaya 专辑、"
                     "SmartEdu 教材或 Zjer 课程。平台内部结构由 MCP 识别。"
                 )
             ),
