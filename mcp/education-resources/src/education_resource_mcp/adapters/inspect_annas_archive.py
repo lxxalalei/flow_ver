@@ -1,9 +1,8 @@
-"""Bounded Anna's Archive inspection backed by public Libgen metadata.
+"""Bounded LibGen inspection from mirror-backed metadata.
 
-Search and download use anonymous Libgen mirrors with Anna-compatible MD5
-identity.  The inspector does not need an Anna's Archive account or session and
-does not probe a membership page; a valid MD5 from server-controlled search
-metadata is sufficient to describe the mirror-backed primary representation.
+Search and download use public LibGen mirrors with MD5 identity. A valid MD5
+from resource metadata is sufficient to describe the mirror-backed primary
+representation; no Anna's Archive page or account participates in inspection.
 """
 
 from __future__ import annotations
@@ -23,13 +22,10 @@ from .inspect_nlc import (
 )
 
 
-INSPECTOR_ID = "annas_archive"
+INSPECTOR_ID = "libgen"
 MD5_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 _EXTENSION_RE = re.compile(r"^[a-z0-9][a-z0-9.+_-]{0,15}$", re.IGNORECASE)
-RIGHTS_HINT = (
-    "仅展示公开 Libgen 书目元数据；不代表 Anna's Archive 官方 API 或下载授权，"
-    "获取前请确认版权与来源许可。"
-)
+RIGHTS_HINT = "仅展示公开 LibGen 书目元数据；获取前请确认版权与来源许可。"
 _MIME_BY_EXTENSION = {
     "pdf": "application/pdf",
     "epub": "application/epub+zip",
@@ -55,7 +51,11 @@ def _size_bytes(value: Any) -> int | None:
         return direct
     if not isinstance(value, str):
         return None
-    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)\s*", value, re.IGNORECASE)
+    match = re.fullmatch(
+        r"\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)\s*",
+        value,
+        re.IGNORECASE,
+    )
     if match is None:
         return None
     amount = float(match.group(1))
@@ -72,10 +72,10 @@ def _size_bytes(value: Any) -> int | None:
     return int(result)
 
 
-class AnnasArchiveInspector(PlatformBoundedInspector):
-    """Inspect a Libgen-backed resource from search metadata using a validated MD5."""
+class LibgenInspector(PlatformBoundedInspector):
+    """Inspect a LibGen resource from search metadata using a validated MD5."""
 
-    platform_id = "annas-archive"
+    platform_id = "libgen"
     inspector_id = INSPECTOR_ID
 
     def inspect(self, resource: Mapping[str, Any]) -> InspectionResult:
@@ -91,15 +91,19 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             return self._validation_result(
                 resource,
                 "PLATFORM_VALIDATION_BLOCKED",
-                "Libgen-backed 检查需要资源元数据中的合法 32 位 MD5",
+                "LibGen 检查需要资源元数据中的合法 32 位 MD5",
             )
         base = self._result(
-            resource, resolution_status="resolved", availability="available"
+            resource,
+            resolution_status="resolved",
+            availability="available",
         )
         return self._enrich(resource, base)
 
     @staticmethod
-    def _md5_mappings(resource: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    def _md5_mappings(
+        resource: Mapping[str, Any],
+    ) -> tuple[Mapping[str, Any], ...]:
         values: list[Mapping[str, Any]] = [resource]
         metadata = resource.get("metadata")
         if isinstance(metadata, Mapping):
@@ -112,7 +116,11 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             values.append(signals)
         return tuple(values)
 
-    def _enrich(self, resource: Mapping[str, Any], result: InspectionResult) -> InspectionResult:
+    def _enrich(
+        self,
+        resource: Mapping[str, Any],
+        result: InspectionResult,
+    ) -> InspectionResult:
         if not self._enrichment_allowed(result):
             return result
 
@@ -125,7 +133,7 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             return self._validation_result(
                 resource,
                 "PLATFORM_VALIDATION_BLOCKED",
-                "Libgen-backed 检查需要资源元数据中的合法 32 位 MD5",
+                "LibGen 检查需要资源元数据中的合法 32 位 MD5",
             )
 
         metadata: dict[str, Any] = {"md5": md5}
@@ -139,12 +147,23 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
         if publisher:
             metadata["publisher"] = publisher
         year = _safe_year(
-            _first_value(resource, "year", "publication_year", "publish_year", "published_at")
+            _first_value(
+                resource,
+                "year",
+                "publication_year",
+                "publish_year",
+                "published_at",
+            )
         )
         if year is not None:
             metadata["year"] = year
 
-        raw_extension = _first_value(resource, "extension", "format", "file_extension")
+        raw_extension = _first_value(
+            resource,
+            "extension",
+            "format",
+            "file_extension",
+        )
         extension = _safe_text(raw_extension, maximum=16)
         if extension:
             extension = extension.lstrip(".").casefold()
@@ -153,14 +172,19 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
         if extension:
             metadata["extension"] = extension
 
-        size = _size_bytes(_first_value(resource, "size_bytes", "size", "file_size"))
+        size = _size_bytes(
+            _first_value(resource, "size_bytes", "size", "file_size")
+        )
         if size is not None:
             metadata["size_bytes"] = size
         language = _first_text(resource, "language", "lang")
         if language:
             metadata["language"] = language
 
-        current = [dict(item) for item in result.to_mapping()["resolved_resource"]["representations"]]
+        current = [
+            dict(item)
+            for item in result.to_mapping()["resolved_resource"]["representations"]
+        ]
         concrete_primary = [
             item
             for item in current
@@ -172,12 +196,19 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
         if concrete_primary:
             representations = current
             for item in representations:
-                if item.get("scope") == "primary_resource" and item.get("role") == "primary":
+                if (
+                    item.get("scope") == "primary_resource"
+                    and item.get("role") == "primary"
+                ):
                     item["requires_auth"] = False
         else:
             base = current[0] if current else {}
             representation: dict[str, Any] = {
-                "representation_id": self._representation_id(resource, "document", "primary"),
+                "representation_id": self._representation_id(
+                    resource,
+                    "document",
+                    "primary",
+                ),
                 "kind": "document",
                 "container": extension or "document",
                 "scope": "primary_resource",
@@ -194,7 +225,9 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
                     role="primary",
                     technical_availability="available",
                     source="metadata",
-                    observed_at=result.to_mapping()["inspection"].get("inspected_at"),
+                    observed_at=result.to_mapping()["inspection"].get(
+                        "inspected_at"
+                    ),
                 )
             )
             mime_type = _MIME_BY_EXTENSION.get(extension or "")
@@ -218,7 +251,11 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
             )
             if landing is None:
                 landing = {
-                    "representation_id": self._representation_id(resource, "webpage", "landing"),
+                    "representation_id": self._representation_id(
+                        resource,
+                        "webpage",
+                        "landing",
+                    ),
                     "kind": "webpage",
                     "container": "html",
                     "mime_type": "text/html",
@@ -245,10 +282,13 @@ class AnnasArchiveInspector(PlatformBoundedInspector):
         )
 
 
-AnnaArchiveInspector = AnnasArchiveInspector
+# Temporary class aliases for old imports. Runtime platform identity is libgen.
+AnnasArchiveInspector = LibgenInspector
+AnnaArchiveInspector = LibgenInspector
 
 
 __all__ = [
+    "LibgenInspector",
     "AnnaArchiveInspector",
     "AnnasArchiveInspector",
     "INSPECTOR_ID",
