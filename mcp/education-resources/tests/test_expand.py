@@ -103,16 +103,25 @@ class ExpandTests(unittest.TestCase):
         page = self._run(result)
         self.assertEqual("succeeded", page["status"])
         self.assertEqual(2, page["total"])
-        self.assertEqual(["video 1", "video 2"], [item["title"] for item in page["items"]])
-        self.assertEqual("https://space.bilibili.com/42", self.bilibili.creator_id)
+        self.assertEqual(
+            ["video 1", "video 2"],
+            [item["title"] for item in page["items"]],
+        )
+        self.assertEqual(
+            "https://space.bilibili.com/42",
+            self.bilibili.creator_id,
+        )
 
     def test_collection_url_uses_collection_expander(self) -> None:
         url = "https://space.bilibili.com/42/lists/99?type=season"
         page = self._run(start_expand(self.service, source_url=url))
-        self.assertEqual(["video 3", "video 4"], [item["title"] for item in page["items"]])
+        self.assertEqual(
+            ["video 3", "video 4"],
+            [item["title"] for item in page["items"]],
+        )
         self.assertEqual(url, self.bilibili.collection_url)
 
-    def test_discovered_video_can_expand_via_creator_fact(self) -> None:
+    def test_leaf_video_never_expands_to_creator_even_with_creator_fact(self) -> None:
         remembered = self.service._remember_resources([{
             "platform": "bilibili",
             "title": "one video",
@@ -120,9 +129,18 @@ class ExpandTests(unittest.TestCase):
             "resource_type": "视频",
             "metadata": {"creator_mid": "777"},
         }])
-        page = self._run(start_expand(self.service, resource_id=remembered[0]["resource_id"]))
-        self.assertEqual(2, page["total"])
-        self.assertEqual("777", self.bilibili.creator_id)
+        result = start_expand(
+            self.service,
+            resource_id=remembered[0]["resource_id"],
+        )
+        directory = self.root / "jobs" / result["job_id"]
+        run_expand(directory, self.service)
+        status = self.service.job_status(result["job_id"])
+        self.assertEqual("failed", status["status"])
+        self.assertEqual(
+            "FEATURE_NOT_SUPPORTED",
+            status["failures"][0]["code"],
+        )
 
     def test_unverified_douyin_collection_fails_honestly(self) -> None:
         result = start_expand(
@@ -133,9 +151,12 @@ class ExpandTests(unittest.TestCase):
         run_expand(directory, self.service)
         status = self.service.job_status(result["job_id"])
         self.assertEqual("failed", status["status"])
-        self.assertEqual("FEATURE_NOT_SUPPORTED", status["failures"][0]["code"])
+        self.assertEqual(
+            "FEATURE_NOT_SUPPORTED",
+            status["failures"][0]["code"],
+        )
 
-    def test_leaf_video_is_not_silently_reinterpreted_without_creator_fact(self) -> None:
+    def test_leaf_video_is_not_silently_reinterpreted(self) -> None:
         remembered = self.service._remember_resources([{
             "platform": "bilibili",
             "title": "leaf",
@@ -143,12 +164,18 @@ class ExpandTests(unittest.TestCase):
             "resource_type": "视频",
             "metadata": {},
         }])
-        result = start_expand(self.service, resource_id=remembered[0]["resource_id"])
+        result = start_expand(
+            self.service,
+            resource_id=remembered[0]["resource_id"],
+        )
         directory = self.root / "jobs" / result["job_id"]
         run_expand(directory, self.service)
         status = self.service.job_status(result["job_id"])
         self.assertEqual("failed", status["status"])
-        self.assertEqual("FEATURE_NOT_SUPPORTED", status["failures"][0]["code"])
+        self.assertEqual(
+            "FEATURE_NOT_SUPPORTED",
+            status["failures"][0]["code"],
+        )
 
 
 if __name__ == "__main__":
