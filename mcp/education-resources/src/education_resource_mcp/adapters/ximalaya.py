@@ -1,7 +1,8 @@
-"""Ximalaya (喜马拉雅) audio search adapter.
+"""Ximalaya (喜马拉雅) album search adapter.
 
-Calls the public revision/search API directly. No auth required, no
-fallback paths. If the API fails the adapter returns a structured error.
+Calls the public revision/search API directly. Search returns album container
+Resources; album -> track expansion is handled by the adapter-layer expansion
+implementation. No auth is required for discovery.
 """
 
 from __future__ import annotations
@@ -31,7 +32,11 @@ UA = (
 
 
 def _strip_html(text: Any) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", str(text or ""))).strip()
+    return re.sub(
+        r"\s+",
+        " ",
+        re.sub(r"<[^>]+>", "", str(text or "")),
+    ).strip()
 
 
 class XimalayaSearchAdapter:
@@ -40,12 +45,18 @@ class XimalayaSearchAdapter:
     platform_id = "ximalaya"
     descriptor = descriptor_for_platform("ximalaya")
 
-    def __init__(self, session_store: SessionStore, settings: Settings) -> None:
+    def __init__(
+        self,
+        session_store: SessionStore,
+        settings: Settings,
+    ) -> None:
         self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
 
     def search(
-        self, query: str, limit: int
+        self,
+        query: str,
+        limit: int,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         params = urlencode({
             "core": "album",
@@ -57,14 +68,20 @@ class XimalayaSearchAdapter:
             "spellchecker": "true",
         })
         url = f"{SEARCH_URL}?{params}"
-        request = Request(url, headers={
-            "User-Agent": UA,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-            "Referer": "https://www.ximalaya.com/",
-        })
+        request = Request(
+            url,
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "Referer": "https://www.ximalaya.com/",
+            },
+        )
         try:
-            with urlopen_with_fallback(request, timeout=self.timeout) as resp:
+            with urlopen_with_fallback(
+                request,
+                timeout=self.timeout,
+            ) as resp:
                 raw = resp.read().decode("utf-8", "replace")
         except Exception as exc:
             return [], adapter_error(
@@ -106,19 +123,26 @@ class XimalayaSearchAdapter:
         return resources[:limit], None
 
     @staticmethod
-    def _parse_doc(doc: dict[str, Any]) -> dict[str, Any] | None:
+    def _parse_doc(
+        doc: dict[str, Any],
+    ) -> dict[str, Any] | None:
         resource_id = str(doc.get("id") or "").strip()
         if not resource_id:
             return None
 
-        title = _strip_html(doc.get("title") or doc.get("richTitle"))
+        title = _strip_html(
+            doc.get("title") or doc.get("richTitle")
+        )
         if not title:
             return None
 
         source_url = f"{ALBUM_URL}{resource_id}"
-
-        summary = _strip_html(doc.get("intro") or doc.get("custom_title"))[:400] or None
-
+        summary = (
+            _strip_html(
+                doc.get("intro") or doc.get("custom_title")
+            )[:400]
+            or None
+        )
         author = _strip_html(doc.get("nickname")) or None
 
         cover = doc.get("cover_path") or ""
@@ -136,7 +160,7 @@ class XimalayaSearchAdapter:
             platform="ximalaya",
             title=title,
             source_url=source_url,
-            resource_type="音频",
+            resource_type="album",
             summary=summary,
             author=author,
             platform_signals={
