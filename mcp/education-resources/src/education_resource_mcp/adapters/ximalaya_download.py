@@ -1,10 +1,11 @@
-"""Ximalaya audio downloader.
+"""Ximalaya track downloader.
 
 Self-contained implementation that handles xm-sign generation, encrypted audio
-URL resolution and streaming download.  Ported from the standalone
+URL resolution and streaming download. Ported from the standalone
 xmly_downloader.py skill.
 
-Requires pycryptodome for AES-ECB signing.
+Requires pycryptodome for AES-ECB signing. Only explicit track resources are
+accepted; albums are containers and must be expanded before download.
 """
 
 from __future__ import annotations
@@ -38,8 +39,6 @@ from .http_client import urlopen_with_fallback
 # ---------------------------------------------------------------------------
 BASE = "https://www.ximalaya.com"
 BASE_INFO_URL = BASE + "/mobile-playpage/track/v3/baseInfo/{ts}"
-TRACKS_LIST_URL = BASE + "/revision/album/getTracksList"
-ALBUM_URL = BASE + "/album/{album_id}"
 SOUND_URL = BASE + "/sound/{track_id}"
 HDAA_REPORT_URL = "https://hdaa.shuzilm.cn/report?v=1.2.0&e=1&c=1&r={uid}"
 UA = (
@@ -262,7 +261,6 @@ def _get_track_info(track_id: str, cookie: str) -> dict[str, Any]:
     play_urls = track_info.get("playUrlList") or []
     if not play_urls:
         raise DomainError("DOWNLOAD_FAILED", "未获取到播放 URL（可能需要 VIP）", retryable=False)
-    # Select best quality
     play_urls = sorted(
         [p for p in play_urls if p.get("url")],
         key=lambda p: int((p.get("type") or "0_0").split("_")[-1]) if (p.get("type") or "").split("_")[-1].isdigit() else 0,
@@ -278,31 +276,14 @@ def _get_track_info(track_id: str, cookie: str) -> dict[str, Any]:
     }
 
 
-def _get_first_track_id(album_id: str) -> str:
-    """Get the first track ID from an album."""
-    url = TRACKS_LIST_URL + "?" + urlencode({"albumId": album_id, "pageNum": 1, "sort": 0})
-    request = Request(url, headers={"User-Agent": UA, "Referer": ALBUM_URL.format(album_id=album_id)})
-    with urlopen_with_fallback(request, timeout=30) as resp:
-        body = json.loads(resp.read().decode("utf-8", "replace"))
-    tracks = (body.get("data") or {}).get("tracks") or []
-    if not tracks:
-        raise DomainError("DOWNLOAD_FAILED", "专辑无可用曲目", retryable=False)
-    return str(tracks[0].get("trackId"))
-
-
 # ---------------------------------------------------------------------------
 # Downloader
 # ---------------------------------------------------------------------------
-_ALBUM_RE = re.compile(r"/album/(\d+)")
 _SOUND_RE = re.compile(r"/sound/(\d+)")
 
 
 class XimalayaDownloader:
-    """Download Ximalaya audio via signed API.
-
-    Requires a valid login cookie (``1&_token``) in SessionStore.
-    Downloads the first track of an album or the specified track.
-    """
+    """Download one explicit Ximalaya track via the signed API."""
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
@@ -316,37 +297,25 @@ class XimalayaDownloader:
         cancel_event: threading.Event,
     ) -> DownloadResult:
         url = str(resource["source_url"])
-        title = str(resource.get("title") or "ximalaya_audio")
-
-        # Resolve track ID
         sound_match = _SOUND_RE.search(url)
-        if sound_match:
-            track_id = sound_match.group(1)
-        else:
-            album_match = _ALBUM_RE.search(url)
-            if album_match:
-                track_id = _get_first_track_id(album_match.group(1))
-            else:
-                # Fallback: try numeric ID
-                nums = re.findall(r"(\d+)", url)
-                track_id = nums[-1] if nums else ""
+        if not sound_match:
+            raise DomainError(
+                "FEATURE_NOT_SUPPORTED",
+                "喜马拉雅 Downloader 只接受单集 track；专辑请先 Expand 后选择单集或全部单集",
+                retryable=False,
+            )
+        track_id = sound_match.group(1)
 
-        if not track_id:
-            raise DomainError("DOWNLOAD_FAILED", f"无法从 URL 解析曲目 ID: {url}")
-
-        # Get cookie
         session_data = self.session_store.get_session_data("ximalaya")
         cookie = SessionStore._cookie_header(session_data) if session_data else ""
         if not cookie:
             raise DomainError("AUTH_REQUIRED", "喜马拉雅下载需要登录 Cookie", retryable=False)
 
-        # Get audio URL
         info = _get_track_info(track_id, cookie)
         audio_url = info["url"]
         if not audio_url:
             raise DomainError("DOWNLOAD_FAILED", "音频 URL 解密失败", retryable=False)
 
-        # Download
         job_dir = self.settings.jobs_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         ensure_within_root(job_dir, self.settings.jobs_dir)
