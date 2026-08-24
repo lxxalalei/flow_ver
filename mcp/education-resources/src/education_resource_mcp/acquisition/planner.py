@@ -107,7 +107,7 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         frozenset({"mp4"}), frozenset({"video"}),
     ),
     ProviderSpec(
-        "annas-archive", "primary_resource", "document", "primary",
+        "libgen", "primary_resource", "document", "primary",
         AcquisitionStrategy.DIRECT_FILE, "annas-archive",
         frozenset(), frozenset({"book", "document"}),
     ),
@@ -138,9 +138,6 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
         frozenset({"html"}), frozenset(),
     ),
-    # Zhihu answers/articles: the page itself is the resource, so a Zhihu
-    # webpage materializes into an archived page like generic web pages do
-    # (0057 M0).
     ProviderSpec(
         "zhihu", "primary_resource", "webpage", "primary",
         AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
@@ -195,11 +192,6 @@ def _choose_representation(
     primaries = [item for item in values if _scope(item) == "primary_resource"]
     pool = primaries or values
 
-    # original means "materialize the resource in its natural delivery form".
-    # A provider may produce multiple files from that one resource; the primary
-    # representation is only the routing anchor and does not imply a one-file
-    # result. Companion/attachment representations therefore do not make an
-    # otherwise single-primary resource ambiguous.
     if preferred_container == "original":
         if len(pool) == 1:
             return pool[0]
