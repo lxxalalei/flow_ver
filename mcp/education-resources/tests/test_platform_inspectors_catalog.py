@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from education_resource_mcp.adapters.inspect_annas_archive import AnnasArchiveInspector
+from education_resource_mcp.adapters.inspect_annas_archive import LibgenInspector
 from education_resource_mcp.adapters.inspect_nlc import NlcInspector
 from education_resource_mcp.adapters.inspect_ximalaya import XimalayaInspector
 
@@ -134,13 +134,12 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual("landing", representations[1]["role"])
         self.assertEqual("ximalaya", mapped["inspection"]["inspector_id"])
 
-    def test_annas_archive_is_libgen_backed_and_requires_valid_md5(self) -> None:
+    def test_libgen_is_metadata_backed_and_requires_valid_md5(self) -> None:
         md5 = "ABCDEF0123456789ABCDEF0123456789"
-        # No queued response: any network request fails the test.
-        transport = QueueTransport()
+        transport = QueueTransport()  # any network request fails the test
         candidate = resource(
-            "annas-archive",
-            "https://libgen.test/book/42",
+            "libgen",
+            "https://libgen.test/ads.php?md5=" + md5,
             platform_signals={
                 "md5": md5,
                 "isbn": "9780306406157",
@@ -153,7 +152,7 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
             },
         )
 
-        mapped = make_inspector(AnnasArchiveInspector, transport).inspect(candidate).to_mapping()
+        mapped = make_inspector(LibgenInspector, transport).inspect(candidate).to_mapping()
         resolved = mapped["resolved_resource"]
         representation = resolved["representations"][0]
 
@@ -163,48 +162,31 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual(2048, resolved["metadata"]["size_bytes"])
         self.assertEqual("document", representation["kind"])
         self.assertEqual("pdf", representation["container"])
-        self.assertIn("Libgen", representation["rights_hint"])
+        self.assertIn("LibGen", representation["rights_hint"])
         self.assertTrue(representation["materializable"])
         self.assertEqual("primary_resource", representation["scope"])
         self.assertEqual("primary", representation["role"])
         self.assertEqual("available", representation["technical_availability"])
-        self.assertEqual("annas_archive", mapped["inspection"]["inspector_id"])
+        self.assertEqual("libgen", mapped["inspection"]["inspector_id"])
         self.assertEqual("platform_metadata", mapped["inspection"]["method"])
         self.assertEqual([], transport.requests)
 
-    def test_annas_archive_blocked_detail_site_does_not_gate_inspection(self) -> None:
-        # Incident 2026-08-14: the synthetic annas-archive.gl detail URL is
-        # neither the data source nor the download channel.  Its risk control
-        # (403) or unreachability must not block the pipeline.
-        md5 = "0123456789abcdef0123456789abcdef"
-        transport = QueueTransport()  # any request fails the test
-        candidate = resource(
-            "annas-archive",
-            f"https://annas-archive.gl/md5/{md5}",
-            platform_signals={"md5": md5, "extension": "epub"},
-        )
-
-        mapped = make_inspector(AnnasArchiveInspector, transport).inspect(candidate).to_mapping()
-        resolved = mapped["resolved_resource"]
-        representation = resolved["representations"][0]
-
-        self.assertEqual("resolved", mapped["resolution_status"])
-        self.assertEqual("available", resolved["availability"]["status"])
-        self.assertEqual([], mapped["failures"])
-        self.assertEqual("document", representation["kind"])
-        self.assertTrue(representation["materializable"])
-        self.assertEqual([], transport.requests)
-
-    def test_annas_archive_invalid_md5_is_blocked_without_network(self) -> None:
+    def test_libgen_invalid_md5_is_blocked_without_network(self) -> None:
         transport = QueueTransport()
-        candidate = resource("annas-archive", "https://libgen.test/book/42")
+        candidate = resource("libgen", "https://libgen.test/book/42")
         candidate["metadata"] = {"md5": "not-a-valid-md5"}
 
-        mapped = make_inspector(AnnasArchiveInspector, transport).inspect(candidate).to_mapping()
+        mapped = make_inspector(LibgenInspector, transport).inspect(candidate).to_mapping()
         self.assertEqual("unresolved", mapped["resolution_status"])
-        self.assertEqual("policy_blocked", mapped["resolved_resource"]["availability"]["status"])
-        self.assertEqual("PLATFORM_VALIDATION_BLOCKED", mapped["failures"][0]["code"])
-        self.assertEqual("annas-archive", mapped["failures"][0]["platform"])
+        self.assertEqual(
+            "policy_blocked",
+            mapped["resolved_resource"]["availability"]["status"],
+        )
+        self.assertEqual(
+            "PLATFORM_VALIDATION_BLOCKED",
+            mapped["failures"][0]["code"],
+        )
+        self.assertEqual("libgen", mapped["failures"][0]["platform"])
         self.assertEqual([], transport.requests)
 
     def test_nlc_and_ximalaya_wrong_hosts_are_blocked_before_transport(self) -> None:
@@ -220,8 +202,14 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
                 mapped = make_inspector(inspector_class, transport).inspect(
                     resource(platform, source_url)
                 ).to_mapping()
-                self.assertEqual("policy_blocked", mapped["resolved_resource"]["availability"]["status"])
-                self.assertEqual("PLATFORM_POLICY_BLOCKED", mapped["failures"][0]["code"])
+                self.assertEqual(
+                    "policy_blocked",
+                    mapped["resolved_resource"]["availability"]["status"],
+                )
+                self.assertEqual(
+                    "PLATFORM_POLICY_BLOCKED",
+                    mapped["failures"][0]["code"],
+                )
                 self.assertEqual(platform, mapped["failures"][0]["platform"])
                 self.assertEqual([], transport.requests)
 
@@ -236,13 +224,14 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
             resource("nlc", "https://www.nlc.cn/catalog/1")
         ).to_mapping()
 
-        self.assertEqual("policy_blocked", mapped["resolved_resource"]["availability"]["status"])
+        self.assertEqual(
+            "policy_blocked",
+            mapped["resolved_resource"]["availability"]["status"],
+        )
         self.assertEqual("PLATFORM_POLICY_BLOCKED", mapped["failures"][0]["code"])
         self.assertEqual(1, len(transport.requests))
 
     def test_auth_and_not_found_statuses_are_preserved(self) -> None:
-        # Anna's Archive inspects from metadata without a GET, so it has no
-        # auth/not-found transport path; only GET-backed inspectors appear here.
         cases = (
             (NlcInspector, "nlc", "https://www.nlc.cn/catalog/1", {}),
             (XimalayaInspector, "ximalaya", "https://www.ximalaya.com/album/1", {}),
@@ -257,10 +246,14 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
                         resource(platform, source_url, **metadata)
                     ).to_mapping()
                     expected = "auth_required" if status == 401 else "unavailable"
-                    self.assertEqual(expected, mapped["resolved_resource"]["availability"]["status"])
+                    self.assertEqual(
+                        expected,
+                        mapped["resolved_resource"]["availability"]["status"],
+                    )
                     self.assertEqual(platform, mapped["failures"][0]["platform"])
                     self.assertEqual(
-                        "platform_bounded_get", mapped["inspection"]["method"]
+                        "platform_bounded_get",
+                        mapped["inspection"]["method"],
                     )
 
     def test_output_has_no_locator_bytes_headers_or_secret(self) -> None:
