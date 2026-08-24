@@ -38,14 +38,24 @@ class _FakeBilibili:
 class _FakeDouyin:
     platform_id = "douyin"
 
-    def iter_creator(self, creator_id: str, *, cancel_event=None):
-        yield {
+    @staticmethod
+    def _video(index: int) -> dict:
+        return {
             "platform": "douyin",
-            "title": "douyin 1",
-            "source_url": "https://www.douyin.com/video/123",
+            "title": f"douyin {index}",
+            "source_url": f"https://www.douyin.com/video/{100 + index}",
             "resource_type": "视频",
             "metadata": {},
         }
+
+    def iter_creator(self, creator_id: str, *, cancel_event=None):
+        self.creator_id = creator_id
+        yield self._video(1)
+
+    def iter_collection(self, source_url: str, *, cancel_event=None):
+        self.collection_url = source_url
+        yield self._video(2)
+        yield self._video(3)
 
 
 class _Provider:
@@ -72,6 +82,7 @@ class ExpandTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.bilibili = _FakeBilibili()
+        self.douyin = _FakeDouyin()
         self.service = ResourceService(
             settings=Settings(
                 data_dir=self.root,
@@ -81,7 +92,7 @@ class ExpandTests(unittest.TestCase):
             ),
             search_provider=_Provider({
                 "bilibili": self.bilibili,
-                "douyin": _FakeDouyin(),
+                "douyin": self.douyin,
             }),
             job_runner=_NoopSpawner(),
         )
@@ -121,6 +132,17 @@ class ExpandTests(unittest.TestCase):
         )
         self.assertEqual(url, self.bilibili.collection_url)
 
+    def test_douyin_collection_expands_to_videos(self) -> None:
+        url = "https://www.douyin.com/collection/123"
+        page = self._run(start_expand(self.service, source_url=url))
+        self.assertEqual("succeeded", page["status"])
+        self.assertEqual(2, page["total"])
+        self.assertEqual(
+            ["douyin 2", "douyin 3"],
+            [item["title"] for item in page["items"]],
+        )
+        self.assertEqual(url, self.douyin.collection_url)
+
     def test_leaf_video_never_expands_to_creator_even_with_creator_fact(self) -> None:
         remembered = self.service._remember_resources([{
             "platform": "bilibili",
@@ -132,20 +154,6 @@ class ExpandTests(unittest.TestCase):
         result = start_expand(
             self.service,
             resource_id=remembered[0]["resource_id"],
-        )
-        directory = self.root / "jobs" / result["job_id"]
-        run_expand(directory, self.service)
-        status = self.service.job_status(result["job_id"])
-        self.assertEqual("failed", status["status"])
-        self.assertEqual(
-            "FEATURE_NOT_SUPPORTED",
-            status["failures"][0]["code"],
-        )
-
-    def test_unverified_douyin_collection_fails_honestly(self) -> None:
-        result = start_expand(
-            self.service,
-            source_url="https://www.douyin.com/collection/123",
         )
         directory = self.root / "jobs" / result["job_id"]
         run_expand(directory, self.service)
