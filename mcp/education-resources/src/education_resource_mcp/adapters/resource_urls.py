@@ -73,7 +73,7 @@ def identify_resource_url(source_url: str) -> dict[str, Any]:
         md5_match = _MD5_RE.search(url)
         signals = {"md5": md5_match.group(0).lower()} if md5_match else {}
         return resource(
-            "annas-archive",
+            "libgen",
             "book",
             "LibGen book",
             platform_signals=signals,
