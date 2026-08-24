@@ -20,7 +20,6 @@ from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
     build_default_inspection,
-    build_representation_authority,
 )
 from . import cctv
 
@@ -154,15 +153,6 @@ class CctvInspector:
             "technical_availability": availability,
             "materializable": materializable,
         }
-        representation.update(
-            build_representation_authority(
-                resource,
-                scope="primary_resource",
-                role="primary",
-                technical_availability=availability,
-                source="provider",
-            )
-        )
 
         return InspectionResult(
             resolution_status="resolved",

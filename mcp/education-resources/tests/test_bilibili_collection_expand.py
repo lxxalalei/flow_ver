@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
 import tempfile
@@ -18,9 +17,7 @@ from education_resource_mcp.adapters.bilibili import (
     _AdapterError,
     _parse_collection_url,
 )
-from education_resource_mcp.batch import run_batch_collect
 from education_resource_mcp.config import Settings
-from education_resource_mcp.job_state import read_job, write_job, write_request
 from education_resource_mcp.sessions import SessionStore
 
 
@@ -37,11 +34,6 @@ def _archive(index: int, *, mid: str = "2142762") -> dict:
         "owner": {"mid": int(mid), "name": "测试UP"},
         "stat": {"view": 100 + index, "danmaku": index, "favorite": 10 + index},
     }
-
-
-class _NeverCancel:
-    def is_set(self) -> bool:
-        return False
 
 
 class BilibiliCollectionAdapterTests(unittest.TestCase):
@@ -129,75 +121,6 @@ class BilibiliCollectionAdapterTests(unittest.TestCase):
         query = parse_qs(urlparse(calls[0]).query)
         self.assertEqual(["547718"], query["series_id"])
         self.assertEqual(["1958703906"], query["mid"])
-
-
-class BilibiliCollectionBatchTests(unittest.TestCase):
-    def test_collection_expand_only_enumerates_candidates(self) -> None:
-        class FakeAdapter:
-            def iter_collection(self, source_url: str, *, cancel_event=None):
-                self.source_url = source_url
-                del cancel_event
-                yield {
-                    "platform": "bilibili",
-                    "title": "视频 A",
-                    "source_url": "https://www.bilibili.com/video/BV1AAAA",
-                    "resource_type": "视频",
-                    "metadata": {"author": "UP"},
-                }
-                yield {
-                    "platform": "bilibili",
-                    "title": "视频 B",
-                    "source_url": "https://www.bilibili.com/video/BV1BBBB",
-                    "resource_type": "视频",
-                    "metadata": {"author": "UP"},
-                }
-
-        adapter = FakeAdapter()
-        provider = type("Provider", (), {"_adapters": {"bilibili": adapter}})()
-        service = type("Service", (), {"search_provider": provider})()
-
-        with tempfile.TemporaryDirectory() as directory:
-            job_dir = Path(directory)
-            write_request(
-                job_dir,
-                {
-                    "kind": "batch_collect",
-                    "job_id": "job_test",
-                    "mode": "collection_expand",
-                    "platform": "bilibili",
-                    # ResourceService currently persists the collection locator in this generic
-                    # batch locator slot; the public MCP schema exposes it as collection_url.
-                    "creator_id": COLLECTION_URL,
-                    "max_items": None,
-                },
-            )
-            write_job(
-                job_dir,
-                {
-                    "job_id": "job_test",
-                    "kind": "batch_collect",
-                    "mode": "collection_expand",
-                    "platform": "bilibili",
-                    "status": "queued",
-                    "total": 0,
-                    "completed": 0,
-                    "files": [],
-                    "failures": [],
-                    "pid": None,
-                },
-            )
-
-            self.assertEqual(0, run_batch_collect(job_dir, service))
-            status = read_job(job_dir)
-            self.assertEqual("succeeded", status["status"])
-            self.assertEqual(2, status["completed"])
-            lines = (job_dir / "results.jsonl").read_text(encoding="utf-8").splitlines()
-            items = [json.loads(line) for line in lines]
-
-        self.assertEqual(["视频 A", "视频 B"], [item["title"] for item in items])
-        self.assertEqual(COLLECTION_URL, adapter.source_url)
-        # No download side effect exists in this batch worker; results are candidate URLs only.
-        self.assertTrue(all(item["url"].startswith("https://www.bilibili.com/video/") for item in items))
 
 
 if __name__ == "__main__":

@@ -1,12 +1,6 @@
-"""Synchronous Libgen client — shared by annas_archive search & download adapters.
+"""Synchronous LibGen client shared by search and download adapters.
 
-Ported from the standalone anna-mcp project (annas_mcp/libgen.py), adapted
-from httpx-async to stdlib urllib (sync) to fit education-resource-mcp's
-no-extra-http-dependency convention.  HTML parsing uses BeautifulSoup.
-
-Libgen shares the same md5 identifiers as Anna's Archive, so searching/
-downloading via Libgen gives Anna's-compatible results without requiring an
-Anna's account or membership.  All endpoints are public HTML pages.
+The client uses public HTML mirrors, stdlib urllib and BeautifulSoup.
 """
 from __future__ import annotations
 
@@ -79,8 +73,6 @@ def _mirror_links_from_badges(badge_td: str, md5: str, base: str) -> dict[str, s
         href, title = a.group(1), _clean(a.group(2))
         if title:
             links[title.lower()] = urljoin(base, href)
-    for m in re.finditer(r'href="([^"]*annas-archive[^"]*/md5/' + md5 + r'[^"]*)"', badge_td):
-        links["anna's archive"] = m.group(1)
     return links
 
 
@@ -245,7 +237,6 @@ class LibgenClient:
             book.mirrors["libgen_download"] = urljoin(mirror + "/", a.get("href", ""))
             break
         book.mirrors.setdefault("libgen", f"{mirror}/ads.php?md5={md5}")
-        book.mirrors.setdefault("anna's archive", f"https://annas-archive.gl/md5/{md5}")
         if not book.title:
             return None
         return book

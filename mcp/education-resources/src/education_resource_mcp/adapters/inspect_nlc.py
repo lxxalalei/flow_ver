@@ -1,7 +1,7 @@
 """Bounded public inspection for the National Library of China catalog.
 
 The platform inspectors in this small module share a deliberately narrow
-base with the Anna's Archive/Libgen and Ximalaya inspectors.  The base is kept
+base with the LibGen and Ximalaya inspectors.  The base is kept
 here so the three adapters remain independently discoverable while retaining
 one result-rebuild and host-policy implementation.  It never accepts or
 emits credentials, headers, locators, paths, or response bytes.
@@ -11,15 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import hashlib
+import json
 import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..inspection import (
-    InspectionResult,
-    build_representation_authority,
-    source_fingerprint,
-)
+from ..inspection import InspectionResult
 from .inspect_generic import GenericWebInspector
 
 
@@ -225,11 +222,19 @@ class PlatformBoundedInspector(GenericWebInspector):
         return InspectionResult.from_mapping(mapping)
 
     def _representation_id(self, resource: Mapping[str, Any], kind: str, role: str) -> str:
-        try:
-            fingerprint = source_fingerprint(resource)
-        except Exception:
-            fingerprint = hashlib.sha256(self.platform_id.encode("utf-8")).hexdigest()
-        seed = f"{self.inspector_id}:{fingerprint}:{kind}:{role}"
+        seed = json.dumps(
+            {
+                "inspector_id": self.inspector_id,
+                "platform": resource.get("platform"),
+                "source_url": resource.get("source_url"),
+                "title": resource.get("title"),
+                "kind": kind,
+                "role": role,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
         return "repr_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
 
     def _copy_representation(
@@ -240,7 +245,6 @@ class PlatformBoundedInspector(GenericWebInspector):
         kind: str | None = None,
         role: str,
         scope: str | None = None,
-        source: str = "inspection",
     ) -> dict[str, Any]:
         """Copy public representation facts without upgrading capability scope."""
 
@@ -276,19 +280,6 @@ class PlatformBoundedInspector(GenericWebInspector):
                     "metadata": "metadata",
                 }.get(role, "representation")
         copied["scope"] = scope
-        if role == old_role and isinstance(representation.get("evidence"), Mapping):
-            copied["evidence"] = dict(representation["evidence"])
-        else:
-            authority = build_representation_authority(
-                resource,
-                scope=scope,
-                role=role,
-                technical_availability=str(
-                    copied.get("technical_availability") or "unknown"
-                ),
-                source=source,
-            )
-            copied.update(authority)
         copied.setdefault(
             "technical_availability",
             "available" if copied.get("materializable") else "unknown",
@@ -311,7 +302,6 @@ class PlatformBoundedInspector(GenericWebInspector):
         resolved = mapping["resolved_resource"]
         resolved["resource_type"] = resource_type
         resolved["metadata"] = dict(metadata)
-        observed_at = mapping.get("inspection", {}).get("inspected_at")
         if availability is not None:
             resolved["availability"] = {"status": availability}
         availability_status = resolved.get("availability", {}).get("status", "unknown")
@@ -332,18 +322,6 @@ class PlatformBoundedInspector(GenericWebInspector):
                 "technical_availability",
                 "available" if availability_status == "available" else "unknown",
             )
-            evidence = item.get("evidence")
-            if not isinstance(evidence, Mapping):
-                item.update(
-                    build_representation_authority(
-                        resource,
-                        scope=scope,
-                        role=role,
-                        technical_availability=str(item["technical_availability"]),
-                        source="metadata",
-                        observed_at=observed_at if isinstance(observed_at, str) else None,
-                    )
-                )
             normalised_representations.append(item)
         resolved["representations"] = normalised_representations
         if creator:

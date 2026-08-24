@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 
-from education_resource_mcp.adapters.annas_archive import AnnasArchiveSearchAdapter
-from education_resource_mcp.adapters.inspect_annas_archive import AnnasArchiveInspector
+from education_resource_mcp.adapters.libgen import LibgenSearchAdapter
+from education_resource_mcp.adapters.inspect_libgen import LibgenInspector
 from education_resource_mcp.adapters.libgen_client import Book
 from education_resource_mcp.config import Settings
 from education_resource_mcp.sessions import SessionStore
@@ -16,10 +16,10 @@ def _settings(root: Path) -> Settings:
     return Settings(data_dir=root, jobs_dir=root / "jobs")
 
 
-def test_annas_search_exposes_anonymous_libgen_mirror_route() -> None:
+def test_libgen_search_exposes_anonymous_mirror_route() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        adapter = AnnasArchiveSearchAdapter(SessionStore(root), _settings(root))
+        adapter = LibgenSearchAdapter(SessionStore(root), _settings(root))
         adapter._client.mirrors = ["https://libgen.example"]
         adapter._client.search = lambda query, limit: [
             Book(
@@ -44,10 +44,10 @@ def test_annas_search_exposes_anonymous_libgen_mirror_route() -> None:
     assert signals["acquisition_route"] == "libgen_mirror"
 
 
-def test_annas_inspection_explicitly_declares_no_authentication() -> None:
+def test_libgen_inspection_explicitly_declares_no_authentication() -> None:
     resource = {
         "resource_id": "res_test",
-        "platform": "annas-archive",
+        "platform": "libgen",
         "title": "公开镜像图书",
         "source_url": "https://libgen.example/ads.php?md5=" + "b" * 32,
         "resource_type": "book",
@@ -60,7 +60,7 @@ def test_annas_inspection_explicitly_declares_no_authentication() -> None:
         },
     }
 
-    payload = AnnasArchiveInspector().inspect(resource).to_mapping()
+    payload = LibgenInspector().inspect(resource).to_mapping()
     assert payload["resolution_status"] == "resolved"
     assert payload["resolved_resource"]["availability"]["status"] == "available"
 

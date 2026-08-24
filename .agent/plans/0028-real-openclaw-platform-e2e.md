@@ -1,200 +1,156 @@
-# 0028 — Windows OpenClaw / 真实资源能力验收
+# 0028 — 真实 OpenClaw 与真实平台验收
 
 - 状态：in_progress
 - 创建日期：2026-08-08
-- 更新日期：2026-08-19
-- 负责人：用户执行真实 Windows OpenClaw 测试；Coding Agent 只根据真实失败修具体能力
+- 更新日期：2026-08-25
+- 父计划：[0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md)
+- 范围：真实 Agent / 用户链路、真实平台网络行为、Session 登录恢复、Job durability 与真实文件
 
 ## Objective
 
-验证当前 `learning-resource-flow + education-resources MCP` 能否在 Windows OpenClaw 中稳定完成真实资源任务。
-
-本计划只跟踪**真实 Agent / 用户链路**。平台实现历史、局部单测、fixture、stdio 能启动、Provider 存在都不能替代这里的验收。
-
-## 当前后端基线
-
-当前 release-ready 基线为：
+验证当前唯一能力路线在真实 OpenClaw 用户任务中成立：
 
 ```text
-commit: 8ce531274edbec482e913b73dd33313283c322b1
-MCP: education-resources 0.4.0
-Tool surface: 14 tools
-full pytest: 205 passed
-compileall: passed
-runtime verifier: passed
-MCP stdio probe: passed
+用户自然语言
+  -> Agent / Skill 语义判断
+  -> Search / Host Web
+  -> 必要时 Expand / Import / Inspect
+  -> 用户明确选择并要求下载
+  -> Download Job
+  -> 真实文件
+  -> 可选 Archive
 ```
 
-这些证据证明当前后端与 Tool 表面可运行，但**不证明真实 OpenClaw、真实平台登录、真实网络出口或真实下载可用**。后续真实反馈修正必须重新验证受影响链路，不能借用该基线冒充新 diff 已通过。
+本计划只记录真实 Agent、真实平台和真实文件证据。平台实现、fixture、Service 直调、单元测试、stdio probe 或 Tool 存在都不能替代这里的验收。
 
-## 当前真实链路
+## Non-goals
 
-```text
-自然语言需求
-  -> resource_search / Host Web Search / resource_browse_creator
-  -> Agent 判断候选
-  -> 必要时 resource_import_url / resource_inspect / 补搜
-  -> 用户选择
-  -> 用户明确要求下载
-  -> resource_download
-  -> resource_job_status
-  -> real files / failures
-  -> 可选 resource_archive
-```
+- 不定义第二套公共 Tool 或架构路线；公共面以 0067 和运行时 schema 为准。
+- 不恢复 Flow、ResultSet、Presentation、Selection、Plan、Eligibility、Authority、Asset 或 digest 状态链。
+- 不用真实验收失败推动无关重构；失败只回到对应 Adapter、Inspector、Downloader、Session 或 Job 边界修正。
+- 不索取、记录或提交密码、验证码、Cookie、Token、浏览器档案和下载资产。
 
-没有：
+## Business invariants
 
-```text
-Flow
-ResultSet lineage
-Presentation
-Selection
-Prepare
-confirmation token
-Start
-Asset / Outcome 状态链
-```
+- Search / Expand 只产生候选，不授权下载。
+- Inspect 只在未知事实影响选择或获取时使用，不是固定步骤。
+- 用户已经明确选择并要求下载时直接调用 `resource_download`，不制造二次确认状态机。
+- Download 内部 fresh Inspect，并精确执行当前 Provider 路线；失败不静默切换到不等价资源。
+- 一个逻辑 Resource 可以自然产生多个真实文件。
+- Expand 完整结果落 `results.jsonl`；`resource_job_read` 只控制上下文页大小，不截断数据。
+- `AUTH_REQUIRED`、网络出口限制、平台风控、内容失效和文件校验失败必须按真实原因区分。
+- 没有真实文件不得报告下载成功。
 
-`resource_id` 只是进程内临时句柄；Download / Batch 的 `job_id` 才是文件型运行状态。一个逻辑 Resource 可以自然产生多个 File，不要求一一对应。
+## Current architecture
 
-## 当前真实验收队列
+- 当前公共面为 9 个资源 Tool + 4 个 Session Tool，共 13 个。
+- `resource_id` 是进程内句柄；Expand / Download 的 `job_id` 是真实长任务句柄。
+- SessionStore 位于同一个 `education-resources` MCP 中，不是 Search / Download 前置步骤。
+- `resource_import_url` 对已接入的明确 URL 形态恢复平台身份，未知 URL 保持 `generic`。
+- 当前主计划是 0067；CCTV 专项实现由 0068 跟踪，本计划统一承接它们的真实验收。
 
-按实际使用需要选择，不要求固定顺序。
+## 验收矩阵
 
-### 1. Host Web -> 已接入平台
+### 1. Host Web 与 URL Import
 
-验证 Host Web 找到 Bilibili / Zhihu / SmartEdu 等明确 URL 后：
-
-```text
-Host Web Search
--> resource_import_url
--> 正确平台身份
--> 对应 Inspector / Downloader
-```
-
-不能再次全部落成 `generic`。
+- Host Web 找到已接入平台 URL；
+- Import 恢复正确平台身份；
+- 进入专门 Inspector / Downloader；
+- 最终得到真实文件；
+- 未知网页仍按 Generic Web 处理。
 
 ### 2. SmartEdu
 
-分别记录四个边界：
+- 公共 Search 在保存过 Session 时仍保持匿名；
+- textbook Expand 得到真实 course 候选；
+- 一个包含主视频与资料附件的 course 使用 `original` 产生符合真实内容的多文件 Job；
+- 不把 IP/网络出口拒绝误报成登录问题；
+- `course -> file[]` 只有在 0067 建立稳定子资源身份后再验收，不用短期 CDN URL 假装完成。
 
-- 公共 Search / Catalog 在已保存 session 环境下仍应匿名；
-- 具体 Detail / Download 如果真实需要登录，才进入 Session；
-- 如果出现 IP / 网络出口限制，记录失败发生在 detail、media URL、m3u8、segment、key 哪一级，不把它误报成“补 token 即可”；
-- 课程链接是逻辑 Course Resource，不等于单网页/单文件。包含视频 + PDF/音频等内容时，Inspect 应公开主表示与 attachment/companion；用户未指定格式时直接 `resource_download(..., original)`，Agent 不应自行补 `mp4` 来绕过“网页不可下载”。Job 的多个 `files` / `failures` 才是课程交付事实。
+### 3. LibGen
 
-2026-08-19 真实事故：用户批量获取 SmartEdu 课程时，Agent 将课程 URL 降维为 webpage，随后人为补了格式才继续下载；但同一课程链接实际包含视频和文档。修正由 `0060-resource-multifile-delivery.md` 跟踪。
+- Search 返回 active `platform=libgen`；
+- 书籍身份以 MD5 为核心；
+- 不触发登录；
+- 镜像失败切换到下一 LibGen mirror，不跳转 Anna 页面重新识别；
+- 下载得到真实电子书文件。
 
-当前视频/PDF/音频实现存在不等于当前网络出口可用。
+### 4. Session 登录恢复
 
-### 3. Anna / Libgen
-
-匿名镜像链不得触发 Anna 会员登录；验证搜索、Inspect、下载最终文件。
-
-### 4. AUTH_REQUIRED -> Session
-
-找一个真实需要登录的平台，验证：
-
-```text
-真实资源能力返回 AUTH_REQUIRED
--> 用户浏览器登录
--> resource_session_save
--> 重试原资源能力
-```
-
-Session Tool 不是 Search / Download 的固定前置步骤。
+- 真实资源操作先返回 `AUTH_REQUIRED`；
+- 用户自行完成浏览器登录；
+- capture 原样交给 `resource_session_save`，由 MCP 内部筛选；
+- 重试原资源操作成功或返回新的真实失败；
+- Agent 不接触密码、验证码、短信码或 MFA。
 
 ### 5. Generic Web
 
-验证普通网页最终真实得到：
+- 真实页面得到原始 `source.html`；
+- Trafilatura 生成 `content.md` 与 Reader `index.html`；
+- Reader 不依赖远程正文图片资源；
+- 抽取或图片获取失败时保留 source，并按 partial / warning 如实返回；
+- 人工打开至少一个中文页面检查可读性。
 
-```text
-source.html
-index.html
-content.md
-metadata.json
-webbundle.zip
-```
+### 6. 结构展开平台
 
-人工检查 source snapshot 与 Trafilatura 可读表示；正文抽取失败不能删除已经取得的 source HTML。
+- Bilibili：creator / collection Expand 到完整 video 候选，video 下载得到真实 MP4；
+- Douyin：creator / collection Expand 到完整 video 候选，长任务不因上下文膨胀中断；
+- Ximalaya：creator Expand 到完整 album 候选，album Expand 到 track，track 下载得到真实音频，album 直接 Download 明确失败；
+- Zjer：course Expand 到 video，video 下载得到真实 MP4；
+- CCTV：column / series Expand 到 video，video 下载得到真实 MP4；
 
-### 6. Douyin creator 长任务
+### 7. Job durability 与取消
 
-复测“停云小阁”场景：搜索/Inspect 直接得到 `creator_sec_uid`，再进入 `resource_browse_creator` 或批量枚举。Agent 不应再为了找 creator_id 读取大型源码/旧 Contract 并触发 compaction。
+- Expand / Download Job 在 Gateway/MCP 重启场景中的结果有真实结论；
+- worker 消失时状态不永久停留 running；
+- 用户取消能到达真实终态；
+- 不新增 checkpoint、resume token 或第二套 Job 状态机掩盖失败。
 
-### 7. Yixi
+### 8. Expand 结果选择与批量下载
 
-使用历史真实样本 `speech_id=1435`《教育就是生长》，验证公开 MP4 从候选走到实际文件。0051 的实现历史已归档，不再使用其中的 Prepare / Start / Asset 术语。
+- 用户只选择部分子资源时，通过 `resource_job_read` 获取对应 `resource_id` 后下载；
+- 用户明确选择完整 succeeded Expand Job 的全部结果时，使用 `expand_job_id` 提交普通多资源 Download Job；
+- partial / failed / cancelled Expand Job 不得冒充“全部”；
+- Search / Expand 完成不会自动开始下载。
 
-### 8. Zjer
-
-使用 `courseCateId=34941` 验证 experimental 课程视频：稳定课程/课时身份 -> fresh Inspect -> 下载时刷新临时签名 URL -> 实际 MP4 文件。普通关键词搜索在原生接口未确认前继续如实 `FEATURE_NOT_SUPPORTED`。
-
-### 9. Job durability
-
-在真实 Windows 计划任务网关环境验证：下载进行中执行实际 `sync-to-openclaw.ps1` / gateway restart 后，文件型 Job 状态仍诚实可读；worker 存活则继续，真实中断则显示 `interrupted`，不得伪造成功。
-
-### 10. Batch
-
-批量能力的实现历史已经归档；这里只验证真实用户链需要的代表场景，例如 Bilibili creator/time-range、SmartEdu catalog expand。全量结果必须留在 `results.jsonl`，对话只分页读取；损坏 JSONL 必须显式失败。
-
-SmartEdu `catalog_expand` 当前解决完整枚举，不等于已经提供“把整个 catalog 自动全部下载”的资源工作流；若真实需求确认需要直接衔接，再另做最小批量 acquisition 能力，不把这次课程包修正扩大成新状态机。
-
-## 每次测试最少记录
+## 每次真实测试最少记录
 
 ```text
 User request:
 Platform / route:
-Search or discovery completed: yes/no
-Inspect needed/completed: yes/no
-Download requested: yes/no
+Search / Import / Expand completed:
+Inspect needed/completed:
+Download explicitly requested:
 Job terminal status:
 Actual files:
-Compaction happened: yes/no
-Task interrupted: yes/no
-Observed error:
-Failure stage (if known):
+Session involved:
+Compaction or interruption:
+Observed error and stage:
 ```
 
-不要为了记录完整而要求用户提供 digest、Plan、Outcome 等已删除状态。
+## Acceptance criteria
 
-## 必须保持的边界
+- AC-01：至少一个真实平台从自然语言需求走到真实文件。
+- AC-02：Host Web -> Import -> 专门平台 -> 文件真实通过一次。
+- AC-03：Generic Web 真实生成 source + readable views，并完成一次人工检查。
+- AC-04：一个 SmartEdu 多文件课程使用 `original` 得到与真实内容一致的 Job 结果。
+- AC-05：一个真实 AUTH_REQUIRED 平台完成用户登录 capture -> save -> 原操作重试。
+- AC-06：一个曾易 compaction 的完整展开任务成功结束，或失败已定位到具体平台/能力。
+- AC-07：Gateway/MCP 重启下 Job durability 得到真实结论。
+- AC-08：Bilibili、Douyin、Ximalaya、Zjer、LibGen、CCTV 的已实现核心路径各有至少一次真实 smoke，无法执行的明确记录外部条件。
+- AC-09：测试过程中没有恢复旧状态链、静默 fallback 或数据截断。
 
-- Agent 只有在用户已经明确表达下载意图时调用 `resource_download`；
-- 不制造 Prepare / confirmation token / Start；
-- 下载内部 fresh Inspect，并使用当前 exact Provider；
-- 一个 Resource 可以产生多个真实文件；primary 只是 Provider 路由锚点，不是“一资源只能一个文件”的声明；
-- 默认 `original` 不制造格式要求，Agent 不因 landing webpage 自行猜扩展名；
-- Provider 失败返回真实失败，不 silent fallback 到不等价来源；
-- `AUTH_REQUIRED`、网络阻断、平台风控、内容变化和文件校验失败必须区分；
-- 没有真实文件不得报告成功；
-- 平台真实问题优先修 Adapter / Inspector / Downloader，不增加通用状态机掩盖问题。
+## 步骤
 
-## 历史计划接管
+- [x] completed：合并 0058、0060、0061、0062、0063 的剩余真实验收责任，并更新为当前 13 Tool / Expand 路线。
+- [ ] in_progress：按验收矩阵执行真实 OpenClaw / 平台 smoke，逐项记录证据与失败阶段。
+- [ ] pending：把真实失败返回对应局部实现计划修正，并按影响范围复测。
+- [ ] pending：满足完成标准后记录结果、标记 completed 并归档。
 
-以下实现计划已移入 `archive/`，剩余真实用户验收统一由本计划接管：
+## Validation status
 
-- `0051-yixi-video-acquisition.md` -> Yixi 1435；
-- `0052-zjer-course-video-acquisition.md` -> Zjer 34941；
-- `0054-douyin-creator-id-exposure.md` -> Douyin creator / compaction；
-- `0056-download-job-subprocess-durability.md` -> Windows gateway restart；
-- `0057-native-batch-capability-parity.md` -> 代表性 Batch 用户链；
-- `0059-post-convergence-review-fixes.md` 已完成，只作为 release-ready 后端验证历史。
+已有单元、integration、stdio 和历史真实网页物化证据只能证明局部实现，不满足本计划的真实 Agent / 平台门槛。当前尚未形成覆盖上述矩阵的统一真实验收记录。
 
-当前新的 `0060-resource-multifile-delivery.md` 是由 2026-08-19 真实 SmartEdu 用户反馈产生的局部修正，不是旧计划恢复。
+## Result
 
-旧计划中的 Prepare / Confirm / Start / Asset、独立 session-manager、旧测试基线等文字仅代表当时历史，不再是当前架构依据。
-
-## Completion criteria
-
-本计划至少满足：
-
-1. 一个真实平台在 Windows OpenClaw 中从自然语言需求走到实际下载文件；
-2. Host Web -> 已接入平台 URL -> Import -> 专门能力真实通过一次；
-3. Generic Web 真实生成 source snapshot + readable views 并人工检查；
-4. 一个此前易 compaction 的长任务完整完成，或剩余中断已定位到具体能力/平台；
-5. Windows gateway restart 下 Job durability 得到真实结论；
-6. 登录相关测试能区分真实 `AUTH_REQUIRED` 与 IP/网络出口/平台策略问题；
-7. 一个包含至少主视频 + 文档附件的 SmartEdu 课程，在不指定格式的情况下通过 `original` 产生符合真实内容的多文件 Job，Agent 不再自行补格式。
-
-如果失败，只根据实际 Search / Inspect / Download / Job 错误修具体能力，不恢复通用工作流状态机。
+未完成。当前作为 0067 的唯一真实验收子计划继续跟踪。

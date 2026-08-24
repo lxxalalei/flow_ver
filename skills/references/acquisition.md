@@ -10,7 +10,7 @@
 
 - “第 1、3 个帮我下下来” → 对象和意图都明确，可以执行；
 - “这本书能下的话帮我保存” → 已经明确要求获取，不需要再生成一份形式化计划让用户二次确认；
-- “这批结果全部下载” → 如果“这批”指向一个已经完整枚举成功的 batch，可直接把整个 batch 交给下载；
+- “这批结果全部下载” → 如果“这批”指向一个已经完整展开成功的 Expand Job，可直接把整个 Expand Job 交给下载；
 - “先看看”“先别下载” → 只做发现和判断，不执行下载。
 
 如果用户指代的具体资源仍有歧义，先确认对象；如果对象已经清楚，不要重复确认已经明确的意图。
@@ -21,13 +21,13 @@ Agent 应理解用户真正选中了哪个资源，并利用当前对话中已�
 
 临时操作句柄只是执行工具的一部分。句柄失效时应重新定位同一资源，而不是重新做一遍资源研究。
 
-**批量枚举不是用户选择。** `resource_batch_collect` 只把候选范围抓完整；任务变成 `succeeded` 也不代表这些候选自动获得下载授权。
+**结构展开不是用户选择。** `resource_expand` 只把容器的子资源抓完整；任务变成 `succeeded` 也不代表这些候选自动获得下载授权。
 
 批量场景按用户实际选择处理：
 
-- 用户只选择其中一部分 → 读取必要页，使用 `resource_batch_read` 返回的当前进程 `resource_id` 下载这些资源；
-- 用户明确说“全部”“整套都要”等，并且 batch 已完整 `succeeded` → 可以把该 `batch_job_id` 直接交给 `resource_download`，由 MCP 后台读取完整 `results.jsonl` 并复用普通多资源下载 Job；
-- batch 是 `partial` / `failed` / `cancelled` 时，不得把当前已采到的部分冒充“全部”。如果用户仍只想要已展示的部分，应按那些明确候选的 `resource_id` 下载。
+- 用户只选择其中一部分 → 读取必要页，使用 `resource_job_read` 返回的当前进程 `resource_id` 下载这些资源；
+- 用户明确说“全部”“整套都要”等，并且 Expand Job 已完整 `succeeded` → 可以把该 `expand_job_id` 直接交给 `resource_download`，由 MCP 后台读取完整 `results.jsonl` 并复用普通多资源下载 Job；
+- Expand Job 是 `partial` / `failed` / `cancelled` 时，不得把当前已采到的部分冒充“全部”。如果用户仍只想要已展示的部分，应按那些明确候选的 `resource_id` 下载。
 
 这里不创建 Selection/Confirm 状态对象；用户自然语言本身就是选择依据。
 
@@ -94,22 +94,22 @@ Import / Inspect / Download x N
 因此：
 
 ```text
-Batch discovery
+Expand
   -> 候选集合
   -> 用户明确选择全部或部分
   -> resource_download
   -> 后台逐 Resource fresh Inspect / exact Provider / 0..N Files
 ```
 
-如果用户明确选择整个完整 batch，Agent 不需要分页把全部 URL 搬进上下文；直接传 `batch_job_id`。如果用户只选择部分，则只读到足以确定这些资源的页即可。
+如果用户明确选择整个完整 Expand Job，Agent 不需要分页把全部 URL 搬进上下文；直接传 `expand_job_id`。如果用户只选择部分，则只读到足以确定这些资源的页即可。
 
 ## 7. 成功只依据真实结果
 
 只有工具实际产生可用文件，才能说下载成功。
 
-`resource_download` 和 `resource_batch_collect` 都会先返回持久 `job_id` 与 `queued` 状态。开始后必须继续用 `resource_job_status` 查看进度，直到进入 `succeeded`、`partial`、`failed`、`cancelled` 或 `interrupted` 之一；`queued`、`running`、`cancelling` 都不是最终结果。
+`resource_download` 和 `resource_expand` 都会先返回持久 `job_id` 与 `queued` 状态。开始后必须继续用 `resource_job_status` 查看进度，直到进入 `succeeded`、`partial`、`failed`、`cancelled` 或 `interrupted` 之一；`queued`、`running`、`cancelling` 都不是最终结果。
 
-只有到达终态后才能根据真实 `files` / `failures` 说明结果或执行归档。Batch 也只有完整 `succeeded` 时才能作为“全部结果”继续交给下载；其他终态仍按本文件前述部分结果语义处理。
+只有到达终态后才能根据真实 `files` / `failures` 说明结果或执行归档。Expand Job 也只有完整 `succeeded` 时才能作为“全部结果”继续交给下载；其他终态仍按本文件前述部分结果语义处理。
 
 一个资源产生多个文件时，以 Job 的真实 `files` / `failures` 为准；不要因为主视频成功就自动声称课程包全部成功。多个 Resource 的批量 Job 也同理：部分资源成功不等于整批成功。
 

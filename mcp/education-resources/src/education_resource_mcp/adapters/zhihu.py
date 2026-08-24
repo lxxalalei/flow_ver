@@ -407,66 +407,6 @@ class ZhihuSearchAdapter:
             return [], adapter_error("AUTH_REQUIRED", "知乎 session 未配置，且搜索引擎兜底无结果", False)
         return [], adapter_error("PARTIAL_FAILURE", "知乎搜索三级降级均无结果", False)
 
-
-
-    def search_creator(
-        self, creator_id: str, limit: int
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        """Browse a Zhihu author's answers (creator_id = url_token)."""
-        session_data = self.session_store.get_session_data("zhihu")
-        cookie = SessionStore._cookie_header(session_data) if session_data else ""
-        url_token = creator_id.strip().rstrip("/").split("/")[-1]
-        results: list[dict[str, Any]] = []
-        offset = 0
-        while len(results) < limit:
-            page_size = min(20, limit - len(results))
-            api = f"https://www.zhihu.com/api/v4/members/{url_token}/answers"
-            params = urlencode({"include": "data[*].is_normal,content,voteup_count,comment_count;",
-                                "offset": str(offset), "limit": str(page_size),
-                                "sort_by": "default"})
-            headers = {"User-Agent": UA, "Accept": "application/json",
-                       "Referer": f"https://www.zhihu.com/people/{url_token}/answers"}
-            if cookie:
-                headers["Cookie"] = cookie
-            try:
-                request = Request(f"{api}?{params}", headers=headers)
-                with urlopen_with_fallback(request, timeout=self.timeout) as resp:
-                    data = json.loads(resp.read().decode("utf-8", "replace"))
-            except Exception as exc:
-                if results:
-                    return results, adapter_error("PARTIAL_FAILURE", str(exc)[:200], True)
-                return [], adapter_error("PARTIAL_FAILURE", f"知乎创作者请求失败: {type(exc).__name__}", True)
-            answers = data.get("data") or []
-            if not answers:
-                break
-            for ans in answers:
-                if not isinstance(ans, dict):
-                    continue
-                q = ans.get("question") or {}
-                aid = str(ans.get("id") or "").strip()
-                qid = str(q.get("id") or "").strip()
-                title = _strip_html(q.get("title"))
-                if not aid or not title:
-                    continue
-                author = (ans.get("author") or {}).get("name")
-                results.append(make_resource(
-                    platform="zhihu", title=title,
-                    source_url=f"https://www.zhihu.com/question/{qid}/answer/{aid}",
-                    resource_type="问答", author=author,
-                    platform_signals={
-                        "voteup": ans.get("voteup_count"),
-                        "comments": ans.get("comment_count"),
-                    },
-                ))
-                if len(results) >= limit:
-                    break
-            paging = data.get("paging") or {}
-            if paging.get("is_end"):
-                break
-            offset += page_size
-        return results, None
-
-
 class _ZhihuError(Exception):
     def __init__(self, code: str, message: str, retryable: bool) -> None:
         super().__init__(message)

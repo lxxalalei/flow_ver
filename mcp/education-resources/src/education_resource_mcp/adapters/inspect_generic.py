@@ -25,8 +25,6 @@ from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
     build_default_inspection,
-    build_representation_authority,
-    source_fingerprint,
 )
 from ..policy import Resolver, PolicyViolation, system_resolver, validate_public_http_url
 
@@ -652,34 +650,24 @@ class GenericWebInspector:
         )
         if representation is not None:
             rep = dict(representation)
-            try:
-                fingerprint = source_fingerprint(resource)
-            except Exception:
-                source = resource.get("source_url")
-                source_text = source if isinstance(source, str) else ""
-                fingerprint = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
-            seed = f"{fingerprint}:{rep.get('kind', 'other')}:{rep.get('mime_type', '')}"
+            seed = json.dumps(
+                {
+                    "platform": resource.get("platform"),
+                    "source_url": resource.get("source_url"),
+                    "title": resource.get("title"),
+                    "kind": rep.get("kind", "other"),
+                    "mime_type": rep.get("mime_type", ""),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
             rep.setdefault("representation_id", "repr_" + hashlib.sha256(seed.encode()).hexdigest()[:32])
-            # Every adapter result carries explicit capability scope and
-            # bounded evidence.  Legacy role/materializable fields remain in
-            # the envelope for old consumers but are never used to infer a
-            # primary resource when the authority fields disagree.
             scope = rep.get("scope")
-            role = rep.get("role")
-            if isinstance(scope, str) and isinstance(role, str):
-                authority = build_representation_authority(
-                    resource,
-                    scope=scope,
-                    role=role,
-                    technical_availability=str(
-                        rep.get("technical_availability") or availability
-                    ),
-                    source=str(rep.get("evidence", {}).get("source") or "inspection")
-                    if isinstance(rep.get("evidence"), Mapping)
-                    else "inspection",
-                    observed_at=inspection["inspected_at"],
+            if isinstance(scope, str):
+                rep["technical_availability"] = str(
+                    rep.get("technical_availability") or availability
                 )
-                rep.update(authority)
             resolved["representations"] = [rep]
         return InspectionResult(
             resolution_status=resolution_status,

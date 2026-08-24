@@ -18,7 +18,6 @@ from urllib.parse import urlsplit
 from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
-    build_representation_authority,
 )
 from .inspect_generic import GenericWebInspector, _safe_text
 
@@ -196,17 +195,6 @@ class _PlatformWebInspector(GenericWebInspector):
             representation["container"] = container
         if mime_type:
             representation["mime_type"] = mime_type
-        observed_at = payload.get("inspection", {}).get("inspected_at")
-        representation.update(
-            build_representation_authority(
-                resource,
-                scope=scope,
-                role=role,
-                technical_availability="unknown",
-                source="metadata",
-                observed_at=observed_at if isinstance(observed_at, str) else None,
-            )
-        )
         for item in representations:
             if item.get("kind") == "webpage" and item.get("role") == "primary":
                 item["role"] = "landing"
@@ -366,16 +354,6 @@ class BilibiliInspector(_PlatformWebInspector):
                 "technical_availability": "available",
                 "materializable": True,
             }
-            primary.update(
-                build_representation_authority(
-                    resource,
-                    scope="primary_resource",
-                    role="primary",
-                    technical_availability="available",
-                    source="provider",
-                    observed_at=payload.get("inspection", {}).get("inspected_at"),
-                )
-            )
             representations.insert(0, primary)
             resolved["representations"] = representations
             resolved["availability"] = {"status": "available"}

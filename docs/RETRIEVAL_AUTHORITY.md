@@ -1,26 +1,11 @@
-# Retrieval Authority：事实、语义审查与停止决策
+# 已退役：Retrieval Authority
 
-- **状态**：Accepted
-- **日期**：2026-08-12
+本文件不再承载 active 架构或执行路线。
 
-## 权威边界
+当前唯一架构入口是 [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)：
 
-```text
-MCP Search -> immutable ResultSet + factual coverage
-MCP Inspect -> Resolution / Representation facts
-MCP Plan / Job / Asset / Archive -> service facts
-                               |
-                               v
-Skill reads MCP facts -> private SemanticReview
-                               |
-                               v
-Skill decides: Present / Replan / Clarify / StopWithGap
-```
+- Agent / Skill 负责需求理解、搜索设计、候选判断、Gap、停止、用户选择与归档分类；
+- `education-resources` MCP 负责 Search / Expand / Inspect / Download、Job、Archive 与辅助 Session 能力；
+- MCP 不保存 Flow、ResultSet、Presentation、Selection、Plan、Eligibility、Authority、Asset 或 digest 状态链。
 
-## 原则
-
-1. **MCP 只保存事实**：ResultSet、Resolution、Selection、Plan、Job、Outcome、Asset。
-2. **语义判断在 Skill 私有完成**：SemanticReview、Gap、StopDecision 不持久化、不暴露给 MCP。
-3. **候选数量或标题命中不自动触发 Present**：Skill 基于任务目标和证据质量判断。
-4. **Selective Inspect**：只对会改变决策的高潜候选做 Inspect。
-5. **停止决策不可委托给 MCP**：Skill 拥有 Present / Replan / Clarify / Stop 的最终决策权。
+需要修改语义决策时读取 [`skills/SKILL.md`](../skills/SKILL.md)；需要修改公共 Tool 时读取 [`TOOLS.md`](../TOOLS.md) 和运行时 `server.py`。历史 Retrieval Authority 设计仅保留在 Git 历史与归档材料中。

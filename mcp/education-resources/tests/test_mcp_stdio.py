@@ -24,9 +24,7 @@ EXPECTED_TOOLS = {
     "resource_job_read",
     "resource_archive",
     "resource_session_status",
-    "resource_session_login_guide",
-    "resource_session_save",
-    "resource_session_delete",
+    "resource_session_manage",
 }
 
 

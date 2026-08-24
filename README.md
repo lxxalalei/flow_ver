@@ -6,7 +6,7 @@
 用户自然语言
   -> skills/
   -> Host Web Search / mcp/education-resources/
-  -> 搜索 / 必要检查 / 下载 / Batch / Archive
+  -> Search / Expand / Inspect / Download / Archive
 ```
 
 ## Active 结构
@@ -19,9 +19,9 @@ docs/                                # 当前架构与开发路线
 legacy/                               # 只读历史
 ```
 
-`education-resources` 当前同时暴露 10 个资源 Tool 和 4 个 Session Tool。Session 只是辅助登录态能力，不是搜索/下载的固定前置流程；只有真实资源能力返回 `AUTH_REQUIRED` 或用户主动管理登录态时才使用。
+`education-resources` 当前暴露 9 个资源 Tool 和 2 个 Session Tool，共 11 个。Session 只是辅助登录态能力，不是搜索/下载的固定前置流程；只有真实资源能力返回 `AUTH_REQUIRED` 或用户主动管理登录态时才使用。
 
-MCP 不承担 Flow、ResultSet、Presentation、Selection、Plan、Asset、authority/digest 等工作流状态。用户选择和获取意图属于正常对话；后端只保存执行真正需要的临时资源句柄、下载/Batch Job 和平台 SessionStore。
+MCP 不承担 Flow、ResultSet、Presentation、Selection、Plan、Asset、authority/digest 等工作流状态。用户选择和获取意图属于正常对话；后端只保存执行真正需要的临时资源句柄、Expand/Download Job 和平台 SessionStore。
 
 ## Web 与专门平台
 
@@ -31,7 +31,7 @@ MCP 不承担 Flow、ResultSet、Presentation、Selection、Plan、Asset、autho
 resource_import_url(source_url="https://...")
 ```
 
-Import 会把明确的 Bilibili / Zhihu / SmartEdu URL 交给对应专门 Inspector；无法明确识别的网页按 Generic Web 处理。
+Import 会把明确的 Bilibili、Douyin、Ximalaya、SmartEdu、Zjer、CCTV、LibGen、Zhihu URL 交给对应平台能力；无法明确识别的网页按 Generic Web 处理。
 
 Generic Web 下载现在保留原始 `source.html`，再使用 Trafilatura 生成 `index.html` / `content.md` 等可读表示。正文抽取失败不会删除已经取得的源响应。
 

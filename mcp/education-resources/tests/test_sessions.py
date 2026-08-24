@@ -91,15 +91,6 @@ class UnifiedSessionStoreTests(unittest.TestCase):
             self.assertEqual("MS", data["local_storage"]["xmst"])
             self.assertNotIn("unrelated", data["local_storage"])
 
-    def test_public_platform_never_requests_login(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            store = SessionStore(Path(d))
-            status = store.get_status(["annas-archive"])[0]
-            self.assertEqual(status.status, "not_required")
-            guide = store.login_guide("annas-archive")
-            self.assertFalse(guide["requires_login"])
-            self.assertEqual([], guide["steps"])
-
     def test_wrong_domain_cookie_fails_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             store = SessionStore(Path(d))

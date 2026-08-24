@@ -1,4 +1,4 @@
-"""Detached worker for Download, Expand and legacy internal batch jobs."""
+"""Detached worker for Download and Expand jobs."""
 
 from __future__ import annotations
 
@@ -24,19 +24,10 @@ LOGGER = logging.getLogger(__name__)
 
 def run(directory: Path) -> int:
     request = read_request(directory)
-    kind = str(request.get("kind") or "")
-    if kind == "resource_expand":
+    if str(request.get("kind") or "") == "resource_expand":
         from .expand import run_expand
 
         return run_expand(directory)
-    # Kept as an internal compatibility path while the public MCP no longer
-    # exposes platform-specific batch modes. It can be removed separately
-    # after old tests/callers are migrated.
-    if kind == "batch_collect":
-        from .batch import run_batch_collect
-
-        return run_batch_collect(directory)
-
     job_id = str(request["job_id"])
     resources = list(request.get("resources") or [])
     preferred_container = str(request.get("preferred_container") or "original")

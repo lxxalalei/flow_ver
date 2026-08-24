@@ -440,7 +440,7 @@ class MultiPlatformSearchProvider:
             ("runoob", "RunoobSearchAdapter"),
             ("nlc", "NlcSearchAdapter"),
             ("open163", "Open163SearchAdapter"),
-            ("annas_archive", "AnnasArchiveSearchAdapter"),
+            ("libgen", "LibgenSearchAdapter"),
             ("weibo", "WeiboSearchAdapter"),
             ("wechat", "WechatSearchAdapter"),
             ("shuge", "ShugeSearchAdapter"),
@@ -499,82 +499,6 @@ class MultiPlatformSearchProvider:
                 )
         self._adapters[adapter.platform_id] = adapter
 
-    @staticmethod
-    def _creator_platform_run(
-        platform: str,
-        creator_id: str,
-        candidate_count: int,
-        error: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        query_run: dict[str, Any] = {
-            "query": creator_id,
-            "candidate_count": candidate_count,
-            "failure_count": 1 if error else 0,
-        }
-        if error:
-            query_run["error"] = {
-                "code": str(error.get("code") or "PARTIAL_FAILURE"),
-                "message": str(error.get("message") or "创作者浏览失败"),
-                "retryable": bool(error.get("retryable")),
-            }
-        return {
-            "platform": platform,
-            "status": (
-                "succeeded"
-                if error is None
-                else ("partial" if candidate_count else "failed")
-            ),
-            "query_runs": [query_run],
-        }
-
-    def search_creator(
-        self, platform: str, creator_id: str, limit: int, cancel_event: Any = None
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Browse a creator's content via the platform adapter.
-
-        Only adapters that implement ``search_creator`` are supported — this
-        is a social-media capability (douyin, bilibili, zhihu, weibo, …).
-        Education/resource platforms return FEATURE_NOT_SUPPORTED.
-        """
-        adapter = self._adapters.get(platform)
-        if adapter is None:
-            return [], [
-                self._creator_platform_run(
-                    platform,
-                    creator_id,
-                    0,
-                    {
-                        "code": "UNKNOWN_PLATFORM",
-                        "message": (
-                            f"平台 {platform} 无 adapter；"
-                            f"可用平台：{', '.join(sorted(self._adapters) + ['generic'])}"
-                        ),
-                        "retryable": False,
-                    },
-                )
-            ]
-        if not hasattr(adapter, "search_creator"):
-            return [], [
-                self._creator_platform_run(
-                    platform,
-                    creator_id,
-                    0,
-                    {
-                        "code": "FEATURE_NOT_SUPPORTED",
-                        "message": f"平台 {platform} 不支持创作者浏览",
-                        "retryable": False,
-                    },
-                )
-            ]
-        if cancel_event is None:
-            resources, error = adapter.search_creator(creator_id, limit)
-        else:
-            resources, error = adapter.search_creator(creator_id, limit, cancel_event)
-        return resources, [
-            self._creator_platform_run(platform, creator_id, len(resources), error)
-        ]
-
-
     # ------------------------------------------------------------------
     # Per-platform worker: runs queries serially, returns one platform_run.
     # ------------------------------------------------------------------
@@ -584,17 +508,13 @@ class MultiPlatformSearchProvider:
         adapter: PlatformSearchAdapter,
         queries: list[str],
         limit: int,
-        tabs: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         query_runs: list[dict[str, Any]] = []
         all_resources: list[dict[str, Any]] = []
         error_count = 0
         for query in queries:
             try:
-                if tabs and platform == "smartedu" and hasattr(adapter, "search"):
-                    resources, error = adapter.search(query, limit, tabs=tabs)
-                else:
-                    resources, error = adapter.search(query, limit)
+                resources, error = adapter.search(query, limit)
             except Exception as exc:  # pragma: no cover - defensive
                 query_runs.append(
                     {
@@ -652,7 +572,6 @@ class MultiPlatformSearchProvider:
         self, search_tasks: list[dict[str, Any]], limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         # Merge tasks that share the same platform (preserve order).
-        # options (tabs, …) are taken from the first task that declares them.
         merged: dict[str, dict[str, Any]] = {}
         for task in search_tasks:
             platform = str(task.get("platform") or "")
@@ -663,13 +582,10 @@ class MultiPlatformSearchProvider:
             ]
             if not queries:
                 continue
-            tabs = task.get("tabs") if platform == "smartedu" else None
             if platform in merged:
                 merged[platform]["queries"].extend(queries)
-                if tabs and not merged[platform].get("tabs"):
-                    merged[platform]["tabs"] = tabs
             else:
-                merged[platform] = {"queries": list(queries), "tabs": tabs}
+                merged[platform] = {"queries": list(queries)}
 
         if not merged:
             return [], []
@@ -705,7 +621,6 @@ class MultiPlatformSearchProvider:
                                 adapter,
                                 entry.get("queries") or [],
                                 limit,
-                                entry.get("tabs") or None,
                             )
                         ] = platform
                     else:

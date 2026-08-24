@@ -28,12 +28,12 @@
 
 ## Current architecture
 
-- Public MCP 当前同时存在 `resource_browse_creator`、`resource_batch_collect(mode=creator_full|time_range_search|catalog_expand|collection_expand)`，把平台结构和模式泄漏给模型。
-- `batch.py` 已有稳定的 Job + `results.jsonl` 完整枚举承载机制，可以复用。
-- Bilibili / Douyin 已有 creator 枚举；Bilibili 已有 collection 枚举。
-- SmartEdu 当前通过 `catalog_expand + specs` 暴露教材展开，Search 还暴露 `tabs`。
-- Ximalaya 当前只搜 album；Downloader 对 album 会退化为第一 track，需要移除该行为并补 album 展开。
-- Anna's Archive 实际 Search/Download 已由 LibGen mirror + MD5 驱动，应统一改名为 `libgen`。
+- Public MCP 已收敛为 13 个 Tool；资源核心是 Search / Expand / Import / Inspect / Download，完整展开结果由通用 Job + `results.jsonl` + `resource_job_read` 承载。
+- `resource_browse_creator`、`resource_batch_collect`、`resource_batch_read` 及其 mode 已退出公共 Tool schema；旧 `batch.py` 仍是待确认无调用后的内部清理项。
+- Bilibili creator/collection、Douyin creator/collection、Ximalaya creator/album、SmartEdu textbook、Zjer course 与 CCTV column/series 已进入通用 Expand 路线。
+- SmartEdu course 独立 file Resource 身份仍是明确缺口，不猜身份。
+- active 图书平台身份已改为 `libgen`；部分内部类名、Provider/Session 配置与 Anna 镜像候选仍待清理。
+- `TOOLS.md`、`CURRENT_ARCHITECTURE.md`、MCP README 与 active Skill references 统一描述当前公共面；旧计划只保留 superseded 标记。
 
 ## Expected change surface
 
@@ -70,12 +70,15 @@ Should not change:
 ## 步骤
 
 - [x] completed：核对当前 Tool schema、Service、Batch 与主要平台实现。
-- [ ] in_progress：重构公共 Tool 与 Service/Batch 为通用 Expand/Job Read。
-- [ ] pending：补齐/调整主要平台资源对象与 Expand 行为。
-- [ ] pending：Anna's Archive -> LibGen active 命名迁移。
-- [ ] pending：更新 Skill/TOOLS/当前架构文档。
+- [x] completed：重构公共 Tool 与 Service/Batch 为通用 Expand/Job Read。
+- [x] completed：完成 Bilibili、Douyin collection、Ximalaya album、SmartEdu textbook、Zjer 与 CCTV 已确认资源对象的 Expand 行为。
+- [x] completed：完成 `libgen` 公共平台身份迁移与 Inspector 显式注册。
+- [x] completed：更新 Skill、TOOLS、MCP README、当前架构与计划入口，消除旧公共路线漂移。
+- [x] completed：基于喜马拉雅当前网页 `/revision/user/pub` 的 `totalCount` 分页实现 Ximalaya creator → album[]，提前断页显式失败。
+- [ ] in_progress：清理 active LibGen 内部 Anna 候选/Provider/Session 残留，并修正对应旧测试断言。
+- [ ] pending：调查并按真实证据决定 SmartEdu course 子资源缺口。
 - [ ] pending：运行最小充分测试与 Tool schema probe，修复回归。
-- [ ] pending：完成 checkpoint、结果记录并归档计划。
+- [ ] pending：由 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) 完成真实平台/Agent 验证，再记录 checkpoint 并归档计划。
 
 ## Milestone checkpoint
 
@@ -124,12 +127,12 @@ Scope drift detected?: no
 
 | Validation | Result | What it proves | What it does NOT prove |
 | --- | --- | --- | --- |
-| targeted unit | pending | 受影响 adapter/service 行为 | real Agent/user flow |
-| MCP tool schema probe | pending | 模型看到的 Tool 已收敛 | 平台线上接口长期稳定 |
-| real platform smoke | pending/按可用环境执行 | 真实平台当前路径 | 全平台全面回归 |
-| real Agent/user flow | not run yet | - | - |
+| targeted unit | 部分已有提交证据；当前未完整重跑 | 受影响 adapter/service 行为 | real Agent/user flow |
+| MCP tool schema probe | schema 测试已更新；当前环境尚未完成独立 probe | 模型看到的 Tool 已收敛 | 平台线上接口长期稳定 |
+| real platform smoke | 由 0028 跟踪，pending | 真实平台当前路径 | 全平台全面回归 |
+| real Agent/user flow | 由 0028 跟踪，not run yet | - | - |
 | full regression | not planned by default | - | - |
 
 ## 结果
 
-未完成。
+主体实现已落地，但计划未完成：仍有 LibGen 内部残留、两个明确平台能力缺口、独立 Tool probe 与真实用户链路验收。

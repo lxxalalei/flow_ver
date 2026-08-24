@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request
 
 from ..errors import DomainError
-from ..inspection import INSPECTOR_VERSION, InspectionResult, build_representation_authority
+from ..inspection import INSPECTOR_VERSION, InspectionResult
 from ..policy import NetworkPolicy, PolicyViolation
 from .inspect_bilibili import _PlatformWebInspector
 from .smartedu_download import (
@@ -224,17 +224,6 @@ class SmartEduInspector(_PlatformWebInspector):
         size = candidate.get("size")
         if isinstance(size, int) and not isinstance(size, bool) and size > 0:
             representation["size_bytes"] = size
-        inspected_at = payload.get("inspection", {}).get("inspected_at")
-        representation.update(
-            build_representation_authority(
-                resource,
-                scope=scope,
-                role=role,
-                technical_availability="available",
-                source="provider",
-                observed_at=inspected_at if isinstance(inspected_at, str) else None,
-            )
-        )
         return representation
 
     def _enrich_payload(

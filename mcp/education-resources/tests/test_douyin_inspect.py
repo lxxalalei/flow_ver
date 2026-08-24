@@ -91,8 +91,7 @@ class DouyinInspectorTests(unittest.TestCase):
         self.assertEqual("available", primary["technical_availability"])
         self.assertTrue(primary["materializable"])
         self.assertEqual("video/mp4", primary["mime_type"])
-        # The platform-native creator handle rides along in inspect metadata
-        # so resource_browse_creator can be called without extra discovery.
+        # The platform-native creator handle supports creator expansion.
         self.assertEqual(
             "MS4wLjABAAAAtest_inspect_sec_uid",
             resolved["metadata"]["creator_sec_uid"],

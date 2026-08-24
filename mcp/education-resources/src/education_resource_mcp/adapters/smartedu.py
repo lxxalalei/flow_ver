@@ -41,20 +41,6 @@ SEARCH_URLS = (
     "https://resource-gateway.ykt.eduyun.cn/resources/aggregate",
 )
 
-# National-lesson textbook discovery via public static CDN JSON (0057 M4b).
-# No browser: the frontend renders these endpoints, so we call them directly.
-CDN_DATA_VERSION_URL = (
-    "https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/national_lesson/"
-    "teachingmaterials/version/data_version.json"
-)
-CDN_MATERIAL_PARTS_TMPL = (
-    "https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/national_lesson/"
-    "teachingmaterials/{mid}/resources/part_{n}.json"
-)
-CDN_MATERIAL_TREES_TMPL = (
-    "https://s-file-1.ykt.cbern.com.cn/zxx/ndrv2/national_lesson/trees/{mid}.json"
-)
-
 DETAIL_PAGE = (
     "https://basic.smartedu.cn/{catalog}/detail?"
     "contentType={content_type}&contentId={id}&catalogType={catalog}&subCatalog={sub_catalog}"
@@ -392,9 +378,7 @@ class SmartEduSearchAdapter:
             "Content-Type": "application/json;charset=UTF-8",
         }
 
-    def _build_payload(
-        self, query: str, limit: int, tabs: list[str] | None = None
-    ) -> dict[str, Any]:
+    def _build_payload(self, query: str, limit: int) -> dict[str, Any]:
         # Request more than the caller's limit because the post-filter
         # discards the majority of raw results.
         fetch_limit = max(limit * 5, 50)
@@ -402,7 +386,7 @@ class SmartEduSearchAdapter:
             "identity": "家长",
             "identity_code": "GUARDIAN",
             "keyword": query,
-            "tab_codes": tabs if tabs else DEFAULT_TAB_CODES,
+            "tab_codes": DEFAULT_TAB_CODES,
             "cross_tenant": True,
             "duplicate_filter": True,
             "search_order": {"field": "_score", "direction": "desc"},
@@ -433,112 +417,13 @@ class SmartEduSearchAdapter:
         except (TimeoutError, URLError, json.JSONDecodeError):
             return None
 
-    # -- textbook discovery (0057 M4b) -----------------------------------
-
-    def discover_textbook_courses(self, specs: list[str]) -> list[dict[str, Any]]:
-        """Locate national-lesson textbooks by spec and list their courses.
-
-        *specs* look like "学科/年级/册次/版本", e.g. "语文/一年级/上册/统编版".
-        Uses public static CDN JSON endpoints directly and never attaches a
-        stored browser token.
-        """
-
-        headers = self._build_headers()
-        try:
-            data_version = self._cdn_json(CDN_DATA_VERSION_URL, headers)
-        except (HTTPError, URLError, TimeoutError) as exc:
-            raise _SmartEduError(
-                "NETWORK_BLOCKED", f"教材索引拉取失败: {type(exc).__name__}", True
-            ) from None
-        part_urls = [str(u) for u in (data_version.get("urls") or []) if isinstance(u, str)]
-        if not part_urls:
-            raise _SmartEduError("PARTIAL_FAILURE", "教材索引没有 part 文件", False)
-
-        wanted = [tuple(str(p).strip() for p in spec.split("/")) for spec in specs]
-        matched: list[dict[str, Any]] = []
-        for part_url in part_urls:
-            try:
-                items = self._cdn_json(part_url, headers)
-            except Exception:  # noqa: BLE001 - one bad part must not kill discovery
-                continue
-            for item in items or []:
-                if not isinstance(item, dict):
-                    continue
-                tags = {
-                    str(t.get("tag_dimension_id") or ""): str(t.get("tag_name") or "")
-                    for t in item.get("tag_list") or []
-                    if isinstance(t, dict)
-                }
-                for want in wanted:
-                    subject = want[0] if len(want) > 0 else ""
-                    grade = want[1] if len(want) > 1 else ""
-                    volume = want[2] if len(want) > 2 else ""
-                    version = want[3] if len(want) > 3 else ""
-                    if (
-                        tags.get("zxxxk") == subject
-                        and (not grade or tags.get("zxxnj") == grade)
-                        and (not volume or tags.get("zxxcc") == volume)
-                        and (not version or tags.get("zxxbb") == version)
-                        and tags.get("zxxxjjc", "新教材") == "新教材"
-                    ):
-                        mid = str(item.get("id") or "")
-                        if mid and mid not in {m["textbook_id"] for m in matched}:
-                            matched.append(
-                                {
-                                    "textbook_id": mid,
-                                    "textbook": str(item.get("title") or mid),
-                                }
-                            )
-                        break
-        if not matched:
-            raise _SmartEduError(
-                "RESOURCE_NOT_FOUND",
-                f"未找到匹配教材: {specs}（格式：学科/年级/册次/版本）",
-                False,
-            )
-
-        courses: list[dict[str, Any]] = []
-        for mat in matched:
-            mid = mat["textbook_id"]
-            try:
-                data = self._cdn_json(
-                    CDN_MATERIAL_PARTS_TMPL.format(mid=mid, n=100), headers
-                )
-            except Exception:  # noqa: BLE001
-                continue
-            for item in data or []:
-                if not isinstance(item, dict):
-                    continue
-                if str(item.get("resource_type_code") or "") != "national_lesson":
-                    continue
-                aid = str(item.get("id") or "")
-                title = str(item.get("title") or "").strip()
-                if not aid or not title:
-                    continue
-                courses.append(
-                    {
-                        "id": aid,
-                        "title": title,
-                        "textbook": mat["textbook"],
-                        "textbook_id": mid,
-                    }
-                )
-        return courses
-
-    def _cdn_json(self, url: str, headers: dict[str, str]) -> Any:
-        request = Request(url, headers=headers)
-        with urlopen_with_fallback(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
-
     # -- public API ------------------------------------------------------
 
-    def search(
-        self, query: str, limit: int, tabs: list[str] | None = None
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    def search(self, query: str, limit: int) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         results: list[dict[str, Any]] = []
         try:
             headers = self._build_headers()
-            payload = self._build_payload(query, limit, tabs)
+            payload = self._build_payload(query, limit)
 
             data: dict[str, Any] | None = None
             for url in SEARCH_URLS:

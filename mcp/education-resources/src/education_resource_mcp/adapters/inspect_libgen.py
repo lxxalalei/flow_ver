@@ -1,8 +1,7 @@
 """Bounded LibGen inspection from mirror-backed metadata.
 
 Search and download use public LibGen mirrors with MD5 identity. A valid MD5
-from resource metadata is sufficient to describe the mirror-backed primary
-representation; no Anna's Archive page or account participates in inspection.
+from resource metadata describes the mirror-backed primary representation.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
-from ..inspection import InspectionResult, build_representation_authority
+from ..inspection import InspectionResult
 from .inspect_nlc import (
     PlatformBoundedInspector,
     _first_text,
@@ -218,18 +217,6 @@ class LibgenInspector(PlatformBoundedInspector):
                 "requires_auth": False,
                 "rights_hint": RIGHTS_HINT,
             }
-            representation.update(
-                build_representation_authority(
-                    resource,
-                    scope="primary_resource",
-                    role="primary",
-                    technical_availability="available",
-                    source="metadata",
-                    observed_at=result.to_mapping()["inspection"].get(
-                        "inspected_at"
-                    ),
-                )
-            )
             mime_type = _MIME_BY_EXTENSION.get(extension or "")
             if mime_type:
                 representation["mime_type"] = mime_type
@@ -280,17 +267,8 @@ class LibgenInspector(PlatformBoundedInspector):
             availability="available",
             method="platform_metadata",
         )
-
-
-# Temporary class aliases for old imports. Runtime platform identity is libgen.
-AnnasArchiveInspector = LibgenInspector
-AnnaArchiveInspector = LibgenInspector
-
-
 __all__ = [
     "LibgenInspector",
-    "AnnaArchiveInspector",
-    "AnnasArchiveInspector",
     "INSPECTOR_ID",
     "MD5_RE",
     "RIGHTS_HINT",

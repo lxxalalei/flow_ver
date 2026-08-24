@@ -119,7 +119,6 @@ _PLATFORM_LIST = [
         "nlc", "国家图书馆", "https://read.nlc.cn/",
         "cookie", "browser_cookies", cookie_domains=("nlc.cn",),
     ),
-    PlatformConfig("annas-archive", "安娜的档案", "", "none", "none"),
     PlatformConfig("cctv", "央视网", "", "none", "none"),
     PlatformConfig("kepu", "科普中国", "", "none", "none"),
     PlatformConfig("yixi", "一席", "", "none", "none"),
@@ -688,9 +687,9 @@ class SessionStore:
                     "order": 3,
                     "action": capture_action,
                     "actor": "agent",
-                    "message": "把浏览器捕获原样交给 resource_session_save，由 MCP 按平台规则筛选。",
+                    "message": "把浏览器捕获原样交给 resource_session_manage(action=save)，由 MCP 按平台规则筛选。",
                 },
-                {"order": 4, "action": "resource_session_save", "actor": "agent"},
+                {"order": 4, "action": "resource_session_manage", "actor": "agent"},
             ],
         }
 

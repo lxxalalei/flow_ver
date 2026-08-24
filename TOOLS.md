@@ -32,9 +32,7 @@ Session 辅助能力：
 
 ```text
 resource_session_status
-resource_session_login_guide
-resource_session_save
-resource_session_delete
+resource_session_manage
 ```
 
 公共面不再暴露：
@@ -113,7 +111,6 @@ MCP 直接读取完整 `results.jsonl`。Expand 自身不产生下载授权。
 
 ### 当前明确 gap
 
-- Ximalaya `creator → album[]`：尚未确认稳定、完整的主播专辑分页接口，因此当前显式不支持，不猜 API。
 - SmartEdu `course → file[]`：Inspector 已能看到课程组成文件，但独立子文件还没有稳定 Resource 身份；课程本身仍可按自然交付方式下载多个真实文件。
 
 ## Bilibili
@@ -139,12 +136,12 @@ video      -> Download MP4
 ## Ximalaya
 
 ```text
-creator -> album[]   # 当前实现 gap
+creator -> album[]
 album   -> track[]
 track   -> Download
 ```
 
-Downloader 只接受明确 `/sound/{track_id}`。专辑不会再静默退化成“第一集”，也不会从任意 URL 猜一个数字当 track id。
+主播展开使用喜马拉雅当前网页的 `/revision/user/pub` 分页接口，并以 `totalCount` 判断是否完整；分页提前结束会显式失败，不按网页 UI 的展示上限静默截断。Downloader 只接受明确 `/sound/{track_id}`。专辑不会再静默退化成“第一集”，也不会从任意 URL 猜一个数字当 track id。
 
 ## CCTV
 
@@ -178,7 +175,7 @@ resource = book
 identity = MD5
 ```
 
-Search / Inspect / Download 走 LibGen mirror 路径，不依赖 Anna's Archive 会员页。当前下载 Provider 的少量历史内部类名仍可能保留，属于实现清理，不改变运行时平台身份。
+Search / Inspect / Download 统一走 LibGen mirror 路径；Provider、Inspector、Session 和测试只使用 `libgen` 身份。
 
 ## URL Import
 
@@ -216,7 +213,7 @@ Session Tool 不是 Search/Download 的固定前置流程。只有：
 
 时才使用。
 
-`resource_session_save` 接收 opaque browser-session capture；Agent 不手工挑选 Cookie/Token。
+`resource_session_status` 在指定平台且需要登录时直接返回登录步骤；全量查询不重复展开步骤。`resource_session_manage(action=save|delete)` 负责保存或删除；save 接收 opaque browser-session capture，Agent 不手工挑选 Cookie/Token。
 
 ## Generic Web Resource
 

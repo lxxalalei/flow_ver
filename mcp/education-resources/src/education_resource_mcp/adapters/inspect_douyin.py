@@ -22,7 +22,6 @@ from ..errors import DomainError
 from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
-    build_representation_authority,
 )
 from .douyin import (
     USER_AGENT,
@@ -130,16 +129,6 @@ class DouyinInspector:
             "technical_availability": "available",
             "materializable": True,
         }
-        representation.update(
-            build_representation_authority(
-                resource,
-                scope="primary_resource",
-                role="primary",
-                technical_availability="available",
-                source="provider",
-                observed_at=inspected_at,
-            )
-        )
 
         return self._success_result(resource, representation, aweme_detail, inspected_at)
 
@@ -335,8 +324,7 @@ class DouyinInspector:
         aweme_id = str(aweme_detail.get("aweme_id") or "")
         if aweme_id:
             metadata["aweme_id"] = aweme_id
-        # Expose the platform-native creator handle so resource_browse_creator
-        # can be called directly from inspect metadata (no source spelunking).
+        # Expose the platform-native creator handle for creator expansion.
         sec_uid = str((aweme_detail.get("author") or {}).get("sec_uid") or "").strip()
         if sec_uid:
             metadata["creator_sec_uid"] = sec_uid

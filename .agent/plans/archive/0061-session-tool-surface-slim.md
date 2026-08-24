@@ -1,5 +1,7 @@
 # 0061 — Session Tool 公共契约瘦身
 
+> 处置：superseded by [0067-resource-capability-surface-unification.md](../0067-resource-capability-surface-unification.md)。Session 结论已进入当前架构，剩余 AUTH_REQUIRED 真实验收已并入 [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md)。
+
 - 状态：in_progress
 - 创建日期：2026-08-20
 - 完成日期：未完成

@@ -10,18 +10,12 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
-import json
 from typing import Any, Protocol, runtime_checkable
 
 from .errors import DomainError
 
 
 INSPECTOR_VERSION = "1.0.0"
-# Kept as a compatibility import for existing adapters. It is not a cache or
-# contract version anymore.
-INSPECTION_PROFILE_VERSION = "inspect"
-
 RESOLUTION_STATUSES = frozenset({"resolved", "partial", "unresolved"})
 AVAILABILITY_STATUSES = frozenset(
     {"available", "auth_required", "unavailable", "unknown", "policy_blocked"}
@@ -29,7 +23,6 @@ AVAILABILITY_STATUSES = frozenset(
 REPRESENTATION_KINDS = frozenset(
     {"webpage", "document", "video", "audio", "image", "subtitle", "other"}
 )
-CACHE_STATUSES = frozenset({"hit", "miss", "refresh"})
 
 
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -194,79 +187,12 @@ def build_default_inspection(
     }
 
 
-def build_representation_authority(
-    resource: Mapping[str, Any] | Any,
-    *,
-    scope: str,
-    role: str,
-    technical_availability: str,
-    source: str = "inspection",
-    observed_at: str | None = None,
-    expires_at: str | None = None,
-) -> dict[str, Any]:
-    """Compatibility helper: return only facts needed for routing.
-
-    ``source`` and timestamp arguments are accepted so existing platform
-    inspectors do not need a mechanical rewrite, but no evidence/fingerprint
-    object is generated.
-    """
-
-    del resource, role, source, observed_at, expires_at
-    return {
-        "scope": str(scope),
-        "technical_availability": str(technical_availability),
-    }
-
-
-def source_fingerprint(resource: Mapping[str, Any] | Any) -> str:
-    """Compatibility-only deterministic key; not an authority or validation gate."""
-
-    if not isinstance(resource, Mapping):
-        return ""
-    snapshot = {
-        "platform": resource.get("platform"),
-        "source_url": resource.get("source_url"),
-        "title": resource.get("title"),
-    }
-    return hashlib.sha256(
-        json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-
-
-def representation_evidence_is_fresh(
-    representation: Mapping[str, Any] | Any,
-    *,
-    now: Any = None,
-) -> bool:
-    """Retired compatibility helper: live download always performs fresh Inspect."""
-
-    del now
-    return isinstance(representation, Mapping)
-
-
-def resolution_evidence_is_fresh(
-    resolved_resource: Mapping[str, Any] | Any,
-    *,
-    now: Any = None,
-) -> bool:
-    """Retired compatibility helper: live download always performs fresh Inspect."""
-
-    del now
-    return isinstance(resolved_resource, Mapping)
-
-
 __all__ = [
     "AVAILABILITY_STATUSES",
-    "CACHE_STATUSES",
-    "INSPECTION_PROFILE_VERSION",
     "INSPECTOR_VERSION",
     "InspectionResult",
     "InspectionRouter",
     "ResourceInspector",
     "build_default_inspection",
-    "build_representation_authority",
     "normalize_resolved_resource",
-    "representation_evidence_is_fresh",
-    "resolution_evidence_is_fresh",
-    "source_fingerprint",
 ]

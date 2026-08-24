@@ -8,7 +8,6 @@
 | --- | --- |
 | 当前系统现在是什么、哪些能力已经落地 | [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md) |
 | 项目接下来按什么顺序发展、阶段完成门槛是什么 | [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) |
-| 检索事实、语义审查、Gap 与 StopDecision 为什么这样分权 | [RETRIEVAL_AUTHORITY.md](RETRIEVAL_AUTHORITY.md) |
 | 当前正在执行什么任务 | [`.agent/plans/`](../.agent/plans/README.md) |
 | MCP 当前公共工具与运行参数 | [TOOLS.md](../TOOLS.md) |
 | MCP 服务如何安装、启动和验证 | [`mcp/education-resources/README.md`](../mcp/education-resources/README.md) |
@@ -21,7 +20,7 @@
 
 1. `server.py` 生成的 Tool schema 与实际 MCP 返回；
 2. `mcp/education-resources/src/education_resource_mcp/` 中的实际运行时代码和状态转换；
-3. `CURRENT_ARCHITECTURE.md` 等当前说明文档；
+3. `CURRENT_ARCHITECTURE.md`（唯一 active 架构说明）；
 4. `.agent/plans/` 当前执行计划；
 5. `docs/archive/`、`.agent/plans/archive/` 和 `legacy/` 中的历史材料。
 
@@ -40,6 +39,8 @@ README.md
      -> DEVELOPMENT_PLAN.md
 ```
 
-只有在需要修改检索语义时再阅读 `RETRIEVAL_AUTHORITY.md`；需要修改公共接口时先读 `TOOLS.md` 与 `server.py`；需要执行当前开发任务时进入 `.agent/plans/`。
+需要修改检索语义时阅读 active `skills/`；需要修改公共接口时先读 `TOOLS.md` 与 `server.py`；需要执行当前开发任务时进入 `.agent/plans/`。
+
+`RETRIEVAL_AUTHORITY.md` 已退役，不再维护第二套架构或语义权威链。历史设计只从 Git 历史、`docs/archive/`、`.agent/plans/archive/` 或 `legacy/` 查阅。
 
 默认不要通读 `archive/` 和 `legacy/`。

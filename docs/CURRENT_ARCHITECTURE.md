@@ -1,6 +1,6 @@
 # 当前架构
 
-> 快照日期：2026-08-20
+> 快照日期：2026-08-25
 > 只描述当前 active 运行事实。旧 Flow / ResultSet / Presentation / Selection / Plan / Asset / authority / digest 设计只保留在 Git 历史或 legacy 中。
 
 ## 1. 当前定位
@@ -19,9 +19,9 @@ learning-resource-flow Skill / Main Agent
   │
   ↓
 education-resources MCP
-  ├── Search / Browse / Import / Inspect
-  ├── Download / Job / Batch / Archive
-  └── Session status / login guide / save / delete
+  ├── Search / Expand / Import / Inspect / Download
+  ├── Job status / cancel / paged read / Archive
+  └── Session status / manage
           ↓
       单一 SessionStore
 ```
@@ -49,31 +49,30 @@ Skill 不复制 MCP 参数说明，也不把搜索、Inspect、下载、归档�
 
 ### `mcp/education-resources/`
 
-唯一 active MCP。负责平台调用、URL 导入、候选事实检查、下载、批量枚举、Job、归档，以及辅助 SessionStore 管理。
+唯一 active MCP。负责平台调用、URL 导入、结构展开、候选事实检查、下载、Job、归档，以及辅助 SessionStore 管理。
 
 Session 代码职责仍与资源 Adapter 分离，但共用同一进程和同一数据目录，不再经过 `session_bridge.py` 或 standalone/local 双路径。
 
-## 3. 当前 14 个 Tool
+## 3. 当前 11 个 Tool
 
 资源能力：
 
 1. `resource_search`
-2. `resource_browse_creator`
+2. `resource_expand`
 3. `resource_import_url`
 4. `resource_inspect`
 5. `resource_download`
 6. `resource_job_status`
 7. `resource_job_cancel`
-8. `resource_batch_collect`
-9. `resource_batch_read`
-10. `resource_archive`
+8. `resource_job_read`
+9. `resource_archive`
 
 Session 辅助能力：
 
-11. `resource_session_status`
-12. `resource_session_login_guide`
-13. `resource_session_save`
-14. `resource_session_delete`
+10. `resource_session_status`
+11. `resource_session_manage`
+
+公共面不再暴露 `resource_browse_creator`、`resource_batch_collect`、`resource_batch_read`，也不暴露 `creator_full`、`time_range_search`、`catalog_expand`、`collection_expand`、`start_day/end_day/specs/tabs` 等平台 mode 或参数。容器统一通过 `resource_expand` 展开，结果统一通过 `resource_job_read` 分页读取。
 
 Session Tool 只在两种情况下使用：
 
@@ -94,12 +93,13 @@ $EDUCATION_RESOURCE_MCP_DATA_DIR/sessions/
 
 ### 公共 Tool 与内部认证契约分离
 
-`resource_session_save` 对 Agent 只暴露：
+`resource_session_manage` 对 Agent 只暴露：
 
 ```text
+action         # save | delete
 platform
-capture        # opaque browser-session capture object
-expires_at?
+capture?       # 仅 save；opaque browser-session capture object
+expires_at?    # 仅 save
 ```
 
 Agent 不需要知道 `capture` 内部某个平台具体依赖哪些 Cookie 名、storage key 或 Token 字段，也不手工筛选/拼接 credential。浏览器捕获可以较宽，SessionStore 再按平台内部规则筛选，只持久化 canonical subset。
@@ -113,7 +113,7 @@ storage_keys = accessToken, x-nd-auth
 required_storage_keys = accessToken
 ```
 
-这些内部字段不再通过 `resource_session_status` / `resource_session_login_guide` 暴露给 Agent；公开结果只保留进入登录流程真正需要的信息：平台、是否需要登录、登录 URL、捕获方式、probe 能力和状态。
+这些内部字段不通过 `resource_session_status` 暴露给 Agent；status 只保留平台、登录 URL、捕获方式、probe 能力和状态。指定平台查询且确实需要登录时才附带登录步骤，全量状态查询不重复展开步骤。
 
 Cookie 平台当前已确认域名边界，但并非每个平台都已经实测到最小 Cookie 名集合。没有证据时继续按当前内部域名筛选，不为了“更严格”凭经验增加 Cookie 名白名单。
 
@@ -136,9 +136,9 @@ Cookie 平台当前已确认域名边界，但并非每个平台都已经实测�
 
 只有具体 Inspect / Download 真实返回 `AUTH_REQUIRED` 时才进入 Session Tool。
 
-### Anna's Archive
+### LibGen
 
-当前 `annas-archive` 是 Libgen 镜像支持的匿名图书发现/获取路线，不需要 Anna 会员登录；SessionStore 对该平台返回 `not_required`。
+当前 active 平台标识为 `libgen`，搜索、检查和下载由 LibGen mirror + MD5 驱动，不需要登录，也不进入 Session 管理。
 
 ## 5. Host Web Search 与 URL Import
 
@@ -150,9 +150,14 @@ resource_import_url(source_url="https://...")
 
 Import 不再无条件把 URL 标成 `generic`。当前对明确 URL 形态做一层薄识别：
 
-- Bilibili 视频 URL → `bilibili` Inspector / Downloader；
-- Zhihu 页面 URL → `zhihu` Inspector；
-- `basic.smartedu.cn` → `smartedu` Inspector；
+- Bilibili video / creator / collection；
+- Douyin video / creator / collection；
+- Ximalaya track / album / creator；
+- SmartEdu textbook / course；
+- Zjer course；
+- CCTV column / video；
+- LibGen book；
+- Zhihu 页面；
 - 无法明确识别 → `generic`。
 
 这只是 Host Web 到现有专门能力的桥接，不建立第二套平台 Registry 或 Resolver Framework。
@@ -203,12 +208,12 @@ webbundle.zip
 `resource_id` 只在当前 MCP 进程内有效：
 
 ```text
-resource_id -> 当前搜索/导入/BatchRead 得到的资源对象
+resource_id -> 当前 Search / Import / JobRead 得到的资源对象
 ```
 
 稳定资源身份仍是 URL、平台原生稳定 ID 等。句柄失效时优先按已知 URL/平台 ID 重定位同一资源，不重跑整个研究任务。
 
-下载和 Batch 是真实长任务，因此 `job_id` 持久：
+Download 和 Expand 是真实长任务，因此 `job_id` 持久：
 
 ```text
 $EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/<job_id>/
@@ -216,13 +221,13 @@ $EDUCATION_RESOURCE_MCP_DATA_DIR/jobs/<job_id>/
   job.json
   worker.log
   cancel.flag        # 取消后才出现
-  results.jsonl      # Batch 才出现
+  results.jsonl      # Expand 才出现
   ...下载产物
 ```
 
 这不是 durable workflow；没有 Flow、Selection、Plan、Outcome、checkpoint、resume token 或执行绑定状态机。
 
-## 8. Inspect / Download / Batch / Archive
+## 8. Search / Expand / Inspect / Download / Archive
 
 Inspect 只在未知事实会改变推荐、选择或获取决策时使用，不是固定步骤。
 
@@ -246,13 +251,13 @@ resource_download(resource_ids=[...])
 
 下载内部 fresh Inspect，并路由到当前 exact Provider；失败返回真实失败，不静默切换不等价 Provider。
 
-完整枚举使用 `resource_batch_collect`，默认不传 `max_items`，直到来源真实结束；`resource_batch_read` 的分页大小只控制单次 Tool Result。**Batch 结果始终只是候选集合，不等于用户已经选择下载。**
+完整枚举统一使用 `resource_expand`，直到来源真实结束；`resource_job_read` 的分页大小只控制单次 Tool Result。**Expand 结果始终只是候选集合，不等于用户已经选择下载。**
 
-当前 Batch 与 Download 的衔接不增加新 Tool：
+当前 Expand 与 Download 的衔接不增加新 Tool：
 
-- 用户只选择 batch 中的一部分 → `resource_batch_read` 读取必要页，每个返回候选获得当前进程 `resource_id`，再用现有 `resource_download(resource_ids=[...])`；
-- 用户明确选择一个完整 `succeeded` batch 的全部结果 → 直接 `resource_download(batch_job_id="...")`，MCP 从该 batch 的 `results.jsonl` 恢复资源事实并提交一个普通多资源 Download Job；Agent 不需要为了下载全部而分页搬运每个 URL；
-- batch 若为 `partial` / `failed` / `cancelled`，不能通过 `batch_job_id` 把当前部分结果冒充“全部”。用户仍可明确选择已经展示的个别候选并按 `resource_id` 下载。
+- 用户只选择展开结果中的一部分 → `resource_job_read` 读取必要页，每个返回候选获得当前进程 `resource_id`，再用 `resource_download(resource_ids=[...])`；
+- 用户明确选择一个完整 `succeeded` Expand Job 的全部结果 → 直接 `resource_download(expand_job_id="...")`，MCP 从该 Job 的 `results.jsonl` 恢复资源事实并提交普通多资源 Download Job；Agent 不需要为了下载全部而分页搬运每个 URL；
+- Expand Job 若为 `partial` / `failed` / `cancelled`，不能通过 `expand_job_id` 把当前部分结果冒充“全部”。用户仍可明确选择已经展示的个别候选并按 `resource_id` 下载。
 
 这只是把已选择资源的机械循环留在 MCP 后台；用户选择仍属于 Skill/Agent，不创建 Selection/Confirm 状态对象。
 
@@ -268,7 +273,7 @@ mcp/education-resources/
     ├── server.py
     ├── service.py
     ├── search.py
-    ├── batch.py
+    ├── expand.py
     ├── inspection.py
     ├── archive.py
     ├── jobs.py
@@ -290,16 +295,16 @@ mcp/education-resources/
 ## 10. 当前验证重点
 
 1. 同一个 `education-resources` MCP 是否正确暴露资源与 Session Tool；
-2. `resource_session_save` 的 public schema 是否只暴露 opaque `capture`，而不是 Cookie/Storage/Token 字段结构；
+2. `resource_session_manage(action=save)` 的 public schema 是否只暴露 opaque `capture`，而不是 Cookie/Storage/Token 字段结构；
 3. Session broad capture 是否仍由 MCP 筛选后只保存 canonical session；
-4. Session status/login guide 是否不再泄漏内部 `cookie_domains` / `storage_keys`；
+4. Session status 返回的登录步骤是否不泄漏内部 `cookie_domains` / `storage_keys`；
 5. SmartEdu 保存过 session 时公共 Search 是否仍匿名；
-6. Anna/Libgen 是否不触发登录；
+6. LibGen 是否始终使用 `libgen` 平台身份且不触发登录；
 7. Host Web URL → Import 是否能恢复明确的平台身份；
 8. Generic Web 是否同时保留原始 `source.html`、Trafilatura `content.md`，并把清洗 HTML 与正文图片放进无 CDN/JS/远程图片依赖的统一 Reader `index.html`；
 9. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
-10. BatchRead 子集候选是否能得到 `resource_id`，完整 succeeded batch 是否能在用户明确选择全部后直接交给现有 Download Job；
-11. Download / Batch / Archive 其他既有行为是否未被多文件/批量衔接语义破坏；
-12. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且批量枚举不会自动触发下载。
+10. JobRead 子集候选是否能得到 `resource_id`，完整 succeeded Expand Job 是否能在用户明确选择全部后直接交给现有 Download Job；
+11. Expand / Download / Archive 既有行为是否未被多文件/完整枚举衔接语义破坏；
+12. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且 Expand 不会自动触发下载。
 
 后端测试不能替代第 12 项。

@@ -113,7 +113,7 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ),
     ProviderSpec(
         "libgen", "primary_resource", "document", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "annas-archive",
+        AcquisitionStrategy.DIRECT_FILE, "libgen",
         frozenset(), frozenset({"book", "document"}),
     ),
     ProviderSpec(

@@ -1,7 +1,6 @@
 """LibGen search adapter backed by public LibGen mirrors.
 
-Discovery and acquisition use the same MD5 resource identity. No Anna's
-Archive page, membership or session participates in the active path.
+Discovery and acquisition use the same MD5 resource identity.
 """
 from __future__ import annotations
 
@@ -58,11 +57,4 @@ class LibgenSearchAdapter:
                 )
             )
         return results, None
-
-
-# Temporary import compatibility for internal callers while file names are
-# cleaned separately. Runtime platform identity is already ``libgen``.
-AnnasArchiveSearchAdapter = LibgenSearchAdapter
-
-
-__all__ = ["LibgenSearchAdapter", "AnnasArchiveSearchAdapter"]
+__all__ = ["LibgenSearchAdapter"]

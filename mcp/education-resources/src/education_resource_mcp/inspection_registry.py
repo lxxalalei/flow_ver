@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .adapters.inspect_annas_archive import LibgenInspector
+from .adapters.inspect_libgen import LibgenInspector
 from .adapters.inspect_bilibili import BilibiliInspector
 from .adapters.inspect_cctv import CctvInspector
 from .adapters.inspect_douyin import DouyinInspector

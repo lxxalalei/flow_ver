@@ -8,7 +8,6 @@ from education_resource_mcp.acquisition import (
     ProviderRegistration,
 )
 from education_resource_mcp.acquisition.planner import AcquisitionPlanner
-from education_resource_mcp.inspection import build_representation_authority
 
 
 class _DirectProviderStub:
@@ -42,14 +41,10 @@ class ShugeAcquisitionRouteTests(unittest.TestCase):
             "role": "primary",
             "container": "pdf",
             "mime_type": "application/pdf",
+            "scope": "primary_resource",
+            "technical_availability": "available",
             "materializable": True,
             "requires_auth": False,
-            **build_representation_authority(
-                resource,
-                scope="primary_resource",
-                role="primary",
-                technical_availability="available",
-            ),
         }
         resolution = {
             "resolution_id": "resolution-1",

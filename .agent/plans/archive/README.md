@@ -13,9 +13,22 @@
 
 当前保留三份直接跟踪计划：
 
-- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — `in_progress`，统一承接真实 Windows OpenClaw、平台、Session、Job、Batch 用户验收；
-- [0058-system-convergence-and-resource-fidelity.md](../0058-system-convergence-and-resource-fidelity.md) — `in_progress`，系统收敛的最后 M7，最终由真实用户证据完成验收；
-- [0060-resource-multifile-delivery.md](../0060-resource-multifile-delivery.md) — `in_progress`，真实 SmartEdu 课程反馈触发的 Resource→多文件自然交付语义修正；不引入 Bundle/Component 状态层。
+- [0067-resource-capability-surface-unification.md](../0067-resource-capability-surface-unification.md) — `in_progress`，唯一主计划，统一公共能力面与剩余实现缺口；
+- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — `in_progress`，0067 的真实 OpenClaw / 平台 / Session / Job 验收子计划；
+- [0068-cctv-platform-integration.md](../0068-cctv-platform-integration.md) — `in_progress`，同一公共能力面下的 CCTV 专项。
+
+## 2026-08-25 统一路线归档
+
+以下阶段计划的实现已经完成、被 0067 替代，或其剩余验收已转交当前 0028；因此不再留在顶层制造假激活。
+
+| 文件 | 原状态 | 归档说明 / 剩余事项 |
+| --- | --- | --- |
+| [0058-system-convergence-and-resource-fidelity.md](0058-system-convergence-and-resource-fidelity.md) | in_progress | Session、Import、Generic Web 与文档收敛已经落地；剩余真实闭环转交 0028 |
+| [0060-resource-multifile-delivery.md](0060-resource-multifile-delivery.md) | in_progress | 多文件自然交付已落地；旧 Batch 公共面已由 Expand 替代，真实 SmartEdu/完整结果下载验收转交 0028 |
+| [0061-session-tool-surface-slim.md](0061-session-tool-surface-slim.md) | in_progress | Session public schema 瘦身已落地；AUTH_REQUIRED 登录恢复验收转交 0028 |
+| [0062-bilibili-collection-expand.md](0062-bilibili-collection-expand.md) | in_progress | Bilibili collection 已迁入通用 Expand；真实合集 smoke 转交 0028 |
+| [0063-web-reader-template.md](0063-web-reader-template.md) | in_progress | Reader 模板实现已被 0064 完成态覆盖；真实网页人工检查统一由 0028 跟踪 |
+| [0064-self-contained-web-reader.md](0064-self-contained-web-reader.md) | completed | 聚焦测试和真实网页物化证据已记录，按规范归档 |
 
 ## 2026-08-19 active 面收敛
 

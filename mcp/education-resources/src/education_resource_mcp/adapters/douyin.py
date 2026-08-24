@@ -397,16 +397,3 @@ class DouyinSearchAdapter:
                     "PARTIAL_FAILURE", "抖音合集分页未返回新的 cursor", True
                 )
             cursor = next_cursor
-
-    def search_creator(
-        self, creator_id: str, limit: int, cancel_event: Any = None
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        results: list[dict[str, Any]] = []
-        try:
-            for resource in self.iter_creator(creator_id, cancel_event=cancel_event):
-                results.append(resource)
-                if len(results) >= limit:
-                    break
-        except _AdapterError as exc:
-            return results, exc.to_dict()
-        return results, None

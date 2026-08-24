@@ -1,15 +1,13 @@
 """Thin capability service for resource search, inspect, download and archive.
 
 There is no Flow, ResultSet, Presentation, Selection or persisted Plan here.
-Resource handles are process-local. Download and batch jobs are file-backed
+Resource handles are process-local. Download and Expand jobs are file-backed
 because progress, cancellation and surviving an MCP restart are real needs.
 """
 
 from __future__ import annotations
 
 import importlib
-from itertools import islice
-import json
 import logging
 import secrets
 import threading
@@ -21,7 +19,6 @@ from .acquisition.models import AcquisitionStrategy
 from .acquisition.planner import AcquisitionPlanner
 from .acquisition.web_materializer import WebMaterializer
 from .archive import archive_downloaded_files
-from .batch import BATCH_MODES
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
@@ -72,41 +69,6 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
-def _validate_creator_id(platform: str, creator_id: str) -> str:
-    """Reject clearly malformed creator ids and normalize profile URLs."""
-
-    if platform == "douyin":
-        if creator_id.startswith(("http://", "https://")):
-            return creator_id
-        if not creator_id.startswith("MS4wLjAB"):
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "抖音 creator_id 应以 MS4wLjAB 开头（或传完整主页 URL）",
-            )
-        if len(creator_id) < 40:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                f"creator_id 疑似不完整（长度 {len(creator_id)}，抖音 sec_uid 通常 ~76 字符）"
-                "；请从搜索结果候选的 creator_id 字段直接取，不要手工复制",
-            )
-    elif platform == "bilibili":
-        if creator_id.startswith(("http://", "https://")):
-            parsed = urllib.parse.urlparse(creator_id)
-            mid = parsed.path.strip("/").split("/", 1)[0]
-            if parsed.hostname == "space.bilibili.com" and mid.isdigit():
-                return mid
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "B站主页 URL 应类似 https://space.bilibili.com/<mid>",
-            )
-        if not creator_id.isdigit():
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "B站 creator_id 应为数字 mid（或传完整主页 URL）",
-            )
-    return creator_id
-
-
 _SEARCH_TASK_EXAMPLE = (
     'search_tasks 结构示例：[{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}]'
     '；queries 项也可以是 {"query": "..."}。顶层不支持 query 字段。'
@@ -125,24 +87,12 @@ def _normalize_search_tasks(
                 "INVALID_ARGUMENT",
                 f"search_tasks 的每一项必须是对象；{_SEARCH_TASK_EXAMPLE}",
             )
-        unknown = sorted(set(task) - {"platform", "queries", "tabs"})
+        unknown = sorted(set(task) - {"platform", "queries"})
         if unknown:
             raise DomainError(
                 "INVALID_ARGUMENT",
                 f"search_tasks 项含未知字段 {unknown}；{_SEARCH_TASK_EXAMPLE}",
             )
-        tabs = task.get("tabs")
-        if tabs is not None:
-            if (
-                not isinstance(tabs, list)
-                or not tabs
-                or not all(isinstance(t, str) and t.strip() for t in tabs)
-            ):
-                raise DomainError(
-                    "INVALID_ARGUMENT",
-                    "tabs 必须是平台分类代码字符串的非空列表（当前仅 smartedu 支持）",
-                )
-            tabs = [t.strip() for t in tabs]
         platform = str(task.get("platform") or "").strip()
         if not platform:
             raise DomainError(
@@ -178,8 +128,6 @@ def _normalize_search_tasks(
             "platform": platform,
             "queries": [{"query": text} for text in queries],
         }
-        if tabs is not None:
-            task_out["tabs"] = tabs
         normalized.append(task_out)
     return normalized
 
@@ -190,35 +138,6 @@ def _resource_type(value: Any) -> str:
     return _RESOURCE_TYPE_MAP.get(
         text, lowered if lowered in _ALLOWED_RESOURCE_TYPES else "other"
     )
-
-
-def _batch_item_resource(item: dict[str, Any]) -> dict[str, Any]:
-    """Turn one persisted batch candidate back into an ordinary resource fact set."""
-
-    source_url = canonical_http_url(str(item.get("url") or item.get("source_url") or ""))
-    title = str(item.get("title") or "").strip()
-    if not title:
-        raise DomainError("JOB_STATE_INVALID", "批量采集结果缺少资源标题")
-    platform = str(item.get("platform") or "generic").strip() or "generic"
-    resource = dict(item)
-    resource.pop("url", None)
-    resource.pop("resource_id", None)
-    resource.update(
-        {
-            "platform": platform,
-            "title": title,
-            "source_url": source_url,
-            "resource_type": _resource_type(
-                item.get("resource_type") or item.get("type")
-            ),
-        }
-    )
-    metadata = dict(resource.get("metadata") or {}) if isinstance(resource.get("metadata"), dict) else {}
-    for key in ("author", "published_at", "language", "download_feasibility"):
-        if item.get(key) not in (None, ""):
-            metadata[key] = item[key]
-    resource["metadata"] = metadata
-    return resource
 
 
 def _platform_from_import_url(url: str) -> str:
@@ -262,7 +181,7 @@ def _provider_registrations(
         ("douyin_download", "DouyinDownloader", "douyin-video"),
         ("ximalaya_download", "XimalayaDownloader", "ximalaya-audio"),
         ("bilibili_download", "BilibiliDownloader", "bilibili-video"),
-        ("annas_archive_download", "AnnasArchiveDownloader", "annas-archive"),
+        ("libgen_download", "LibgenDownloader", "libgen"),
         ("zjer_download", "ZjerVideoDownloader", "zjer-video"),
         ("cctv_download", "CctvVideoDownloader", "cctv-video"),
     ):
@@ -338,32 +257,6 @@ class ResourceService:
         raw_resources, platform_runs = self.search_provider.search(normalized, limit)
         return {
             "candidates": self._remember_resources(raw_resources),
-            "failures": self._search_failures(platform_runs),
-        }
-
-    def browse_creator(
-        self,
-        platform: str,
-        creator_id: str,
-        *,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        platform = str(platform or "").strip()
-        creator_id = str(creator_id or "").strip()
-        if not platform or not creator_id:
-            raise DomainError("INVALID_ARGUMENT", "platform 和 creator_id 不能为空")
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
-            raise DomainError("INVALID_ARGUMENT", "limit 必须大于 0")
-        if creator_id.startswith("res_"):
-            creator_id = self._creator_id_from_resource(creator_id)
-        else:
-            creator_id = _validate_creator_id(platform, creator_id)
-        search_creator = getattr(self.search_provider, "search_creator", None)
-        if not callable(search_creator):
-            raise DomainError("FEATURE_NOT_SUPPORTED", "当前搜索器不支持创作者浏览")
-        raw_resources, platform_runs = search_creator(platform, creator_id, limit)
-        return {
-            "candidates": self._remember_resources(raw_resources, include_summary=False),
             "failures": self._search_failures(platform_runs),
         }
 
@@ -572,65 +465,18 @@ class ResourceService:
             "failures": list(resolution.get("failures") or []),
         }
 
-    def _resources_from_batch_job(self, batch_job_id: str) -> list[dict[str, Any]]:
-        directory, batch_job = self._load_job(batch_job_id)
-        batch_job = self._reconcile(directory, batch_job)
-        if str(batch_job.get("kind") or "") != "batch_collect":
-            raise DomainError("INVALID_ARGUMENT", "batch_job_id 不是批量采集任务")
-        if str(batch_job.get("status") or "") != "succeeded":
-            raise DomainError(
-                "BATCH_INCOMPLETE",
-                "批量结果尚未完整成功；不能把部分结果当成用户选择的全部资源",
-            )
-        path = directory / "results.jsonl"
-        if not path.is_file():
-            raise DomainError("JOB_STATE_INVALID", "批量采集结果文件不存在")
-
-        resources: list[dict[str, Any]] = []
-        with path.open("r", encoding="utf-8") as handle:
-            for index, line in enumerate(handle, start=1):
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise DomainError(
-                        "JOB_STATE_INVALID",
-                        "批量采集结果文件损坏",
-                        details={"job_id": batch_job_id, "line": index},
-                    ) from exc
-                if not isinstance(item, dict):
-                    raise DomainError(
-                        "JOB_STATE_INVALID",
-                        "批量采集结果项格式无效",
-                        details={"job_id": batch_job_id, "line": index},
-                    )
-                resource = _batch_item_resource(item)
-                resource["resource_id"] = new_id("res")
-                resources.append(resource)
-        if not resources:
-            raise DomainError("RESOURCE_NOT_FOUND", "批量采集任务没有可下载资源")
-        return resources
-
     def download(
         self,
         resource_ids: list[str] | None = None,
         *,
-        batch_job_id: str = "",
         preferred_container: str = "original",
     ) -> dict[str, Any]:
         resource_ids = list(resource_ids or [])
-        batch_job_id = str(batch_job_id or "").strip()
-        if bool(resource_ids) == bool(batch_job_id):
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "resource_ids 与 batch_job_id 必须且只能提供一种下载来源",
-            )
+        if not resource_ids:
+            raise DomainError("INVALID_ARGUMENT", "resource_ids 不能为空")
         if len(set(resource_ids)) != len(resource_ids):
             raise DomainError("INVALID_ARGUMENT", "resource_ids 不得重复")
-        resources = (
-            self._resources_from_batch_job(batch_job_id)
-            if batch_job_id
-            else [self._get_resource(resource_id) for resource_id in resource_ids]
-        )
+        resources = [self._get_resource(resource_id) for resource_id in resource_ids]
         job_id = new_id("job")
         directory = job_dir(self.settings.jobs_dir, job_id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -640,7 +486,6 @@ class ResourceService:
                 "job_id": job_id,
                 "resources": resources,
                 "preferred_container": preferred_container,
-                "source_batch_job_id": batch_job_id or None,
             },
         )
         write_job(
@@ -739,198 +584,6 @@ class ResourceService:
             "library_root": str(self.settings.library_root),
             "files": archived,
             "failures": failures,
-        }
-
-    def _creator_id_from_resource(self, resource_id: str) -> str:
-        resource = self._get_resource(resource_id)
-        metadata = resource.get("metadata") or {}
-        creator_id = (
-            metadata.get("creator_sec_uid")
-            or metadata.get("creator_mid")
-            or metadata.get("creator_id")
-        )
-        if not creator_id:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                f"资源 {resource_id} 不携带创作者 id，无法用于 creator_full",
-            )
-        return str(creator_id)
-
-    def batch_collect(
-        self,
-        platform: str,
-        *,
-        mode: str = "creator_full",
-        creator_id: str = "",
-        keyword: str = "",
-        start_day: str = "",
-        end_day: str = "",
-        specs: list[str] | None = None,
-        max_items: int | None = None,
-    ) -> dict[str, Any]:
-        platform = str(platform or "").strip()
-        creator_id = str(creator_id or "").strip()
-        mode = str(mode or "").strip()
-        keyword = str(keyword or "").strip()
-        start_day = str(start_day or "").strip()
-        end_day = str(end_day or "").strip()
-        specs = list(specs or [])
-        if mode not in BATCH_MODES:
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                f"未知批量模式 {mode!r}；当前支持 {sorted(BATCH_MODES)}",
-            )
-        if not platform:
-            raise DomainError(
-                "INVALID_ARGUMENT", "platform 不能为空，例如 douyin / bilibili / smartedu"
-            )
-        if mode == "creator_full":
-            if not creator_id:
-                raise DomainError(
-                    "INVALID_ARGUMENT",
-                    "creator_full 模式需要 creator_id（sec_uid / mid / 主页 URL），"
-                    "或传一个属于该创作者的 resource_id",
-                )
-            if creator_id.startswith("res_"):
-                creator_id = self._creator_id_from_resource(creator_id)
-            else:
-                creator_id = _validate_creator_id(platform, creator_id)
-        if mode == "time_range_search":
-            if not keyword:
-                raise DomainError("INVALID_ARGUMENT", "time_range_search 需要 keyword")
-            if not start_day or not end_day:
-                raise DomainError(
-                    "INVALID_ARGUMENT",
-                    "time_range_search 需要 start_day/end_day（YYYY-MM-DD）",
-                )
-            try:
-                from datetime import date
-
-                start_dt = date.fromisoformat(start_day)
-                end_dt = date.fromisoformat(end_day)
-            except ValueError as exc:
-                raise DomainError(
-                    "INVALID_ARGUMENT", f"日期格式应为 YYYY-MM-DD: {exc}"
-                ) from None
-            if start_dt > end_dt:
-                raise DomainError("INVALID_ARGUMENT", "start_day 不能晚于 end_day")
-        if mode == "catalog_expand":
-            if not specs or not all(str(s).strip() for s in specs):
-                raise DomainError(
-                    "INVALID_ARGUMENT",
-                    "catalog_expand 需要 specs，如 语文/一年级/上册/统编版",
-                )
-        if max_items is not None and (
-            not isinstance(max_items, int)
-            or isinstance(max_items, bool)
-            or max_items < 1
-        ):
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "max_items 留空表示不截断；传入时必须是大于 0 的整数",
-            )
-
-        job_id = new_id("job")
-        directory = job_dir(self.settings.jobs_dir, job_id)
-        directory.mkdir(parents=True, exist_ok=True)
-        write_request(
-            directory,
-            {
-                "kind": "batch_collect",
-                "job_id": job_id,
-                "mode": mode,
-                "platform": platform,
-                "creator_id": creator_id,
-                "keyword": keyword,
-                "start_day": start_day,
-                "end_day": end_day,
-                "specs": specs,
-                "max_items": max_items,
-            },
-        )
-        write_job(
-            directory,
-            {
-                "job_id": job_id,
-                "kind": "batch_collect",
-                "mode": mode,
-                "platform": platform,
-                "status": "queued",
-                "total": 0,
-                "completed": 0,
-                "files": [],
-                "failures": [],
-                "pid": None,
-                "created_at": utc_now_iso(),
-            },
-        )
-
-        def _spawn() -> "subprocess.Popen | None":
-            if (directory / CANCEL_FLAG_NAME).exists():
-                write_job(directory, {**read_job(directory), "status": "cancelled"})
-                return None
-            return spawn_worker(directory)
-
-        self.job_runner.submit(job_id, _spawn)
-        return {"job_id": job_id, "status": "queued"}
-
-    def batch_read(
-        self, job_id: str, *, offset: int = 0, limit: int = 20
-    ) -> dict[str, Any]:
-        directory, job = self._load_job(job_id)
-        job = self._reconcile(directory, job)
-        if str(job.get("kind") or "") != "batch_collect":
-            raise DomainError(
-                "INVALID_ARGUMENT",
-                "该任务不是批量采集任务；下载任务请用 resource_job_status",
-            )
-        if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
-            raise DomainError("INVALID_ARGUMENT", "offset 必须 >= 0")
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
-            raise DomainError("INVALID_ARGUMENT", "limit 必须 >= 1")
-        limit = min(limit, 50)
-        path = directory / "results.jsonl"
-        items: list[dict[str, Any]] = []
-        page_line_count = 0
-        if path.is_file():
-            with path.open("r", encoding="utf-8") as handle:
-                page_lines = list(islice(handle, offset, offset + limit))
-            page_line_count = len(page_lines)
-            for index, line in enumerate(page_lines, start=offset + 1):
-                try:
-                    parsed = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise DomainError(
-                        "JOB_STATE_INVALID",
-                        "批量采集结果文件损坏",
-                        details={"job_id": job_id, "line": index},
-                    ) from exc
-                if not isinstance(parsed, dict):
-                    raise DomainError(
-                        "JOB_STATE_INVALID",
-                        "批量采集结果项格式无效",
-                        details={"job_id": job_id, "line": index},
-                    )
-                item = dict(parsed)
-                registered = self._remember_resources(
-                    [_batch_item_resource(item)], include_summary=True
-                )
-                if registered:
-                    item["resource_id"] = registered[0]["resource_id"]
-                items.append(item)
-        total = max(_safe_int(job.get("total")), _safe_int(job.get("completed")))
-        status = str(job.get("status") or "")
-        return {
-            "job_id": job_id,
-            "kind": "batch_collect",
-            "status": status,
-            "total": total,
-            "offset": offset,
-            "items": items,
-            "complete": (
-                status in TERMINAL_STATUSES
-                and offset + page_line_count >= total
-            ),
         }
 
     def _load_job(self, job_id: str) -> tuple[Any, dict[str, Any]]:

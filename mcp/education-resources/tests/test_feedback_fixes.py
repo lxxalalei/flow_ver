@@ -55,10 +55,10 @@ class PlatformIdTests(unittest.TestCase):
         self.service.shutdown()
         self._tmp.cleanup()
 
-    def test_underscore_platform_normalizes_to_hyphen(self) -> None:
-        self.service.search([{"platform": "annas_archive", "queries": ["公益图书馆"]}])
+    def test_libgen_platform_id_is_preserved(self) -> None:
+        self.service.search([{"platform": "libgen", "queries": ["公益图书馆"]}])
         tasks = self.provider.calls[-1]
-        self.assertEqual("annas-archive", tasks[0]["platform"])
+        self.assertEqual("libgen", tasks[0]["platform"])
 
     def test_unknown_platform_error_lists_available_ids(self) -> None:
         from education_resource_mcp.sessions import SessionStore
@@ -68,10 +68,10 @@ class PlatformIdTests(unittest.TestCase):
             settings, SessionStore(settings.data_dir), GenericWebSearchProvider(settings)
         )
         _, runs = multi.search(
-            [{"platform": "annas-archive-typo", "queries": [{"query": "x"}]}], 5
+            [{"platform": "libgen-typo", "queries": [{"query": "x"}]}], 5
         )
         message = str(runs[0]["query_runs"][0]["error"]["message"])
-        self.assertIn("annas-archive", message)
+        self.assertIn("libgen", message)
         self.assertIn("bilibili", message)
 
 
@@ -171,8 +171,7 @@ class BilibiliSessionTests(unittest.TestCase):
         with mock.patch.object(
             self.adapter, "_request_json", side_effect=fake_request
         ):
-            resources, error = self.adapter.search_creator("111", 10)
-        self.assertIsNone(error)
+            resources = list(self.adapter.iter_creator("111"))
         self.assertEqual(1, len(resources))
         self.assertEqual("本人作品", resources[0]["title"])
         self.assertEqual("111", resources[0]["metadata"]["creator_mid"])
@@ -224,8 +223,8 @@ class ArchiveManifestTests(unittest.TestCase):
             archived, failures = archive_downloaded_files(
                 [{
                     "resource_id": "res_1",
-                    "platform": "annas-archive",
-                    "source_url": "https://annas.example/seeds/report",
+                    "platform": "libgen",
+                    "source_url": "https://libgen.example/ads.php?md5=" + "a" * 32,
                     "title": "某报告",
                     "author": "某人",
                     "summary": "报告摘要",
@@ -245,8 +244,11 @@ class ArchiveManifestTests(unittest.TestCase):
             self.assertTrue(manifest.is_file())
             entry = json.loads(manifest.read_text(encoding="utf-8").splitlines()[-1])
             self.assertEqual("溯源测试", entry["topic"])
-            self.assertEqual("annas-archive", entry["platform"])
-            self.assertEqual("https://annas.example/seeds/report", entry["source_url"])
+            self.assertEqual("libgen", entry["platform"])
+            self.assertEqual(
+                "https://libgen.example/ads.php?md5=" + "a" * 32,
+                entry["source_url"],
+            )
             self.assertEqual("某人", entry["author"])
             self.assertEqual("报告摘要", entry["summary"])
             self.assertEqual("2026-08-01T08:00:00+08:00", entry["published_at"])

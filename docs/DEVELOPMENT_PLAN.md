@@ -1,6 +1,6 @@
 # 开发路线
 
-当前机器事实见 [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)。本轮系统收敛实施记录见 [0058-system-convergence-and-resource-fidelity.md](../.agent/plans/0058-system-convergence-and-resource-fidelity.md)。
+当前机器事实见 [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)。历史系统收敛实施记录已归档至 [0058-system-convergence-and-resource-fidelity.md](../.agent/plans/archive/0058-system-convergence-and-resource-fidelity.md)；当前路线只看 0067、0028 与 0068。
 
 ## 产品目标
 
@@ -38,8 +38,8 @@ Skill / Main Agent 负责需求理解、搜索任务、来源职责、候选判�
 当前唯一 active MCP 为 `education-resources`，暴露：
 
 ```text
-10 个资源 Tool
-+ 4 个 Session Tool
+9 个资源 Tool
++ 2 个 Session Tool
 ```
 
 Session 不是资源流程前置步骤。只有真实 `AUTH_REQUIRED` 或用户主动管理平台会话时才使用。
@@ -48,7 +48,7 @@ Session 不是资源流程前置步骤。只有真实 `AUTH_REQUIRED` 或用户�
 
 ```text
 resource_id  -> 当前进程内临时资源句柄
-job_id       -> 下载 / Batch 的真实运行状态
+job_id       -> Download / Expand 的真实运行状态
 SessionStore -> 平台必要登录态
 ```
 
@@ -83,16 +83,18 @@ BoundedWebFetcher
 
 ## 当前优先级
 
-### P0 — 真实 OpenClaw 闭环
+### P0 — 完成统一能力面验收
 
-系统边界收敛的代码已经实施，接下来最高优先级是由 [0028-real-openclaw-platform-e2e.md](../.agent/plans/0028-real-openclaw-platform-e2e.md) 继续记录真实用户证据。
+当前唯一主路线是 [0067-resource-capability-surface-unification.md](../.agent/plans/0067-resource-capability-surface-unification.md)：先让 active 文档、Tool schema、平台对象与最小充分验证统一到 Search / Expand / Inspect / Download。CCTV 是同一路线下的专项扩展，记录在 [0068-cctv-platform-integration.md](../.agent/plans/0068-cctv-platform-integration.md)，不形成第二套公共能力。
+
+0067 的静态与 targeted 验收完成后，由其验收子计划 [0028-real-openclaw-platform-e2e.md](../.agent/plans/0028-real-openclaw-platform-e2e.md) 统一记录真实 OpenClaw、平台、Session 与 Job durability 证据。0028 不定义第二套架构，只验证 0067 的当前能力面。
 
 重点复测：
 
 ```text
 Host Web -> 已接入平台 URL -> Import -> 专门 Inspector/Downloader
 SmartEdu 已保存 session -> 公共 Search 仍匿名
-Anna/Libgen -> 不触发登录
+LibGen -> 不触发登录
 AUTH_REQUIRED -> Session save -> 原资源能力重试
 Generic Web -> source.html + readable views
 Douyin 长任务 -> 是否仍 compaction/中断

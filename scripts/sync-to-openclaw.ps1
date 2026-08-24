@@ -172,7 +172,7 @@ if (Test-Path $RetiredPkgDir) {
 if (Test-Path $RetiredSkillLink) {
     $leftovers = $true
     Warn "Retired session-login-flow skill still installed: $RetiredSkillLink"
-    Warn "  login guidance now comes from resource_session_login_guide; remove it or the gateway"
+    Warn "  login guidance now comes from resource_session_status; remove it or the gateway"
     Warn "  keeps exposing the obsolete skill"
 }
 if (Test-Path $RetiredDataDir) {

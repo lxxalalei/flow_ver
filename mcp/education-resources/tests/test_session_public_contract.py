@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -17,6 +18,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from education_resource_mcp.sessions import PLATFORM_REGISTRY, SessionStore
+from education_resource_mcp.errors import DomainError
+from education_resource_mcp.server import _session_manage, _session_status
 
 
 def _list_tools() -> list[dict]:
@@ -80,18 +83,65 @@ def _list_tools() -> list[dict]:
 
 
 class SessionPublicContractTests(unittest.TestCase):
-    def test_session_save_exposes_one_opaque_capture_object(self) -> None:
-        tool = next(item for item in _list_tools() if item["name"] == "resource_session_save")
+    def test_session_manage_exposes_action_and_one_opaque_capture_object(self) -> None:
+        tool = next(item for item in _list_tools() if item["name"] == "resource_session_manage")
         schema = tool["inputSchema"]
         properties = schema["properties"]
 
+        self.assertEqual(["save", "delete"], properties["action"]["enum"])
         self.assertIn("capture", properties)
         self.assertNotIn("session_data", properties)
         capture_schema = properties["capture"]
-        self.assertEqual("object", capture_schema.get("type"))
         capture_text = json.dumps(capture_schema, ensure_ascii=False)
+        self.assertIn("object", capture_text)
         for internal_name in ("cookies", "local_storage", "session_storage", "tokens"):
             self.assertNotIn(internal_name, capture_text)
+
+    def test_status_includes_login_steps_when_session_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(Path(directory))
+            result = _session_status(
+                SimpleNamespace(session_store=store),
+                ["smartedu"],
+                False,
+            )
+        self.assertEqual(1, len(result["needs_login"]))
+        guide = result["needs_login"][0]
+        self.assertTrue(guide["steps"])
+        self.assertEqual("resource_session_manage", guide["steps"][-1]["action"])
+
+    def test_full_status_does_not_repeat_login_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(Path(directory))
+            result = _session_status(
+                SimpleNamespace(session_store=store),
+                None,
+                False,
+            )
+        self.assertTrue(result["needs_login"])
+        self.assertTrue(all("steps" not in item for item in result["needs_login"]))
+
+    def test_manage_save_and_delete_have_explicit_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(Path(directory))
+            service = SimpleNamespace(session_store=store)
+            saved = _session_manage(
+                service,
+                "save",
+                "smartedu",
+                {
+                    "storage_origin": "https://basic.smartedu.cn",
+                    "local_storage": {"accessToken": "TOKEN"},
+                },
+                None,
+            )
+            self.assertEqual("stored", saved["status"])
+            deleted = _session_manage(service, "delete", "smartedu", None, None)
+            self.assertTrue(deleted["deleted"])
+            with self.assertRaises(DomainError):
+                _session_manage(service, "save", "smartedu", None, None)
+            with self.assertRaises(DomainError):
+                _session_manage(service, "delete", "smartedu", {}, None)
 
     def test_public_session_metadata_hides_platform_credential_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -15,7 +15,7 @@ import hashlib
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..inspection import InspectionResult, build_representation_authority
+from ..inspection import InspectionResult
 from .inspect_nlc import (
     PLATFORM_INSPECTION_METHOD,
     PlatformBoundedInspector,
@@ -176,16 +176,6 @@ class XimalayaInspector(PlatformBoundedInspector):
             file_size = int(verified.get("file_size") or 0)
             if file_size > 0:
                 audio["size_bytes"] = file_size
-            audio.update(
-                build_representation_authority(
-                    resource,
-                    scope="primary_resource",
-                    role="primary",
-                    technical_availability="available",
-                    source="provider",
-                    observed_at=result.to_mapping()["inspection"].get("inspected_at"),
-                )
-            )
             representations = [audio]
             resource_type = "audio"
             availability = {"status": "available"}
@@ -202,16 +192,6 @@ class XimalayaInspector(PlatformBoundedInspector):
                 "technical_availability": "unknown",
                 "materializable": False,
             }
-            audio.update(
-                build_representation_authority(
-                    resource,
-                    scope="representation",
-                    role="companion",
-                    technical_availability="unknown",
-                    source="metadata",
-                    observed_at=result.to_mapping()["inspection"].get("inspected_at"),
-                )
-            )
             representations = [audio]
             resource_type = "audio"
             availability = {"status": "unknown"}

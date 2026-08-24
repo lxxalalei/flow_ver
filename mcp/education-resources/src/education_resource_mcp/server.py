@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, Field
@@ -76,8 +76,37 @@ def _session_status(
                 or entry.get("probe_status") == "invalid"
             )
         ):
-            needs_login.append(status.config.public_metadata())
+            needs_login.append(
+                service.session_store.login_guide(status.platform)
+                if platforms
+                else status.config.public_metadata()
+            )
     return {"sessions": sessions, "needs_login": needs_login}
+
+
+def _session_manage(
+    service: ResourceService,
+    action: Literal["save", "delete"],
+    platform: str,
+    capture: dict[str, Any] | None,
+    expires_at: str | None,
+) -> dict[str, Any]:
+    if action == "save":
+        if capture is None:
+            raise DomainError("INVALID_ARGUMENT", "save 操作需要 capture")
+        return service.session_store.save(
+            platform,
+            capture,
+            expires_at=expires_at,
+        )
+    if action == "delete":
+        if capture is not None or expires_at is not None:
+            raise DomainError(
+                "INVALID_ARGUMENT",
+                "delete 操作不接受 capture 或 expires_at",
+            )
+        return service.session_store.delete(platform)
+    raise DomainError("INVALID_ARGUMENT", f"未知 Session 操作：{action}")
 
 
 def _search(service: ResourceService, tasks: list[SearchTask], limit: int) -> dict[str, Any]:
@@ -333,49 +362,34 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         return _call(lambda: _session_status(resource_service, platforms, deep))
 
     @server.tool(structured_output=True)
-    def resource_session_login_guide(
-        platform: Annotated[
-            str,
-            Field(description="需要登录的平台；仅在 AUTH_REQUIRED 或用户主动登录时使用。"),
-        ]
-    ) -> dict[str, Any]:
-        return _call(
-            lambda: resource_service.session_store.login_guide(platform),
-            platform=platform,
-        )
-
-    @server.tool(structured_output=True)
-    def resource_session_save(
-        platform: Annotated[str, Field(description="需要保存登录态的平台 id。")],
+    def resource_session_manage(
+        action: Annotated[
+            Literal["save", "delete"],
+            Field(description="save 保存登录态；delete 删除本地登录态。"),
+        ],
+        platform: Annotated[str, Field(description="需要管理登录态的平台 id。")],
         capture: Annotated[
-            dict[str, Any],
+            dict[str, Any] | None,
             Field(
                 description=(
-                    "浏览器会话捕获对象按捕获结果原样传入；不要由 Agent 手工挑选、"
-                    "改写或拼接 Cookie/Token。"
+                    "仅 save 使用：浏览器会话捕获对象按捕获结果原样传入；"
+                    "不要由 Agent 手工挑选、改写或拼接 Cookie/Token。"
                 )
             ),
-        ],
+        ] = None,
         expires_at: Annotated[
             str | None,
-            Field(description="可选 ISO 8601 过期时间；未知时省略。"),
+            Field(description="仅 save 使用：可选 ISO 8601 过期时间；未知时省略。"),
         ] = None,
     ) -> dict[str, Any]:
         return _call(
-            lambda: resource_service.session_store.save(
+            lambda: _session_manage(
+                resource_service,
+                action,
                 platform,
                 capture,
-                expires_at=expires_at,
+                expires_at,
             ),
-            platform=platform,
-        )
-
-    @server.tool(structured_output=True)
-    def resource_session_delete(
-        platform: Annotated[str, Field(description="删除该平台本地保存的登录态。")]
-    ) -> dict[str, Any]:
-        return _call(
-            lambda: resource_service.session_store.delete(platform),
             platform=platform,
         )
 

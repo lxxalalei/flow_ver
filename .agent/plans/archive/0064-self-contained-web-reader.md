@@ -1,5 +1,7 @@
 # 0064 — 单文件离线网页 Reader
 
+> 处置：completed。当前 Generic Web 事实以 [`docs/CURRENT_ARCHITECTURE.md`](../../../docs/CURRENT_ARCHITECTURE.md) 为准，不从本文派生新的 active 路线。
+
 - 状态：completed
 - 创建日期：2026-08-20
 - 完成日期：2026-08-20

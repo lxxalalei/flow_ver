@@ -1,8 +1,4 @@
-"""Anna's Archive book downloader (Libgen-backed).
-
-Downloads books anonymously from Libgen mirrors. md5 identifiers match
-Anna's Archive. Supports mirror failover and cancellation.
-"""
+"""Anonymous LibGen book downloader with mirror failover and cancellation."""
 from __future__ import annotations
 
 import hashlib
@@ -28,7 +24,7 @@ _EXT_TO_MEDIA = {
 }
 
 
-class AnnasArchiveDownloader:
+class LibgenDownloader:
     """Download books from Libgen mirrors (anonymous, no account)."""
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:

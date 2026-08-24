@@ -1,5 +1,15 @@
 # 计划管理规范
 
+## 当前唯一执行路线
+
+- 主计划：[0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md)，统一公共能力为 Search / Expand / Inspect / Download，并完成 active 文档与验证收口。
+- 验收子计划：[0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md)，统一承接真实 OpenClaw、真实平台、Session 与 Job durability 证据。
+- 专项子计划：[0068-cctv-platform-integration.md](0068-cctv-platform-integration.md)，只在同一公共能力面内接入 CCTV，不定义第二条架构路线。
+
+0058、0060、0061、0062、0063、0064 已归档；其中尚未完成的真实验收责任已合并到 0028。它们正文中的旧 Tool/Batch 术语只代表当时上下文，不是当前契约。
+
+发生冲突时以运行时 Tool schema 为机器事实、以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。不要从旧计划恢复另一条公共能力面。
+
 影响多个文件、包含多个阶段或可能跨会话的任务，应在本目录创建一个计划文件。
 范围局部但非平凡的任务优先使用 [`../TASK_TEMPLATE.md`](../TASK_TEMPLATE.md)；不要为了形式给每个小改动都新建长期计划。
 

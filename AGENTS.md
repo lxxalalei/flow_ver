@@ -94,11 +94,11 @@ Skill 不负责复制 MCP 参数表、返回字段、Provider 内部实现、Job
 
 `education-resources` 是能力和 IO 数据面，不是资源工作流后端。
 
-当前 14 个 Tool 分为两组：
+当前 11 个 Tool 分为两组：
 
 资源能力：Search、Browse Creator、Import URL、Inspect、Download、Job Status/Cancel、Batch Collect/Read、Archive。
 
-Session 辅助能力：Session Status、Login Guide、Save、Delete。
+Session 辅助能力：Session Status、Session Manage（save/delete）。
 
 状态边界：
 
@@ -119,13 +119,13 @@ Batch 的分页大小只控制单次 Tool Result，不得变成完整枚举的�
 Session 是 `education-resources` 内部的辅助能力，不再使用独立 `session-manager` MCP、`session_bridge.py` 或第二份 Store。
 
 - 用户自己完成登录；Agent 不索取或代填密码、验证码、短信码或 MFA。
-- 浏览器捕获结果直接交给 `resource_session_save`，由 MCP 按平台域名/字段规则先筛选，再只保存 canonical Cookie/Token/storage key。
+- 浏览器捕获结果直接交给 `resource_session_manage(action=save)`，由 MCP 按平台域名/字段规则先筛选，再只保存 canonical Cookie/Token/storage key。
 - Agent 不手工拼 Cookie Header 或 canonical Token。
 - 只有用户明确授权并主动提供合法取得的 canonical Cookie/Token 时，才可直接导入。
 - Session Tool 不是 Search / Download 前置步骤；只有真实 `AUTH_REQUIRED` 或用户主动管理会话时才使用。
 - Windows 本机凭据保护、原子写入和必要 probe 可以保留；不要重新加入 operation ledger、idempotency fingerprint/revision 或认证工作流状态机。
 
-SmartEdu 公共 Search / Catalog 必须保持匿名；公共网络拒绝不得通过重放 token 自动处理。`annas-archive` 当前不需要登录。
+SmartEdu 公共 Search / Catalog 必须保持匿名；公共网络拒绝不得通过重放 token 自动处理。LibGen 不进入 Session 管理。
 
 ## Host Web Import
 

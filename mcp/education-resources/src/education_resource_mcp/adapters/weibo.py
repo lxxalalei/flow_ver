@@ -156,16 +156,3 @@ class WeiboSearchAdapter:
             since_id = str((data.get("data") or {}).get("cardlistInfo", {}).get("since_id") or "")
             if not since_id or since_id == "0":
                 break
-
-    def search_creator(
-        self, creator_id: str, limit: int, cancel_event: Any = None
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        results: list[dict[str, Any]] = []
-        try:
-            for resource in self.iter_creator(creator_id, cancel_event=cancel_event):
-                results.append(resource)
-                if len(results) >= limit:
-                    break
-        except _AdapterError as exc:
-            return results, exc.to_dict()
-        return results, None

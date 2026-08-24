@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from education_resource_mcp.adapters.inspect_annas_archive import LibgenInspector
+from education_resource_mcp.adapters.inspect_libgen import LibgenInspector
 from education_resource_mcp.adapters.inspect_nlc import NlcInspector
 from education_resource_mcp.adapters.inspect_ximalaya import XimalayaInspector
 

@@ -16,7 +16,6 @@ from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
     build_default_inspection,
-    build_representation_authority,
 )
 from .zjer import best_mp4, fetch_course_detail, find_lesson, resource_video_identity
 
@@ -203,16 +202,8 @@ class ZjerInspector:
         size = media.get("videoSize")
         if isinstance(size, int) and not isinstance(size, bool) and size > 0:
             representation["size_bytes"] = size
-        representation.update(
-            build_representation_authority(
-                resource,
-                scope="primary_resource",
-                role="primary",
-                technical_availability="available",
-                source="provider",
-                observed_at=str(inspected["inspected_at"]),
-            )
-        )
+        representation["scope"] = "primary_resource"
+        representation["technical_availability"] = "available"
         metadata = self._metadata(
             resource,
             course_cate_id=course_cate_id,
