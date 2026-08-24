@@ -1,7 +1,8 @@
-"""Douyin video search and creator adapter.
+"""Douyin video search, creator and collection adapter.
 
 Uses Douyin's web APIs with hardcoded device parameters. Auth is cookie-based;
-creator enumeration can stream pages until the platform reports the end.
+creator and collection enumeration stream pages until the platform reports the
+end.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from .http_client import urlopen_with_fallback
 
 SEARCH_URL = "https://www.douyin.com/aweme/v1/web/general/search/single/"
 POST_URL = "https://www.douyin.com/aweme/v1/web/aweme/post/"
+MIX_URL = "https://www.douyin.com/aweme/v1/web/mix/aweme/"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
@@ -31,29 +33,19 @@ USER_AGENT = (
 _SIGN_JS = Path(__file__).parent / "douyin_sign.js"
 _AWEME_ID_RE = re.compile(r"/video/(\d+)")
 _USER_ID_RE = re.compile(r"/user/([^/?]+)")
+_MIX_ID_RE = re.compile(r"/(?:collection|mix)/(\d+)")
 
 
 def _web_id() -> str:
-    """Random device id, mirrors MediaCrawler's get_web_id()."""
-
     import random
 
     def _e(t: int | None) -> str:
         if t is not None:
             return str(t ^ (int(16 * random.random()) >> (t // 4)))
-        return "".join(
-            [
-                str(int(1e7)),
-                "-",
-                str(int(1e3)),
-                "-",
-                str(int(4e3)),
-                "-",
-                str(int(8e3)),
-                "-",
-                str(int(1e11)),
-            ]
-        )
+        return "".join([
+            str(int(1e7)), "-", str(int(1e3)), "-", str(int(4e3)), "-",
+            str(int(8e3)), "-", str(int(1e11)),
+        ])
 
     return "".join(_e(int(x)) if x in "018" else x for x in _e(None)).replace("-", "")[:19]
 
@@ -73,8 +65,6 @@ _COMMON_PARAMS: dict[str, str] = {
 
 
 class _AdapterError(Exception):
-    """Internal error carrying a stable code + retryable flag."""
-
     def __init__(self, code: str, message: str, retryable: bool) -> None:
         super().__init__(message)
         self.code = code
@@ -102,13 +92,19 @@ def _to_int(value: Any) -> int | None:
 
 
 def _parse_sec_user_id(creator_id: str) -> str:
-    """Accept a full creator URL or a bare sec_user_id."""
     match = _USER_ID_RE.search(creator_id)
     return match.group(1) if match else creator_id
 
 
+def _parse_mix_id(collection_id: str) -> str:
+    value = str(collection_id or "").strip()
+    match = _MIX_ID_RE.search(value)
+    if match:
+        return match.group(1)
+    return value if value.isdigit() else ""
+
+
 def sign_a_bogus(query_string: str, user_agent: str) -> str:
-    """Compute a_bogus by executing douyin_sign.js through Node.js."""
     js_path = json.dumps(str(_SIGN_JS))
     qs_arg = json.dumps(query_string)
     ua_arg = json.dumps(user_agent)
@@ -121,8 +117,7 @@ def sign_a_bogus(query_string: str, user_agent: str) -> str:
     )
     try:
         result = subprocess.run(
-            ["node", "-e", script],
-            capture_output=True, text=True, timeout=15,
+            ["node", "-e", script], capture_output=True, text=True, timeout=15,
         )
     except FileNotFoundError:
         raise _AdapterError("SIGN_FAILED", "系统未安装 Node.js，无法计算抖音签名", False)
@@ -134,7 +129,7 @@ def sign_a_bogus(query_string: str, user_agent: str) -> str:
 
 
 class DouyinSearchAdapter:
-    """Search Douyin videos and browse creator homepages (cookie-based)."""
+    """Search Douyin videos and expand creator/collection containers."""
 
     platform_id = "douyin"
     descriptor = descriptor_for_platform("douyin")
@@ -233,7 +228,7 @@ class DouyinSearchAdapter:
     def _ms_token(self) -> str:
         try:
             session_data = self.session_store.get_session_data("douyin") or {}
-        except Exception:  # noqa: BLE001 - optional parameter
+        except Exception:
             return ""
         local_storage = session_data.get("local_storage") or {}
         return str(local_storage.get("xmst") or "")
@@ -308,8 +303,6 @@ class DouyinSearchAdapter:
     def iter_creator(
         self, creator_id: str, *, cancel_event: Any = None
     ) -> Iterator[dict[str, Any]]:
-        """Yield a creator's videos until Douyin reports ``has_more = false``."""
-
         cookie = self._get_cookie()
         sec_user_id = _parse_sec_user_id(creator_id)
         max_cursor = ""
@@ -344,7 +337,66 @@ class DouyinSearchAdapter:
                         yield normalized
             if not response.get("has_more"):
                 break
-            max_cursor = str(response.get("max_cursor") or "")
+            next_cursor = str(response.get("max_cursor") or "")
+            if not next_cursor or next_cursor == max_cursor:
+                raise _AdapterError(
+                    "PARTIAL_FAILURE", "抖音创作者分页未返回新的 max_cursor", True
+                )
+            max_cursor = next_cursor
+
+    def iter_collection(
+        self, collection_id: str, *, cancel_event: Any = None
+    ) -> Iterator[dict[str, Any]]:
+        """Yield all videos from one Douyin collection (mix)."""
+
+        cookie = self._get_cookie()
+        mix_id = _parse_mix_id(collection_id)
+        if not mix_id:
+            raise _AdapterError("INVALID_ARGUMENT", "抖音合集 URL 缺少有效 mix_id", False)
+        cursor = "0"
+        count = "12"
+        referer = (
+            collection_id
+            if str(collection_id).startswith(("http://", "https://"))
+            else f"https://www.douyin.com/collection/{mix_id}"
+        )
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            params = self._sign_params(
+                {
+                    **_COMMON_PARAMS,
+                    "version_code": "170400",
+                    "version_name": "17.4.0",
+                    "mix_id": mix_id,
+                    "cursor": cursor,
+                    "count": count,
+                }
+            )
+            query_string = urlencode(params)
+            params["a_bogus"] = sign_a_bogus(query_string, USER_AGENT)
+            response = self._request_json(
+                f"{MIX_URL}?{urlencode(params)}",
+                cookie,
+                referer=referer,
+            )
+            aweme_list = response.get("aweme_list")
+            if not isinstance(aweme_list, list) or not aweme_list:
+                break
+            for item in aweme_list:
+                if isinstance(item, dict):
+                    normalized = self._normalize_item(item)
+                    if normalized:
+                        yield normalized
+            if not response.get("has_more"):
+                break
+            next_cursor = str(response.get("cursor") or "")
+            if not next_cursor or next_cursor == cursor:
+                raise _AdapterError(
+                    "PARTIAL_FAILURE", "抖音合集分页未返回新的 cursor", True
+                )
+            cursor = next_cursor
 
     def search_creator(
         self, creator_id: str, limit: int, cancel_event: Any = None
