@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-import hashlib
-import json
 import math
 import mimetypes
 from pathlib import Path
 import re
 import threading
-from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit
@@ -21,10 +19,6 @@ from .errors import DomainError
 from .policy import PolicyError, ensure_within_root, validate_public_http_url
 
 
-MAX_DOWNLOAD_ITEMS = 50
-MAX_DOWNLOAD_MESSAGE = 512
-MAX_DOWNLOAD_METADATA_BYTES = 8 * 1024
-_FAILURE_CODE = re.compile(r"^[A-Z][A-Z0-9_.-]{0,63}$")
 _SENSITIVE_KEYS = frozenset(
     {
         "authorization",
@@ -56,21 +50,19 @@ _CREDENTIAL_TEXT = re.compile(
 _PATH_TEXT = re.compile(r"(?<![A-Za-z0-9])/(?:[^\s\"'<>]+)")
 
 
-def _redact_text(value: str, *, limit: int = MAX_DOWNLOAD_MESSAGE) -> str:
-    """Keep provider messages bounded without carrying network secrets."""
+def _redact_text(value: str) -> str:
+    """Remove credentials, URLs, and local paths without truncating the message."""
 
     text = str(value).replace("\x00", " ").strip()
     text = _URL_TEXT.sub("[redacted-url]", text)
     text = _CREDENTIAL_TEXT.sub("[redacted-credential]", text)
     text = _PATH_TEXT.sub("[redacted-path]", text)
-    return text[:limit] or "download item failed"
+    return text or "download item failed"
 
 
-def _json_safe(value: Any, *, depth: int = 0) -> Any:
-    """Normalize small provider facts to deterministic JSON-safe values."""
+def _json_safe(value: Any) -> Any:
+    """Normalize provider facts to JSON-safe values without arbitrary size limits."""
 
-    if depth > 5:
-        raise ValueError("provider metadata nesting exceeds the bounded limit")
     if value is None or isinstance(value, (str, bool, int)):
         return _redact_text(value) if isinstance(value, str) else value
     if isinstance(value, float):
@@ -78,10 +70,8 @@ def _json_safe(value: Any, *, depth: int = 0) -> Any:
             raise ValueError("provider metadata contains a non-finite number")
         return value
     if isinstance(value, Mapping):
-        if len(value) > 64:
-            raise ValueError("provider metadata contains too many fields")
         normalized: dict[str, Any] = {}
-        for key in sorted(value, key=lambda item: str(item)):
+        for key, item in value.items():
             if not isinstance(key, str):
                 raise TypeError("provider metadata keys must be strings")
             normalized_key = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
@@ -101,12 +91,10 @@ def _json_safe(value: Any, *, depth: int = 0) -> Any:
                 "token",
             }:
                 continue
-            normalized[key[:128]] = _json_safe(value[key], depth=depth + 1)
+            normalized[key] = _json_safe(item)
         return normalized
     if isinstance(value, (list, tuple)):
-        if len(value) > 64:
-            raise ValueError("provider metadata contains too many items")
-        return [_json_safe(item, depth=depth + 1) for item in value]
+        return [_json_safe(item) for item in value]
     raise TypeError(f"provider metadata contains unsupported value {type(value).__name__}")
 
 
@@ -131,47 +119,64 @@ def _safe_metadata(value: Mapping[str, Any] | None, *, label: str) -> Mapping[st
         value = {}
     if not isinstance(value, Mapping):
         raise TypeError(f"{label} must be a mapping")
-    normalized = _json_safe(value)
-    encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    if len(encoded.encode("utf-8")) > MAX_DOWNLOAD_METADATA_BYTES:
-        raise ValueError(f"{label} exceeds the bounded JSON size")
-    frozen = _freeze_json(normalized)
-    if not isinstance(frozen, Mapping):  # pragma: no cover - defensive
+    frozen = _freeze_json(_json_safe(value))
+    if not isinstance(frozen, Mapping):
         raise TypeError(f"{label} must be a mapping")
     return frozen
 
 
-def _safe_fact(value: str | None, *, label: str, max_length: int = 128) -> str | None:
+def _safe_fact(value: str | None, *, label: str) -> str | None:
     if value is None:
         return None
-    if not isinstance(value, str) or not value or len(value) > max_length:
-        raise ValueError(f"{label} must be a bounded non-empty string")
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a non-empty string")
     if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
         raise ValueError(f"{label} must not contain control characters")
-    if "/" in value or "\\" in value:
-        raise ValueError(f"{label} must not contain path separators")
     return value
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class DownloadResult:
     """One server-created file returned by a download provider.
 
-    The first five fields are the original positional protocol.  The
-    enrichment fields are deliberately keyword-only so an old provider can
-    keep returning ``DownloadResult(path, size, media_type, sha256,
-    filename)`` without being coupled to the bundle model.
+    Existing providers may keep the historical five-positional-argument form
+    ``DownloadResult(path, size, media_type, sha256, filename)``. New providers
+    do not need to calculate a digest and can pass ``filename=...`` directly.
     """
 
     path: Path
     byte_size: int
     media_type: str
-    sha256: str
     filename: str
-    role: str | None = field(default=None, kw_only=True)
-    required: bool | None = field(default=None, kw_only=True)
-    item_key: str | None = field(default=None, kw_only=True)
-    metadata: Mapping[str, Any] = field(default_factory=dict, kw_only=True)
+    sha256: str | None
+    role: str | None
+    required: bool | None
+    item_key: str | None
+    metadata: Mapping[str, Any]
+
+    def __init__(
+        self,
+        path: Path,
+        byte_size: int,
+        media_type: str,
+        sha256: str | None = None,
+        filename: str = "",
+        *,
+        role: str | None = None,
+        required: bool | None = None,
+        item_key: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        object.__setattr__(self, "path", path)
+        object.__setattr__(self, "byte_size", byte_size)
+        object.__setattr__(self, "media_type", media_type)
+        object.__setattr__(self, "sha256", sha256 or None)
+        object.__setattr__(self, "filename", filename)
+        object.__setattr__(self, "role", role)
+        object.__setattr__(self, "required", required)
+        object.__setattr__(self, "item_key", item_key)
+        object.__setattr__(self, "metadata", metadata or {})
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if not isinstance(self.path, Path):
@@ -182,8 +187,9 @@ class DownloadResult:
             raise ValueError("download result byte_size must not be negative")
         if not isinstance(self.media_type, str) or not self.media_type.strip():
             raise ValueError("download result media_type must be non-empty")
-        if not isinstance(self.sha256, str) or not re.fullmatch(
-            r"[0-9a-fA-F]{64}", self.sha256
+        if self.sha256 is not None and (
+            not isinstance(self.sha256, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", self.sha256)
         ):
             raise ValueError("download result sha256 must be a hexadecimal digest")
         if not isinstance(self.filename, str) or not self.filename.strip():
@@ -191,7 +197,7 @@ class DownloadResult:
         object.__setattr__(
             self,
             "role",
-            _safe_fact(self.role, label="download result role", max_length=64),
+            _safe_fact(self.role, label="download result role"),
         )
         if self.required is not None and not isinstance(self.required, bool):
             raise TypeError("download result required must be a boolean")
@@ -212,14 +218,15 @@ class DownloadResult:
         filename = str(self.filename).replace("\\", "/").rsplit("/", 1)[-1]
         result: dict[str, Any] = {
             "byte_size": self.byte_size,
-            "filename": _redact_text(filename, limit=256),
+            "filename": filename,
             "item_key": self.item_key,
-            "media_type": str(self.media_type).strip()[:128],
+            "media_type": str(self.media_type).strip(),
             "metadata": _thaw_json(self.metadata),
             "required": self.required,
             "role": self.role,
-            "sha256": self.sha256,
         }
+        if self.sha256 is not None:
+            result["sha256"] = self.sha256
         if include_path:
             result["path"] = str(self.path)
         return result
@@ -227,12 +234,7 @@ class DownloadResult:
 
 @dataclass(frozen=True, slots=True)
 class DownloadItemFailure:
-    """A bounded failure for one item in a provider batch.
-
-    A failure intentionally has no path or URL field.  Providers may attach
-    safe diagnostic facts in ``details``; the acquisition router recursively
-    removes sensitive keys before exposing them to the job runner.
-    """
+    """Failure for one provider item without carrying paths or credentials."""
 
     item_key: str
     code: str
@@ -254,7 +256,7 @@ class DownloadItemFailure:
         object.__setattr__(
             self,
             "role",
-            _safe_fact(self.role, label="download item failure role", max_length=64),
+            _safe_fact(self.role, label="download item failure role"),
         )
         if self.required is not None and not isinstance(self.required, bool):
             raise TypeError("download item failure required must be a boolean")
@@ -297,13 +299,7 @@ class DownloadItemFailure:
 
 @dataclass(frozen=True, slots=True, init=False)
 class DownloadBatchResult:
-    """Enriched ordered download envelope for one selected resource.
-
-    ``results``/``failures`` are the canonical names.  ``items`` and
-    ``item_failures`` are accepted as constructor aliases because early
-    platform adapters used the latter vocabulary while this seam was being
-    introduced.
-    """
+    """Enriched ordered download envelope for one selected resource."""
 
     results: tuple[DownloadResult, ...]
     failures: tuple[DownloadItemFailure, ...]
@@ -330,8 +326,6 @@ class DownloadBatchResult:
             raise TypeError(
                 "download batch failures must contain DownloadItemFailure values"
             )
-        if len(normalized_results) + len(normalized_failures) > MAX_DOWNLOAD_ITEMS:
-            raise ValueError(f"download batch item count exceeds {MAX_DOWNLOAD_ITEMS}")
         object.__setattr__(self, "results", normalized_results)
         object.__setattr__(self, "failures", normalized_failures)
 
@@ -358,6 +352,8 @@ class DownloadBatchResult:
             "failures": [item.to_dict() for item in self.failures],
             "results": [item.to_dict() for item in self.results],
         }
+
+
 class DownloadProvider(Protocol):
     def download(
         self,
@@ -366,12 +362,7 @@ class DownloadProvider(Protocol):
         strategy: str,
         cancel_event: threading.Event,
     ) -> DownloadResult | list[DownloadResult] | DownloadBatchResult:
-        """Download one or more files for *resource*.
-
-        Most providers return a single ``DownloadResult``.  Platform-specific
-        downloaders may return a list when a single resource (e.g. a SmartEdu
-        course) contains multiple sub-resources (video + worksheets + exercises).
-        """
+        """Download one or more files for *resource*."""
         ...
 
 
@@ -397,6 +388,20 @@ def _safe_filename(title: str, url: str, media_type: str, strategy: str) -> str:
     if not cleaned.lower().endswith(suffix.lower()):
         cleaned += suffix
     return cleaned
+
+
+def _available_destination(path: Path) -> Path:
+    """Return a non-existing sibling path instead of overwriting another resource."""
+
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    index = 2
+    while True:
+        candidate = path.with_name(f"{stem} ({index}){suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 class PublicHttpDownloader:
@@ -430,7 +435,6 @@ class PublicHttpDownloader:
             },
         )
         opener = build_opener(_SafeRedirectHandler())
-        digest = hashlib.sha256()
         byte_size = 0
         try:
             with opener.open(request, timeout=self.settings.download_timeout_seconds) as response:
@@ -448,7 +452,6 @@ class PublicHttpDownloader:
                         if not chunk:
                             break
                         byte_size += len(chunk)
-                        digest.update(chunk)
                         handle.write(chunk)
         except DomainError:
             temporary.unlink(missing_ok=True)
@@ -465,7 +468,12 @@ class PublicHttpDownloader:
             temporary.unlink(missing_ok=True)
             raise DomainError("CONTENT_VALIDATION_FAILED", "下载内容为空")
         filename = _safe_filename(str(resource["title"]), url, media_type, strategy)
-        destination = job_dir / filename
+        destination = _available_destination(job_dir / filename)
         ensure_within_root(destination, self.settings.jobs_dir)
         temporary.replace(destination)
-        return DownloadResult(destination, byte_size, media_type, digest.hexdigest(), filename)
+        return DownloadResult(
+            destination,
+            byte_size,
+            media_type,
+            filename=destination.name,
+        )

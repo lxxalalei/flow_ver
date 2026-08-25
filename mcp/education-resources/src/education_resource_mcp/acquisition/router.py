@@ -164,6 +164,7 @@ class AcquisitionRouter:
         )
 
         artifacts: list[Artifact] = []
+        resource_key = request.resource_id or "resource"
         for index, result in enumerate(results):
             if not isinstance(result, DownloadResult):
                 raise TypeError("download provider returned an invalid item")
@@ -171,7 +172,7 @@ class AcquisitionRouter:
             role = result.role or ("primary" if index == 0 else "attachment")
             artifacts.append(
                 Artifact(
-                    artifact_id=f"{request.job_id}:artifact:{index}",
+                    artifact_id=f"{request.job_id}:{resource_key}:artifact:{index}",
                     role=role,
                     primary=role == "primary",
                     path=path,

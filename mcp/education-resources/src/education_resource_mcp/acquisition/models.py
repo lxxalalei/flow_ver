@@ -30,7 +30,6 @@ INTERNAL_ARTIFACT_ROLES = frozenset({"bundle", "markdown", "image", "sanitized_h
 PERSISTENT_ARTIFACT_ROLES = frozenset(
     {"primary", "subtitle", "cover", "metadata", "attachment", "transcript", "companion"}
 )
-MAX_ARTIFACTS = 10_000
 
 
 class AcquisitionStrategy(str, Enum):
@@ -89,7 +88,7 @@ class Artifact:
     filename: str
     byte_size: int
     media_type: str
-    sha256: str
+    sha256: str | None = None
     primary: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
     required: bool = False
@@ -102,12 +101,13 @@ class Artifact:
             "filename": self.filename,
             "byte_size": self.byte_size,
             "media_type": self.media_type,
-            "sha256": self.sha256,
             "primary": self.primary,
             "metadata": dict(self.metadata),
             "required": self.required,
             "item_key": self.item_key,
         }
+        if self.sha256 is not None:
+            value["sha256"] = self.sha256
         if include_path:
             value["path"] = str(self.path)
         return value
