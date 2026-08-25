@@ -64,13 +64,23 @@ def drop_epb_03(nal, epbs):
 # ===== 解密模式 =====
 
 def decrypt_classic(nal):
-    """classic: key@16, start=32, stride=80"""
+    """classic: key@16, start=32, stride=80, grid ends at o+80 <= len.
+
+    Fixed 2026-08-25 (real-stream evidence vs the official WASM worker): the
+    grid keeps one full stride (80 bytes) of spare room at the NAL tail —
+    ``o + 80 <= len``. The cctv-dl hpp port used o + 8, decrypting blocks near
+    the tail that the encoder never encrypted, which corrupted the stream
+    (ffmpeg decode errors, "老视频乱码"). Verified byte-exact vs the WASM
+    worker on 244/250 type-1/5 NALs of a real 2021 episode; the remaining 6
+    NALs belong to the 01a8 flip family and are handled by the health-gate
+    fallback.
+    """
     n = len(nal)
     if n < 40:
         return
     key = bytes(nal[16:32])
     j = 0
-    while 32 + j * 80 + 8 <= n:
+    while 32 + j * 80 + 80 <= n:
         tea_decrypt_block(nal, 32 + j * 80, key)
         j += 1
 
@@ -200,13 +210,15 @@ def type1_G_flips(X, Y, flip_mask):
 
 
 def type1_stride_f1(nal):
-    """key = nal[1:7]"""
+    """key = nal[1:7] (hpp: type5_stride_f5(nal + 1))"""
     if len(nal) < 7:
         return 0
     le = nal[1] | (nal[2] << 8) | (nal[3] << 16) | (nal[4] << 24)
     base = [160, 192, 224, 256, 288, 320]
     idx = le % 6
-    return base[idx] | nal[idx]
+    # hpp reads key16[idx] where key16 = nal + 1, i.e. nal[1 + idx].
+    # (Fixed 2026-08-25: the port used nal[idx], off by one -> wrong stride.)
+    return base[idx] | nal[idx + 1]
 
 
 def decrypt_type1_new(nal, stride=511, start=64, guard=17):
@@ -266,19 +278,15 @@ class Session:
             if is_type25_enable(nal):
                 self.new_mode = True
             return n
-        if not self.new_mode:
-            if ntype in (1, 5):
-                decrypt_classic(nal)
+        # Real-stream evidence (2026-08-25, vs official WASM worker): type 1
+        # and type 5 NALs always use the classic grid (key@16, start=32,
+        # stride=80, o+16 guard) — the hpp type5_new/type1_new paths
+        # (64 + header-derived stride + G-flips) are a cctv-dl extension and
+        # do NOT match the official decryptor on this stream; using them
+        # corrupts the video.
+        if ntype in (1, 5):
+            decrypt_classic(nal)
             return n
-        if ntype == 5:
-            return decrypt_type5_new(nal)
-        if ntype == 1:
-            if n < self.type1_min_len:
-                return n
-            stride = type1_stride_f1(nal)
-            if stride == 0:
-                stride = 511
-            return decrypt_type1_new(nal, stride, self.type1_start, self.type1_guard)
         return n
 
     def reset(self):

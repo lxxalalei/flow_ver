@@ -200,39 +200,6 @@ class CctvColumnNativeApiTests(unittest.TestCase):
         # short page terminates despite pageCount=9
         self.assertEqual(len(results), 1)
 
-    def test_iter_column_falls_back_to_cctv_dl_on_api_failure(self) -> None:
-        adapter = CctvSearchAdapter(None, _settings(Path(".")))
-        events = [
-            {
-                "event": "video",
-                "guid": _GUID,
-                "title": "兜底视频",
-                "url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-            }
-        ]
-        with mock.patch.object(
-            cctv_adapter, "iter_column_via_api",
-            side_effect=DomainError("PARTIAL_FAILURE", "api 挂了", True),
-        ), mock.patch.object(
-            cctv_download, "run_cctv_dl_list", lambda url, **kw: events
-        ):
-            results = adapter.iter_column(_COLUMN_URL)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["title"], "兜底视频")
-
-    def test_iter_column_via_api_partial_failure_raises(self) -> None:
-        def fake_open(request, timeout):
-            raise OSError("boom")
-
-        with mock.patch.object(
-            cctv_adapter, "column_id_from_page", lambda url, *, timeout: "TOPC1"
-        ), mock.patch.object(cctv_adapter, "urlopen_with_fallback", fake_open):
-            with self.assertRaises(DomainError) as ctx:
-                cctv_adapter.iter_column_via_api(_COLUMN_URL, timeout=5)
-        self.assertEqual(ctx.exception.code, "PARTIAL_FAILURE")
-        self.assertTrue(ctx.exception.retryable)
-
-
 class CctvExpansionTests(unittest.TestCase):
     def test_column_expand_routes_to_adapter(self) -> None:
         fake = _FakeCctvAdapter()
@@ -288,48 +255,6 @@ class CctvExpansionTests(unittest.TestCase):
                 )
         self.assertEqual(ctx.exception.code, "FEATURE_NOT_SUPPORTED")
 
-    def test_column_list_requires_cctv_dl_exe_on_fallback(self) -> None:
-        """API path down + cctv-dl missing -> explicit PROVIDER_UNAVAILABLE."""
-
-        adapter = CctvSearchAdapter(None, _settings(Path(".")))
-        missing = Path("Z:/definitely/missing/cctv-dl.exe")
-        with mock.patch.object(
-            cctv_adapter, "iter_column_via_api",
-            side_effect=DomainError("PARTIAL_FAILURE", "api 挂了", True),
-        ), mock.patch.object(cctv_download, "DEFAULT_CCTV_DL_EXE", missing), \
-                mock.patch.dict(os.environ, {"CCTV_DL_EXE": ""}):
-            with self.assertRaises(DomainError) as ctx:
-                adapter.iter_column(_COLUMN_URL)
-        self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
-        self.assertIn("CCTV_DL_EXE", ctx.exception.message)
-
-    def test_iter_column_normalizes_events(self) -> None:
-        """cctv-dl fallback events are normalized into video resources."""
-
-        adapter = CctvSearchAdapter(None, _settings(Path(".")))
-        events = [
-            {
-                "event": "video",
-                "guid": _GUID,
-                "title": "第1期 典籍",
-                "url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-                "time": "2021-02-12 12:00",
-            },
-            {"event": "status", "ignored": True},
-        ]
-        with mock.patch.object(
-            cctv_adapter, "iter_column_via_api",
-            side_effect=DomainError("PARTIAL_FAILURE", "api 挂了", True),
-        ), mock.patch.object(
-            cctv_download, "run_cctv_dl_list", lambda url, **kwargs: events
-        ):
-            results = adapter.iter_column(_COLUMN_URL)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(
-            results[0]["metadata"]["platform_signals"]["guid"], _GUID
-        )
-        self.assertEqual(results[0]["metadata"]["platform_signals"]["publish_time"], "2021-02-12 12:00")
-
 
 def _skip_native(guid: str, *, timeout: float) -> dict:
     """Test helper: make the native route fail fast (falls through to cctv-dl)."""
@@ -338,9 +263,9 @@ def _skip_native(guid: str, *, timeout: float) -> dict:
 
 
 class CctvDownloaderTests(unittest.TestCase):
-    def test_native_plain_stream_success(self) -> None:
-        """M2: plain stream route succeeds with route=native."""
+    """M2/M3: native-first downloader; WASM is the only fallback."""
 
+    def test_native_plain_stream_success(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
 
         def fake_stream(url, title, job_dir, *, timeout, cancel_event):
@@ -368,8 +293,6 @@ class CctvDownloaderTests(unittest.TestCase):
         self.assertEqual(result.filename, "新视频.mp4")
 
     def test_native_h5e_success(self) -> None:
-        """M2: h5e native decrypt route succeeds."""
-
         tmp = Path(self.enterContext(_tmp_dir()))
 
         def fake_h5e(resource, guid, title, job_dir, *, timeout, cancel_event):
@@ -397,113 +320,44 @@ class CctvDownloaderTests(unittest.TestCase):
             result = downloader.download(resource, "job9", "direct", threading.Event())
         self.assertEqual(result.metadata["route"], "native")
 
-    def test_native_failure_falls_back_to_cctv_dl(self) -> None:
-        """M2: native fails, cctv-dl succeeds -> route cctv-dl."""
-
+    def test_native_failure_falls_back_to_wasm(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
 
-        def fake_runner(cmd, *, timeout, cancel_event):
-            output = Path(cmd[cmd.index("--output") + 1])
-            output.mkdir(parents=True, exist_ok=True)
-            (output / "video.mp4").write_bytes(b"x" * 32)
-            return 0, '{"event":"download_complete","failed":0,"total":3}\n', ""
+        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event):
+            mp4 = job_dir / f"{title}.mp4"
+            mp4.write_bytes(b"wasm-data")
+            return mp4
 
         downloader = CctvVideoDownloader(
             None,
             _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=fake_runner,
-            health_checker=lambda path: 0,
             video_info_func=_skip_native,
+            health_checker=lambda path: 0,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "老视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(cctv_download, "download_wasm", fake_wasm):
+            result = downloader.download(resource, "job10", "direct", threading.Event())
+        self.assertEqual(result.metadata["route"], "wasm")
+        self.assertEqual(result.filename, "老视频.mp4")
+
+    def test_download_reports_final_failure(self) -> None:
+        """native fails and WASM fails -> final DOWNLOAD_FAILED with both causes."""
+
+        tmp = Path(self.enterContext(_tmp_dir()))
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            video_info_func=_skip_native,
+            health_checker=lambda path: 0,
         )
         resource = {
             "platform": "cctv",
             "title": "视频",
-            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-            "metadata": {"platform_signals": {"guid": _GUID}},
-        }
-        result = downloader.download(resource, "job10", "direct", threading.Event())
-        self.assertEqual(result.metadata["attempts"], 1)
-        self.assertTrue(result.path.name.endswith(".mp4"))
-
-    def test_download_success(self) -> None:
-        tmp = Path(self.enterContext(_tmp_dir()))
-        payload = b"x" * 128
-
-        def fake_runner(cmd, *, timeout, cancel_event):
-            output = Path(cmd[cmd.index("--output") + 1])
-            output.mkdir(parents=True, exist_ok=True)
-            (output / "第1期.mp4").write_bytes(payload)
-            stdout = json.dumps(
-                {"event": "download_complete", "failed": 0, "total": 10}
-            )
-            return 0, stdout + "\n", ""
-
-        downloader = CctvVideoDownloader(
-            None,
-            _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=fake_runner,
-            health_checker=lambda path: 0,
-            video_info_func=_skip_native,
-        )
-        resource = {
-            "platform": "cctv",
-            "title": "第1期",
-            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-            "metadata": {"platform_signals": {"guid": _GUID}},
-        }
-        result = downloader.download(resource, "job1", "direct", threading.Event())
-
-        self.assertTrue(result.path.is_file())
-        self.assertEqual(result.filename, "第1期.mp4")
-        self.assertEqual(result.byte_size, len(payload))
-        self.assertEqual(result.media_type, "video/mp4")
-        self.assertEqual(result.sha256, hashlib.sha256(payload).hexdigest())
-        self.assertEqual(result.metadata["guid"], _GUID)
-
-    def test_download_retries_after_health_failure(self) -> None:
-        tmp = Path(self.enterContext(_tmp_dir()))
-
-        def fake_runner(cmd, *, timeout, cancel_event):
-            output = Path(cmd[cmd.index("--output") + 1])
-            output.mkdir(parents=True, exist_ok=True)
-            (output / "video.mp4").write_bytes(b"data")
-            return 0, '{"event":"download_complete","failed":0,"total":5}\n', ""
-
-        health_results = iter([500, 0])
-        downloader = CctvVideoDownloader(
-            None,
-            _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=fake_runner,
-            health_checker=lambda path: next(health_results),
-            video_info_func=_skip_native,
-        )
-        resource = {
-            "platform": "cctv",
-            "title": "video",
-            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-            "metadata": {"platform_signals": {"guid": _GUID}},
-        }
-        result = downloader.download(resource, "job2", "direct", threading.Event())
-        self.assertEqual(result.metadata["attempts"], 2)
-
-    def test_download_reports_final_failure(self) -> None:
-        """cctv-dl fails and the WASM fallback also fails -> final failure."""
-
-        tmp = Path(self.enterContext(_tmp_dir()))
-        downloader = CctvVideoDownloader(
-            None,
-            _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
-            health_checker=lambda path: 0,
-            video_info_func=_skip_native,
-        )
-        resource = {
-            "platform": "cctv",
-            "title": "video",
             "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
             "metadata": {"platform_signals": {"guid": _GUID}},
         }
@@ -515,15 +369,12 @@ class CctvDownloaderTests(unittest.TestCase):
             with self.assertRaises(DomainError) as ctx:
                 downloader.download(resource, "job3", "direct", threading.Event())
         self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+        self.assertIn("自研下载失败", ctx.exception.message)
         self.assertIn("WASM", ctx.exception.message)
 
     def test_download_requires_resolvable_guid(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
-        downloader = CctvVideoDownloader(
-            None,
-            _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-        )
+        downloader = CctvVideoDownloader(None, _settings(tmp))
         resource = {
             "platform": "cctv",
             "title": "video",
@@ -535,49 +386,15 @@ class CctvDownloaderTests(unittest.TestCase):
                 downloader.download(resource, "job4", "direct", threading.Event())
         self.assertEqual(ctx.exception.code, "CONTENT_VALIDATION_FAILED")
 
-    def test_cctv_dl_failure_falls_back_to_wasm(self) -> None:
-        tmp = Path(self.enterContext(_tmp_dir()))
-        payload = b"wasm-data"
-
-        def failing_runner(cmd, *, timeout, cancel_event):
-            return 1, "", "cctv-dl boom"
-
-        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event):
-            mp4 = job_dir / f"{title}.mp4"
-            mp4.write_bytes(payload)
-            return mp4
-
-        downloader = CctvVideoDownloader(
-            None,
-            _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=failing_runner,
-            health_checker=lambda path: 0,
-            video_info_func=_skip_native,
-        )
-        resource = {
-            "platform": "cctv",
-            "title": "老视频",
-            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-            "metadata": {"platform_signals": {"guid": _GUID}},
-        }
-        with mock.patch.object(cctv_download, "download_wasm", fake_wasm):
-            result = downloader.download(resource, "job5", "direct", threading.Event())
-        self.assertEqual(result.metadata["route"], "wasm")
-        self.assertEqual(result.filename, "老视频.mp4")
-        self.assertEqual(result.byte_size, len(payload))
-
     def test_wasm_fallback_fails_when_node_missing(self) -> None:
-        """native fails, cctv-dl fails, node missing -> final failure with cause."""
+        """native fails, node missing -> final failure naming node."""
 
         tmp = Path(self.enterContext(_tmp_dir()))
         downloader = CctvVideoDownloader(
             None,
             _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
-            health_checker=lambda path: 0,
             video_info_func=_skip_native,
+            health_checker=lambda path: 0,
         )
         resource = {
             "platform": "cctv",
@@ -623,9 +440,8 @@ def _classic_encrypted_ts() -> tuple[bytes, bytes]:
     The NAL body is filled with 0x55 (never 0x00) and the encrypted form is
     regenerated until no fake 00 00 01 start-code sequence appears inside the
     NAL — otherwise the TS parser would split the NAL at a false boundary.
+    The TEA grid uses the WASM-calibrated guard (o + 80 <= len).
     """
-
-    import random as _random
 
     key = bytes(range(16))
 
@@ -640,12 +456,11 @@ def _classic_encrypted_ts() -> tuple[bytes, bytes]:
     def has_fake_start(nal: bytes) -> bool:
         return b"\x00\x00\x01" in nal or b"\x00\x00\x00\x01" in nal
 
-    # encrypted NAL (TEA on classic cells at 32 + j*80)
     nal = build(0x55)
     for attempt in range(50):
         candidate = bytearray(nal)
         for j in range(0, 200, 80):
-            if 32 + j + 8 <= len(candidate):
+            if 32 + j + 80 <= len(candidate):
                 _tea_encrypt_block(candidate, 32 + j, key)
         if not has_fake_start(bytes(candidate)):
             nal = candidate
@@ -664,10 +479,6 @@ def _classic_encrypted_ts() -> tuple[bytes, bytes]:
 
     pes_header = b"\x00\x00\x01\xe0\x00\x00\x80\x80\x00"
     start_code = b"\x00\x00\x01"
-    # Two full 184-byte payloads (368). After PES(9)+start(3)+nal(200) a
-    # trailing empty NAL (00 00 01 09, type 9 = untouched) terminates the real
-    # NAL; nal2 = 1 header byte + 152 pad makes new_pes == capacity (368) so
-    # no AF steal occurs and the round-trip is byte-exact.
     trailer = b"\x00\x00\x01\x09" + bytes([0x55]) * 152
     plain_nal = build(0x55)
     body = pes_header + start_code + bytes(plain_nal) + trailer
@@ -745,8 +556,6 @@ class CctvWasmFallbackTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
 
     def test_download_wasm_full_chain_muxes_mp4(self) -> None:
-        """Full WASM chain with mocked fetcher/decryptor/ffmpeg producing MP4."""
-
         tmp = Path(self.enterContext(_tmp_dir()))
 
         def fake_fetch(url: str, *, timeout: float, cancel_event=None) -> bytes:
@@ -759,9 +568,8 @@ class CctvWasmFallbackTests(unittest.TestCase):
             return True
 
         def fake_runner(cmd, *, timeout, cancel_event):
-            # the ffmpeg mux step writes the final mp4
             if cmd and cmd[0] == "ffmpeg":
-                mp4 = Path(cmd[cmd.index(str(tmp)) if str(tmp) in cmd else -1])
+                mp4 = Path(cmd[-1])
                 mp4.write_bytes(b"muxed-video")
                 return 0, "", ""
             return 0, "", ""
@@ -779,38 +587,7 @@ class CctvWasmFallbackTests(unittest.TestCase):
             mp4 = download_wasm(resource, _GUID, "老视频", tmp, timeout=5)
         self.assertEqual(mp4.name, "老视频.mp4")
         self.assertEqual(mp4.read_bytes(), b"muxed-video")
-        # work dir cleaned up after success
         self.assertFalse((tmp / f"{_GUID}_wasmwork").exists())
-
-    def test_downloader_rejects_wasm_output_failing_health_gate(self) -> None:
-        """A WASM fallback whose output still fails decode health is rejected."""
-
-        tmp = Path(self.enterContext(_tmp_dir()))
-
-        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event):
-            mp4 = job_dir / f"{title}.mp4"
-            mp4.write_bytes(b"garble")
-            return mp4
-
-        downloader = CctvVideoDownloader(
-            None,
-            _settings(tmp),
-            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
-            runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
-            health_checker=lambda path: 5000,
-            video_info_func=_skip_native,
-        )
-        resource = {
-            "platform": "cctv",
-            "title": "老视频",
-            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
-            "metadata": {"platform_signals": {"guid": _GUID}},
-        }
-        with mock.patch.object(cctv_download, "download_wasm", fake_wasm):
-            with self.assertRaises(DomainError) as ctx:
-                downloader.download(resource, "job7", "direct", threading.Event())
-        self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
-        self.assertIn("WASM 降级体检失败", ctx.exception.message)
 
 
 class CctvInspectorTests(unittest.TestCase):

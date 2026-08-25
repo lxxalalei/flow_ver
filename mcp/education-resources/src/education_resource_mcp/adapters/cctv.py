@@ -335,11 +335,19 @@ def iter_column_via_api(
                 retryable=True,
             )
 
-        items = data.get("data") or data.get("list") or []
+        # Response shape: {"data": {"total": N, "list": [...]}} — the nested
+        # dict may also carry pageCount/totalPages for larger columns.
+        payload = data.get("data") or data
+        if isinstance(payload, dict):
+            items = payload.get("list") or payload.get("items") or []
+        else:
+            items = payload
         if not isinstance(items, list) or not items:
             break
         if total_pages is None:
-            raw_pages = data.get("pageCount") or data.get("totalPages") or data.get("pages")
+            raw_pages = (
+                payload.get("pageCount") or payload.get("totalPages") or payload.get("pages")
+            ) if isinstance(payload, dict) else None
             try:
                 total_pages = int(raw_pages)
             except (TypeError, ValueError):
@@ -580,50 +588,11 @@ class CctvSearchAdapter:
     def iter_column(
         self, column_url: str, *, cancel_event: Any = None
     ) -> list[dict[str, Any]]:
-        """List all episodes of a column: native API first, cctv-dl fallback.
+        """List all episodes of a column via the public API (0069 M1/M3)."""
 
-        The public getVideoListByColumn endpoint is the primary route (0069
-        M1). The cctv-dl binary remains only as a transitional fallback until
-        M3 removes the external dependency entirely.
-        """
-
-        try:
-            return iter_column_via_api(
-                column_url, timeout=self.timeout, cancel_event=cancel_event
-            )
-        except DomainError as exc:
-            if exc.code == "JOB_CANCELLED":
-                raise
-            # Transitional fallback: the native API path failed for any reason
-            # (id resolution, partial failure, structure) — fall back to the
-            # cctv-dl binary until M3 removes it entirely.
-        except Exception:
-            pass
-        from .cctv_download import run_cctv_dl_list
-
-        events = run_cctv_dl_list(column_url, cancel_event=cancel_event)
-        resources: list[dict[str, Any]] = []
-        for event in events:
-            guid = str(event.get("guid") or event.get("id") or "").strip()
-            title = _clean(event.get("title") or event.get("videoTitle"))
-            source_url = str(event.get("url") or event.get("page_url") or "").strip()
-            if not guid or not title:
-                continue
-            if not source_url.startswith("http"):
-                source_url = ""
-            resources.append(make_resource(
-                platform="cctv",
-                title=title,
-                source_url=source_url or f"https://tv.cctv.com/v/{guid}",
-                resource_type="视频",
-                summary=_clean(event.get("brief") or event.get("description")) or None,
-                platform_signals={
-                    "guid": guid,
-                    "duration": str(event.get("length") or event.get("duration_sec") or "") or None,
-                    "publish_time": str(event.get("time") or event.get("pgmtime") or "") or None,
-                },
-            ))
-        return resources
+        return iter_column_via_api(
+            column_url, timeout=self.timeout, cancel_event=cancel_event
+        )
 
 
 __all__ = [

@@ -1,15 +1,11 @@
-"""CCTV video downloader backed by the local cctv-dl binary, with a WASM
-fallback for 2021-era videos whose h5e stream cctv-dl decrypts incorrectly.
+"""CCTV video downloader: fully native Python (0069), WASM kept as fallback.
 
-cctv-dl (CCTVVideoDownloader) is the confirmed fast route for column episode
-listing and MP4 delivery. Older videos (2021 and before) are a known
-deterministic failure: cctv-dl produces a corrupt/garble stream. The verified
-fallback (used in the source project for exactly this case) runs the official
-WASM worker: this module downloads the h5e segments in Python, decrypts them
-in parallel groups through ``node --import tsx`` against ``h5e_proj``, muxes
-with ffmpeg and applies the same decode health gate. The m3u8 prefers the
-per-video ``h5e_url`` from ``getHttpVideoInfo``; the fixed ``H5E_BASE``
-template is only a fallback.
+Native route (M2): plain streams are fetched directly (direct MP4 or HLS
+segments + ffmpeg mux); h5e streams are fetched as segments and decrypted
+in parallel worker processes by the ported ``cctv_h5e`` module. The official
+WASM worker remains only as a fallback until real-world comparison proves the
+native decryptor end to end. The m3u8 prefers the per-video ``h5e_url`` from
+``getHttpVideoInfo``; the fixed ``H5E_BASE`` template is only a fallback.
 """
 
 from __future__ import annotations
@@ -34,43 +30,16 @@ from ..policy import ensure_within_root
 from ..sessions import SessionStore
 from .http_client import urlopen_with_fallback
 
-DEFAULT_CCTV_DL_EXE = Path(
-    r"C:\Users\admin\projects\mediacrawler\downloads\cctv\cctv-dl-bin"
-    r"\cctv-dl\bin\cctv-dl.exe"
-)
 DEFAULT_H5E_PROJ = Path(r"C:\Users\admin\projects\mediacrawler\h5e_proj")
 # Fixed h5e m3u8 template used only when the per-video h5e_url is unavailable.
 # Its generality is unconfirmed; CCTV_H5E_BASE can override it.
 DEFAULT_H5E_BASE = "https://dh5ws01.v.cntv.cn/asp/h5e/hls/2000/0303000a/3/default"
 DOWNLOAD_TIMEOUT_SECONDS = 3600
-LIST_TIMEOUT_SECONDS = 300
 HEALTH_ERROR_THRESHOLD = 100
-MAX_ATTEMPTS = 3
-THREADS = "8"
 WASM_TIMEOUT_SECONDS = 2 * 3600
 _WASM_DL_THREADS = 12
 _WASM_PARALLEL = 4
 _ILLEGAL_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
-
-
-def resolve_cctv_dl_exe() -> Path:
-    """Locate the cctv-dl binary: ``CCTV_DL_EXE`` env override first."""
-
-    configured = os.environ.get("CCTV_DL_EXE", "").strip()
-    candidates = [Path(configured)] if configured else []
-    candidates.append(DEFAULT_CCTV_DL_EXE)
-    for candidate in candidates:
-        try:
-            if candidate.is_file():
-                return candidate
-        except OSError:
-            continue
-    raise DomainError(
-        "PROVIDER_UNAVAILABLE",
-        "未找到 cctv-dl 可执行文件。请设置环境变量 CCTV_DL_EXE 指向 cctv-dl.exe"
-        "（CCTVVideoDownloader 发行包 bin 目录）",
-        retryable=False,
-    )
 
 
 def _safe_title(title: str) -> str:
@@ -102,35 +71,11 @@ def _run_with_cancel(
         if time.monotonic() > deadline:
             proc.kill()
             raise DomainError(
-                "DOWNLOAD_FAILED", "cctv-dl 执行超时", retryable=True
+                "DOWNLOAD_FAILED", "子进程执行超时", retryable=True
             )
         time.sleep(0.5)
     stdout, stderr = proc.communicate()
     return proc.returncode, stdout or "", stderr or ""
-
-
-def _parse_download_complete(stdout: str) -> tuple[bool, int, int]:
-    """Interpret cctv-dl's download_complete event; (ok, failed, total)."""
-
-    for line in stdout.splitlines():
-        if "download_complete" not in line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            match = re.search(r'"failed":(\d+),"total":(\d+)', line)
-            if match:
-                failed, total = int(match.group(1)), int(match.group(2))
-                return failed == 0, failed, total
-            continue
-        if str(event.get("event") or "") == "download_complete":
-            try:
-                failed = int(event.get("failed") or 0)
-                total = int(event.get("total") or 0)
-            except (TypeError, ValueError):
-                continue
-            return failed == 0, failed, total
-    return False, -1, -1
 
 
 def ffmpeg_error_count(mp4: Path) -> int | None:
@@ -151,50 +96,6 @@ def ffmpeg_error_count(mp4: Path) -> int | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     return len([line for line in proc.stderr.splitlines() if line.strip()])
-
-
-def run_cctv_dl_list(
-    column_url: str,
-    *,
-    cancel_event: Any = None,
-    runner: Callable[..., tuple[int, str, str]] | None = None,
-) -> list[dict[str, Any]]:
-    """List column episodes via ``cctv-dl --json list`` (video events)."""
-
-    exe = resolve_cctv_dl_exe()
-    code, stdout, stderr = (runner or _run_with_cancel)(
-        [str(exe), "--json", "list", column_url],
-        timeout=LIST_TIMEOUT_SECONDS,
-        cancel_event=cancel_event,
-    )
-    if code not in (0, 1, 3):
-        raise DomainError(
-            "PARTIAL_FAILURE",
-            f"cctv-dl 栏目列举失败 rc={code}: {stderr.strip()[-300:]}",
-            retryable=True,
-        )
-    events: list[dict[str, Any]] = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict) and event.get("event") == "video":
-            events.append(event)
-    return events
-
-
-def _newest_mp4(directory: Path) -> Path | None:
-    mp4s = [
-        path for path in directory.glob("*.mp4")
-        if path.is_file() and path.stat().st_size > 0
-    ]
-    if not mp4s:
-        return None
-    return max(mp4s, key=lambda path: path.stat().st_mtime)
 
 
 def _unique_destination(destination: Path) -> Path:
@@ -694,15 +595,11 @@ class CctvVideoDownloader:
         session_store: SessionStore,
         settings: Settings,
         *,
-        exe_resolver: Callable[[], Path] = resolve_cctv_dl_exe,
-        runner: Callable[..., tuple[int, str, str]] | None = None,
         health_checker: Callable[[Path], int | None] | None = None,
         video_info_func: Callable[[str, float], dict[str, Any] | None] | None = None,
     ) -> None:
         self.settings = settings
         self.timeout = float(settings.download_timeout_seconds)
-        self._exe_resolver = exe_resolver
-        self._runner = runner or _run_with_cancel
         self._health_checker = health_checker or ffmpeg_error_count
         self._video_info_func = video_info_func
 
@@ -745,8 +642,7 @@ class CctvVideoDownloader:
             )
 
         job_dir = self.settings.jobs_dir / job_id
-        work_dir = job_dir / "cctv-dl"
-        work_dir.mkdir(parents=True, exist_ok=True)
+        job_dir.mkdir(parents=True, exist_ok=True)
         ensure_within_root(job_dir, self.settings.jobs_dir)
 
         # ---- native route first (0069 M2): plain stream or h5e decrypt ----
@@ -816,72 +712,8 @@ class CctvVideoDownloader:
             native_mp4.unlink(missing_ok=True)
             native_reason = f"自研产物体检失败（{native_errors} 错）"
 
-        # ---- cctv-dl fallback (transitional, removed in M3) ----
-        try:
-            exe = self._exe_resolver()
-        except DomainError as exc:
-            exe = None
-            last_reason = f"cctv-dl 不可用：{exc.message}"
-        quality = os.environ.get("CCTV_QUALITY", "0").strip() or "0"
-        last_reason = "未执行"
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            if cancel_event is not None and cancel_event.is_set():
-                raise DomainError("JOB_CANCELLED", "下载已取消")
-            for stale in work_dir.glob("*.mp4"):
-                stale.unlink(missing_ok=True)
-            code, stdout, stderr = self._runner(
-                [
-                    str(exe), "--json", "download",
-                    "--guid", guid,
-                    "--title", title,
-                    "--output", str(work_dir),
-                    "--quality", quality,
-                    "--threads", THREADS,
-                    "--mp4",
-                ],
-                timeout=DOWNLOAD_TIMEOUT_SECONDS,
-                cancel_event=cancel_event,
-            )
-            ok, failed, total = _parse_download_complete(stdout)
-            if not ok:
-                last_reason = (
-                    f"cctv-dl 未成功完成 (rc={code}, failed={failed}/{total}): "
-                    f"{stderr.strip()[-200:]}"
-                )
-                continue
-            mp4 = _newest_mp4(work_dir)
-            if mp4 is None:
-                last_reason = "cctv-dl 报告完成但没有产出 mp4"
-                continue
-            errors = self._health_checker(mp4)
-            if errors is not None and errors > HEALTH_ERROR_THRESHOLD:
-                last_reason = f"解码体检 {errors} 错 > {HEALTH_ERROR_THRESHOLD}"
-                mp4.unlink(missing_ok=True)
-                continue
-
-            destination = _unique_destination(job_dir / f"{title}.mp4")
-            ensure_within_root(destination, self.settings.jobs_dir)
-            mp4.replace(destination)
-            byte_size = destination.stat().st_size
-            digest = hashlib.sha256()
-            with destination.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                    digest.update(chunk)
-            return DownloadResult(
-                destination,
-                byte_size,
-                "video/mp4",
-                digest.hexdigest(),
-                destination.name,
-                metadata={
-                    "guid": guid,
-                    "health_errors": errors,
-                    "attempts": attempt,
-                },
-            )
-
-        # ---- WASM fallback: 2021-era videos have a deterministic cctv-dl
-        #      decryption defect (garble); the official worker re-decrypts. ----
+        # ---- WASM fallback: last resort for h5e streams the native path
+        #      cannot decrypt (kept until real-world comparison in M3). ----
         if cancel_event is not None and cancel_event.is_set():
             raise DomainError("JOB_CANCELLED", "下载已取消")
         try:
@@ -897,7 +729,7 @@ class CctvVideoDownloader:
             raise DomainError(
                 "DOWNLOAD_FAILED",
                 f"央视视频下载失败：{native_reason or '自研路径未尝试'}；"
-                f"cctv-dl 失败（{last_reason}）；WASM 降级失败（{exc.message}）",
+                f"WASM 降级失败（{exc.message}）",
                 retryable=False,
             ) from exc
         wasm_errors = self._health_checker(wasm_mp4)
@@ -917,26 +749,25 @@ class CctvVideoDownloader:
                     "guid": guid,
                     "route": "wasm",
                     "health_errors": wasm_errors,
-                    "attempts": MAX_ATTEMPTS,
+                    "attempts": 1,
                 },
             )
         wasm_mp4.unlink(missing_ok=True)
         raise DomainError(
             "DOWNLOAD_FAILED",
-            f"央视视频下载失败：{native_reason or '自研路径未尝试'}；cctv-dl 失败"
-            f"（{last_reason}）；WASM 降级体检失败（{wasm_errors} 错 > "
-            f"{HEALTH_ERROR_THRESHOLD}）。该视频可能加密形态特殊，需人工处理",
+            f"央视视频下载失败：{native_reason or '自研路径未尝试'}；WASM 降级"
+            f"体检失败（{wasm_errors} 错 > {HEALTH_ERROR_THRESHOLD}）。"
+            "该视频可能加密形态特殊，需人工处理",
             retryable=False,
         )
 
 
 __all__ = [
     "CctvVideoDownloader",
-    "DEFAULT_CCTV_DL_EXE",
+    "download_h5e_native",
+    "download_stream_native",
     "download_wasm",
     "ffmpeg_error_count",
-    "resolve_cctv_dl_exe",
     "resolve_h5e_proj",
     "resolve_wasm_m3u8",
-    "run_cctv_dl_list",
 ]
