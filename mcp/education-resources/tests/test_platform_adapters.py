@@ -215,14 +215,12 @@ class MultiPlatformSearchTests(unittest.TestCase):
     def test_only_requested_platform_runs(self) -> None:
         first = MagicMock()
         first.platform_id = "first"
-        first.descriptor = MagicMock(platform_id="first")
         first.search.return_value = (
             [make_resource(platform="first", title="A", source_url="https://a.example")],
             None,
         )
         second = MagicMock()
         second.platform_id = "second"
-        second.descriptor = MagicMock(platform_id="second")
         second.search.return_value = (
             [make_resource(platform="second", title="B", source_url="https://b.example")],
             None,
@@ -250,7 +248,6 @@ class MultiPlatformSearchTests(unittest.TestCase):
         def adapter(platform: str):
             value = MagicMock()
             value.platform_id = platform
-            value.descriptor = MagicMock(platform_id=platform)
 
             def search(query, limit):
                 barrier.wait(timeout=2)

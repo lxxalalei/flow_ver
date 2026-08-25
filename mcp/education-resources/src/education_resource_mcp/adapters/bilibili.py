@@ -17,7 +17,7 @@ from urllib.request import Request
 
 from ..config import Settings
 from ..sessions import SessionStore
-from .base import adapter_error, descriptor_for_platform, make_resource
+from .base import adapter_error, make_resource
 from .http_client import urlopen_with_fallback
 from .wbi import wbi_sign
 
@@ -108,7 +108,6 @@ class BilibiliSearchAdapter:
     """Search Bilibili videos through the WBI-signed web API."""
 
     platform_id = "bilibili"
-    descriptor = descriptor_for_platform("bilibili")
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
@@ -502,6 +501,7 @@ class BilibiliSearchAdapter:
             if len(archives) < actual_page_size:
                 break
             page += 1
+
 
 class _AdapterError(Exception):
     """Internal error carrying a stable code + retryable flag."""

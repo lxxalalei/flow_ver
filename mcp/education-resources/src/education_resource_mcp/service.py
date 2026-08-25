@@ -11,7 +11,6 @@ import importlib
 import logging
 import secrets
 import threading
-import urllib.parse
 from typing import Any, Mapping
 
 from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistration
@@ -139,23 +138,6 @@ def _resource_type(value: Any) -> str:
     return _RESOURCE_TYPE_MAP.get(
         text, lowered if lowered in _ALLOWED_RESOURCE_TYPES else "other"
     )
-
-
-def _platform_from_import_url(url: str) -> str:
-    """Recognize only URL shapes with a dedicated active inspector."""
-
-    parsed = urllib.parse.urlparse(url)
-    host = (parsed.hostname or "").casefold().rstrip(".")
-    path = parsed.path or "/"
-    if host in {"bilibili.com", "www.bilibili.com", "m.bilibili.com"} and path.startswith("/video/"):
-        return "bilibili"
-    if host in {"www.zhihu.com", "zhuanlan.zhihu.com"}:
-        return "zhihu"
-    if host == "basic.smartedu.cn":
-        return "smartedu"
-    if host in {"tv.cctv.com", "www.cctv.com", "cctv.com"}:
-        return "cctv"
-    return "generic"
 
 
 def _provider_registrations(
@@ -370,43 +352,6 @@ class ResourceService:
         resource = self._get_resource(resource_id)
         resolution = self._inspect_raw(resource)
         return self._public_inspection(resource_id, resolution)
-
-    def import_url(self, source_url: str) -> dict[str, Any]:
-        """Register an external URL as a process-local resource handle and inspect it."""
-
-        url = canonical_http_url(str(source_url or "").strip())
-        resource_id = new_id("res")
-        resource = {
-            "resource_id": resource_id,
-            "platform": _platform_from_import_url(url),
-            "title": str(
-                urllib.parse.urlparse(url).path.rsplit("/", 1)[-1] or url
-            )[:120],
-            "source_url": url,
-            "resource_type": "网页",
-            "metadata": {},
-        }
-        with self._lock:
-            self._resources[resource_id] = resource
-
-        resolution = self._inspect_raw(resource)
-        resolved = resolution.get("resolved_resource") or {}
-        updates: dict[str, Any] = {}
-        if isinstance(resolved, dict):
-            if resolved.get("title"):
-                updates["title"] = str(resolved["title"])[:120]
-            # 检查确认的类型必须回填到句柄：句柄若停留在导入默认"网页"，
-            # 下载路由按 article 匹配平台下载器会全部落空（CAPABILITY_NOT_DECLARED）。
-            resolved_type = _resource_type(resolved.get("resource_type"))
-            if resolved_type != "other":
-                updates["resource_type"] = resolved_type
-        if updates:
-            with self._lock:
-                self._resources[resource_id].update(updates)
-        return {
-            "resource_id": resource_id,
-            **self._public_inspection(resource_id, resolution),
-        }
 
     def _inspect_raw(self, resource: dict[str, Any]) -> dict[str, Any]:
         payload = self.inspection_router.inspect(dict(resource)).to_mapping()

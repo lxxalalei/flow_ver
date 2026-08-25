@@ -10,7 +10,7 @@ from urllib.request import Request
 
 from ..config import Settings
 from ..sessions import SessionStore
-from .base import adapter_error, descriptor_for_platform, make_resource
+from .base import adapter_error, make_resource
 from .http_client import urlopen_with_fallback
 
 
@@ -39,7 +39,6 @@ class _AdapterError(Exception):
 
 class WeiboSearchAdapter:
     platform_id = "weibo"
-    descriptor = descriptor_for_platform("weibo")
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store

@@ -2,27 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Protocol
-
-
-@dataclass(frozen=True, slots=True)
-class AdapterDescriptor:
-    """Compatibility-only platform label.
-
-    Older adapters expose ``descriptor = descriptor_for_platform(...)``.  The
-    runtime no longer loads a registry or validates descriptor/digest/provider
-    authority; actual capability is the adapter code that is registered.
-    """
-
-    platform_id: str
-
-
-def descriptor_for_platform(platform_id: str) -> AdapterDescriptor:
-    platform_id = str(platform_id or "").strip()
-    if not platform_id:
-        raise ValueError("platform_id must not be empty")
-    return AdapterDescriptor(platform_id=platform_id)
 
 
 class PlatformSearchAdapter(Protocol):

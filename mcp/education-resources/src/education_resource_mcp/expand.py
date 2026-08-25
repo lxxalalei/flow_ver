@@ -35,7 +35,7 @@ RESULTS_NAME = "results.jsonl"
 
 
 def import_resource_url(service: Any, source_url: str) -> dict[str, Any]:
-    """Register and inspect a known URL."""
+    """Register, inspect, and update the single process-local URL resource."""
 
     raw = identify_resource_url(source_url)
     registered = service._remember_resources([raw])  # noqa: SLF001
@@ -43,6 +43,18 @@ def import_resource_url(service: Any, source_url: str) -> dict[str, Any]:
         raise DomainError("RESOURCE_NOT_FOUND", "无法建立资源句柄")
     resource_id = str(registered[0]["resource_id"])
     inspected = service.inspect(resource_id)
+    resolved = inspected.get("resource")
+    updates: dict[str, Any] = {}
+    if isinstance(resolved, Mapping):
+        title = str(resolved.get("title") or "").strip()
+        if title:
+            updates["title"] = title
+        resource_type = str(resolved.get("resource_type") or "").strip()
+        if resource_type and resource_type != "other":
+            updates["resource_type"] = resource_type
+    if updates:
+        with service._lock:  # noqa: SLF001
+            service._resources[resource_id].update(updates)  # noqa: SLF001
     return {
         "resource_id": resource_id,
         **{k: v for k, v in inspected.items() if k != "resource_id"},

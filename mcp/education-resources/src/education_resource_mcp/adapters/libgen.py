@@ -8,13 +8,12 @@ from typing import Any
 
 from ..config import Settings
 from ..sessions import SessionStore
-from .base import adapter_error, descriptor_for_platform, make_resource
+from .base import adapter_error, make_resource
 from .libgen_client import LibgenError, create_libgen_client
 
 
 class LibgenSearchAdapter:
     platform_id = "libgen"
-    descriptor = descriptor_for_platform("libgen")
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self._client = create_libgen_client(float(settings.search_timeout_seconds))

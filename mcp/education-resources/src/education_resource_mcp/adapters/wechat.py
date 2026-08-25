@@ -16,7 +16,7 @@ from urllib.request import Request
 
 from ..config import Settings
 from ..sessions import SessionStore
-from .base import adapter_error, descriptor_for_platform, make_resource
+from .base import adapter_error, make_resource
 from .http_client import urlopen_with_fallback
 
 
@@ -34,7 +34,6 @@ def _clean(text: Any) -> str:
 
 class WechatSearchAdapter:
     platform_id = "wechat"
-    descriptor = descriptor_for_platform(platform_id)
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store

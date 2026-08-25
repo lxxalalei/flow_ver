@@ -15,7 +15,6 @@ download/detail adapters.
 
 from __future__ import annotations
 
-import hashlib
 import html
 import json
 import re
@@ -27,7 +26,7 @@ from urllib.request import Request
 
 from ..config import Settings
 from ..sessions import SessionStore
-from .base import adapter_error, descriptor_for_platform, make_resource
+from .base import adapter_error, make_resource
 from .http_client import urlopen_with_fallback
 
 
@@ -77,18 +76,10 @@ UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 )
 
-# Chinese type → MCP ResourceType mapping (service layer maps further).
-SMARTEDU_TYPE_MAP = {
-    "视频": "视频", "音频": "音频", "课件": "课件", "文档": "文档",
-    "图片": "图片", "习题": "习题", "试卷": "试卷",
-    "课程": "课程", "教材": "教材", "专题": "专题",
-}
-
 
 # ---------------------------------------------------------------------------
 # Text utils (ported from _text_utils.py)
 # ---------------------------------------------------------------------------
-
 def _norm(value: Any) -> str:
     return str(value or "").strip()
 
@@ -97,10 +88,6 @@ def _clean_html_text(value: Any) -> str:
     text = html.unescape(str(value or ""))
     text = re.sub(r"<[^>]+>", "", text)
     return _norm(re.sub(r"\s+", " ", text))
-
-
-def _stable_id(value: str) -> str:
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
 def _first_value(data: dict[str, Any], keys: list[str]) -> Any:
@@ -114,7 +101,6 @@ def _first_value(data: dict[str, Any], keys: list[str]) -> Any:
 # ---------------------------------------------------------------------------
 # Search-item extraction (ported from _search.py)
 # ---------------------------------------------------------------------------
-
 def _detail_page_from_item(item: dict[str, Any]) -> str:
     explicit = _norm(_first_value(item, [
         "url", "web_url", "webUrl", "href", "detail_url", "detailUrl",
@@ -305,7 +291,7 @@ def _provider_name(item: dict[str, Any]) -> str:
     return "/".join(names) if names else ""
 
 
-def _item_to_resource(item: dict[str, Any], query: str) -> dict[str, Any] | None:
+def _item_to_resource(item: dict[str, Any]) -> dict[str, Any] | None:
     source_url = _detail_page_from_item(item)
     fmt = _infer_format(item, source_url)
     title = _clean_html_text(_first_value(item, [
@@ -363,7 +349,6 @@ class SmartEduSearchAdapter:
     """Search SmartEdu public discovery endpoints without replaying login tokens."""
 
     platform_id = "smartedu"
-    descriptor = descriptor_for_platform("smartedu")
 
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
@@ -464,7 +449,7 @@ class SmartEduSearchAdapter:
                     "thematic_course", "assets_url",
                 }:
                     continue
-                resource = _item_to_resource(item, query)
+                resource = _item_to_resource(item)
                 if resource:
                     results.append(resource)
                 if len(results) >= limit:
@@ -480,7 +465,7 @@ class SmartEduSearchAdapter:
                     if tch_data is not None:
                         tch_items = _extract_search_items(tch_data, limit)
                         for item in tch_items:
-                            resource = _item_to_resource(item, query)
+                            resource = _item_to_resource(item)
                             if resource:
                                 results.append(resource)
                             if len(results) >= limit:

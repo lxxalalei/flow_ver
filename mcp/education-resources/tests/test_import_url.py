@@ -8,6 +8,7 @@ import unittest
 
 from education_resource_mcp.config import Settings
 from education_resource_mcp.errors import DomainError
+from education_resource_mcp.expand import import_resource_url
 from education_resource_mcp.inspection import InspectionResult, InspectionRouter
 from education_resource_mcp.service import ResourceService
 
@@ -79,25 +80,24 @@ class ImportUrlTests(unittest.TestCase):
         }
         for url, expected in cases.items():
             with self.subTest(url=url):
-                result = self.service.import_url(url)
+                result = import_resource_url(self.service, url)
                 resource = self.service._get_resource(result["resource_id"])
                 self.assertEqual(expected, resource["platform"])
                 self.assertEqual(expected, self.seen[-1])
 
     def test_import_backfills_resolved_resource_type(self) -> None:
-        # 导入默认 resource_type 是"网页"（article），不回填检查结果的话
-        # 下载路由永远匹配不到平台下载器。
-        result = self.service.import_url(
-            "https://www.bilibili.com/video/BV1xx411c7mD"
+        result = import_resource_url(
+            self.service,
+            "https://www.bilibili.com/video/BV1xx411c7mD",
         )
         resource = self.service._get_resource(result["resource_id"])
         self.assertEqual("video", resource["resource_type"])
         self.assertEqual("bilibili imported resource", resource["title"])
 
-        smart = self.service.import_url(
-            "https://basic.smartedu.cn/tchMaterial/detail?contentId=abc"
+        smart = import_resource_url(
+            self.service,
+            "https://basic.smartedu.cn/tchMaterial/detail?contentId=abc",
         )
-        # probe 对 smartedu 返回 article，按解析结果回填而不是停留在"网页"
         self.assertEqual(
             "article", self.service._get_resource(smart["resource_id"])["resource_type"]
         )
@@ -105,7 +105,7 @@ class ImportUrlTests(unittest.TestCase):
     def test_invalid_url_rejected_loudly(self) -> None:
         for bad in ("", "not-a-url", "ftp://example.org/x", "javascript:alert(1)"):
             with self.assertRaises(DomainError) as ctx:
-                self.service.import_url(bad)
+                import_resource_url(self.service, bad)
             self.assertEqual("INVALID_ARGUMENT", ctx.exception.code)
 
 
