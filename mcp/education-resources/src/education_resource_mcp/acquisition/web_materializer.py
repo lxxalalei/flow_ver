@@ -260,6 +260,24 @@ body > header.reader-bar {
   background: var(--paper-deep);
   font-weight: 700;
 }
+.reader-main figure.reader-card {
+  margin: 2.2rem 0;
+  text-align: center;
+}
+.reader-main figure.reader-card img {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 10px 32px rgb(0 0 0 / 16%);
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}
+.reader-main figure.reader-card figcaption {
+  color: var(--text-light);
+  font-family: var(--sans-font);
+  font-size: .88rem;
+  margin-top: .8rem;
+}
 .reader-image-missing {
   background: var(--paper-deep);
   border: 1px dashed var(--rule);
@@ -414,6 +432,131 @@ def _reader_css() -> str:
         f"{license_text}\n*/"
     )
     return f"{notice}\n{base_css}\n{_READER_OVERRIDES}\n"
+
+
+_LD_JSON_RE = re.compile(
+    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.S | re.I,
+)
+_ARTICLE_CONTAINER_SELECTORS = (
+    "article-content", "article_content", "detail-content", "detail_content",
+    "articleBody", "article-body", "content-detail", "article", "main",
+)
+
+
+def _ld_json_objects(html: str) -> list[dict]:
+    """Parse all JSON-LD blocks into a flat list of dicts."""
+
+    objects: list[dict] = []
+    for match in _LD_JSON_RE.finditer(html):
+        try:
+            data = json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            continue
+        items = data if isinstance(data, list) else [data]
+        objects.extend(item for item in items if isinstance(item, dict))
+    return objects
+
+
+def _json_ld_title(html: str) -> str:
+    """Article name from JSON-LD structured data (name/headline)."""
+
+    for obj in _ld_json_objects(html):
+        for key in ("name", "headline"):
+            value = obj.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def _json_ld_images(html: str) -> list[str]:
+    """Image URLs from JSON-LD (image / image.url / thumbnailUrl)."""
+
+    for obj in _ld_json_objects(html):
+        for key in ("image", "thumbnailUrl"):
+            value = obj.get(key)
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                return [value]
+            if isinstance(value, dict):
+                url = value.get("url") or value.get("contentUrl")
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    return [url]
+    return []
+
+
+def _article_image_urls(html: str) -> list[tuple[str, str]]:
+    """(src, alt) pairs from the article body — image-card fallback source.
+
+    Used when Trafilatura finds no readable text (the page body is pure
+    images, e.g. science infographic cards). Tries known article containers,
+    then JSON-LD image fields, then any main/article region.
+    """
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    def pairs(imgs: list) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for img in imgs:
+            src = str(img.get("src") or img.get("data-src") or "").strip()
+            if not src.startswith(("http://", "https://")):
+                continue
+            alt = str(img.get("alt") or "").strip()
+            out.append((src, alt))
+        return out
+
+    for selector in _ARTICLE_CONTAINER_SELECTORS:
+        for node in soup.select(f".{selector}, #{selector}"):
+            imgs = node.find_all("img")
+            if len(imgs) >= 2:
+                return pairs(imgs)
+    ld_images = _json_ld_images(html)
+    if ld_images:
+        return [(url, "") for url in ld_images]
+    main = soup.find("main") or soup.find("article")
+    if main is not None:
+        imgs = main.find_all("img")
+        if imgs:
+            return pairs(imgs)
+    return []
+
+
+def _image_card_fragment(image_pairs: list[tuple[str, str]]) -> str:
+    """Build a figure-list fragment from (src, alt) pairs for the Reader."""
+
+    figures = []
+    for src, alt in image_pairs:
+        safe_src = html_module.escape(src, quote=True)
+        safe_alt = html_module.escape(alt or "图", quote=False)
+        figcaption = (
+            f"<figcaption>{safe_alt}</figcaption>" if alt else ""
+        )
+        figures.append(
+            f'<figure class="reader-card"><img src="{safe_src}" alt="{safe_alt}">'
+            f"{figcaption}</figure>"
+        )
+    return f"<article>{''.join(figures)}</article>"
+
+
+def _text_is_sparse(markdown: str) -> bool:
+    """True when extraction produced no paragraph-like content.
+
+    Navigation menus extract as many short single-line labels (low long-line
+    character share); real body text — even a short paragraph — is dominated
+    by 30+ char lines. Sparse = fewer than 3 long lines AND long-line
+    characters below 25% of the total.
+    """
+
+    lines = [line.strip() for line in markdown.splitlines() if line.strip()]
+    if not lines:
+        return True
+    total = sum(len(line) for line in lines)
+    long_lines = [line for line in lines if len(line) >= 30]
+    if len(long_lines) >= 3:
+        return False
+    if total <= 0:
+        return True
+    long_chars = sum(len(line) for line in long_lines)
+    return long_chars / total < 0.25
 
 
 def _cleaned_body(fragment: str) -> str:
@@ -726,10 +869,23 @@ class WebMaterializer:
             readable_fragment = ""
             extraction_status = "source_only"
             warnings.append("content_extraction_failed")
-        if not markdown.strip() and not readable_fragment.strip():
-            extraction_status = "source_only"
-            if "content_extraction_failed" not in warnings:
+        if "content_extraction_failed" in warnings:
+            if not markdown.strip() and not readable_fragment.strip():
                 warnings.append("content_extraction_empty")
+        elif _text_is_sparse(markdown):
+            # Image-card fallback: the page body is pure images or the
+            # extraction is navigation noise (science infographic cards etc.).
+            # Keep the article images as figure cards instead of an empty page.
+            html_source = response.body.decode("utf-8", "replace")
+            image_pairs = _article_image_urls(html_source)
+            if len(image_pairs) >= 2:
+                # pure-image / infographic-card pages only — a short text with
+                # a single image keeps its text rendering
+                readable_fragment = _image_card_fragment(image_pairs)
+                extraction_status = "image_card"
+                warnings.append("image_card_content")
+            else:
+                warnings.append("content_sparse")
 
         readable_fragment, embedded_images, failed_images, image_fetches = (
             _embed_reader_images(
@@ -742,7 +898,13 @@ class WebMaterializer:
         if failed_images:
             warnings.append("image_embedding_incomplete")
 
-        title = str(resource.get("title") or "教育资源")
+        # JSON-LD structured data is the most trustworthy title (import_url
+        # derives a poor one from the URL path); resource.title is the fallback.
+        title = _json_ld_title(response.body.decode("utf-8", "replace"))
+        if not title.strip():
+            title = str(resource.get("title") or "")
+        if not title.strip():
+            title = "教育资源"
         if not markdown.strip():
             markdown = (
                 f"# {title}\n\n"
@@ -824,7 +986,8 @@ class WebMaterializer:
             },
             completion=(
                 "complete"
-                if extraction_status == "succeeded" and failed_images == 0
+                if extraction_status in ("succeeded", "image_card")
+                and failed_images == 0
                 else "partial"
             ),
         )

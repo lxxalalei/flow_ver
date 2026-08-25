@@ -272,3 +272,54 @@ class WebMaterializerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImageCardFallbackTests(unittest.TestCase):
+    """Image-card fallback for pure-image pages + JSON-LD title (2026-08-25)."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_empty_text_extraction_falls_back_to_image_cards(self) -> None:
+        html = (
+            "<!doctype html><html><head>"
+            '<script type="application/ld+json">{"@type":"Article","name":"台风明白卡"}</script>'
+            '</head><body><div class="article-content">'
+            '<img src="https://cdn.example.org/card1.jpg" alt="台风路径">'
+            '<img src="https://cdn.example.org/card2.jpg" alt="防风要点">'
+            "</div></body></html>"
+        ).encode("utf-8")
+        fetcher = FakeFetcher(html)
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=["", ""],
+        ):
+            result = WebMaterializer(fetcher=fetcher).acquire(request(self.root))
+        self.assertTrue(result.ok)
+        self.assertEqual("image_card", result.metadata["extraction_status"])
+        readable = (self.root / "job-web-001" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("台风明白卡", readable)
+        self.assertIn("reader-card", readable)
+        self.assertIn('src="data:image/png;base64,', readable)
+        self.assertEqual(2, fetcher.image_calls)
+
+    def test_json_ld_title_used_when_resource_title_missing(self) -> None:
+        html = (
+            "<!doctype html><html><head>"
+            '<script type="application/ld+json">{"@type":"Article","headline":"台风的风雨说明书"}</script>'
+            "</head><body><article><p>正文</p></article></body></html>"
+        ).encode("utf-8")
+        fetcher = FakeFetcher(html)
+        with patch(
+            "education_resource_mcp.acquisition.web_materializer.trafilatura_extract",
+            side_effect=["# 正文", "<article><p>正文</p></article>"],
+        ):
+            req = request(self.root, url="https://example.org/articleinfo?ar_id=1")
+            req.resource["title"] = ""
+            result = WebMaterializer(fetcher=fetcher).acquire(req)
+        readable = (self.root / "job-web-001" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("台风的风雨说明书", readable)
