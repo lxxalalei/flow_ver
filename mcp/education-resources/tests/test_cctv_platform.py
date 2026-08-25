@@ -14,7 +14,11 @@ from unittest import mock
 from education_resource_mcp.adapters import cctv as cctv_adapter
 from education_resource_mcp.adapters import cctv_download
 from education_resource_mcp.adapters.cctv import CctvSearchAdapter
-from education_resource_mcp.adapters.cctv_download import CctvVideoDownloader
+from education_resource_mcp.adapters.cctv_download import (
+    CctvVideoDownloader,
+    download_wasm,
+    resolve_wasm_m3u8,
+)
 from education_resource_mcp.adapters.expansion import expand_resource
 from education_resource_mcp.adapters.inspect_cctv import CctvInspector
 from education_resource_mcp.adapters.resource_urls import identify_resource_url
@@ -252,6 +256,8 @@ class CctvDownloaderTests(unittest.TestCase):
         self.assertEqual(result.metadata["attempts"], 2)
 
     def test_download_reports_final_failure(self) -> None:
+        """cctv-dl fails and the WASM fallback also fails -> final failure."""
+
         tmp = Path(self.enterContext(_tmp_dir()))
         downloader = CctvVideoDownloader(
             None,
@@ -266,10 +272,15 @@ class CctvDownloaderTests(unittest.TestCase):
             "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
             "metadata": {"platform_signals": {"guid": _GUID}},
         }
-        with self.assertRaises(DomainError) as ctx:
-            downloader.download(resource, "job3", "direct", threading.Event())
+        with mock.patch.object(
+            cctv_download,
+            "download_wasm",
+            side_effect=DomainError("DOWNLOAD_FAILED", "WASM 降级也失败"),
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                downloader.download(resource, "job3", "direct", threading.Event())
         self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
-        self.assertFalse(ctx.exception.retryable)
+        self.assertIn("WASM", ctx.exception.message)
 
     def test_download_requires_resolvable_guid(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
@@ -288,6 +299,170 @@ class CctvDownloaderTests(unittest.TestCase):
             with self.assertRaises(DomainError) as ctx:
                 downloader.download(resource, "job4", "direct", threading.Event())
         self.assertEqual(ctx.exception.code, "CONTENT_VALIDATION_FAILED")
+
+    def test_cctv_dl_failure_falls_back_to_wasm(self) -> None:
+        tmp = Path(self.enterContext(_tmp_dir()))
+        payload = b"wasm-data"
+
+        def failing_runner(cmd, *, timeout, cancel_event):
+            return 1, "", "cctv-dl boom"
+
+        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event):
+            mp4 = job_dir / f"{title}.mp4"
+            mp4.write_bytes(payload)
+            return mp4
+
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
+            runner=failing_runner,
+            health_checker=lambda path: 0,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "老视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(cctv_download, "download_wasm", fake_wasm):
+            result = downloader.download(resource, "job5", "direct", threading.Event())
+        self.assertEqual(result.metadata["route"], "wasm")
+        self.assertEqual(result.filename, "老视频.mp4")
+        self.assertEqual(result.byte_size, len(payload))
+
+    def test_wasm_fallback_fails_when_node_missing(self) -> None:
+        tmp = Path(self.enterContext(_tmp_dir()))
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
+            runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
+            health_checker=lambda path: 0,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "老视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(
+            cctv_download.shutil, "which", lambda name: None
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                downloader.download(resource, "job6", "direct", threading.Event())
+        self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
+        self.assertIn("node", ctx.exception.message)
+
+
+class CctvWasmFallbackTests(unittest.TestCase):
+    def test_resolve_wasm_m3u8_prefers_per_video_h5e_url(self) -> None:
+        resource = {
+            "platform": "cctv",
+            "title": "t",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {
+                "platform_signals": {
+                    "guid": _GUID,
+                    "h5e_url": "https://dh5ws01.v.cntv.cn/asp/h5e/hls/x/y/z/abc/2000.m3u8",
+                }
+            },
+        }
+        m3u8 = resolve_wasm_m3u8(resource, _GUID)
+        self.assertIn("abc/2000.m3u8", m3u8)
+
+    def test_resolve_wasm_m3u8_falls_back_to_template(self) -> None:
+        resource = {
+            "platform": "cctv",
+            "title": "t",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {},
+        }
+        m3u8 = resolve_wasm_m3u8(resource, _GUID)
+        self.assertIn(f"{_GUID}/2000.m3u8", m3u8)
+        self.assertIn("dh5ws01.v.cntv.cn", m3u8)
+
+    def test_download_wasm_requires_node_and_h5e_proj(self) -> None:
+        tmp = Path(self.enterContext(_tmp_dir()))
+        resource = {
+            "platform": "cctv",
+            "title": "t",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(
+            cctv_download.shutil, "which", lambda name: None
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                download_wasm(resource, _GUID, "t", tmp, timeout=5)
+        self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
+
+    def test_download_wasm_full_chain_muxes_mp4(self) -> None:
+        """Full WASM chain with mocked fetcher/decryptor/ffmpeg producing MP4."""
+
+        tmp = Path(self.enterContext(_tmp_dir()))
+
+        def fake_fetch(url: str, *, timeout: float, cancel_event=None) -> bytes:
+            if url.endswith("2000.m3u8"):
+                return b"#EXTM3U\nseg1.ts\nseg2.ts\n"
+            return b"encrypted-segment"
+
+        def fake_group(h5e_proj, names, out_ts, *, timeout, cancel_event=None):
+            out_ts.write_bytes("".join(names).encode())
+            return True
+
+        def fake_runner(cmd, *, timeout, cancel_event):
+            # the ffmpeg mux step writes the final mp4
+            if cmd and cmd[0] == "ffmpeg":
+                mp4 = Path(cmd[cmd.index(str(tmp)) if str(tmp) in cmd else -1])
+                mp4.write_bytes(b"muxed-video")
+                return 0, "", ""
+            return 0, "", ""
+
+        resource = {
+            "platform": "cctv",
+            "title": "老视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(cctv_download, "resolve_h5e_proj", lambda: Path("C:/h5e")), \
+                mock.patch.object(cctv_download, "_http_fetch_bytes", fake_fetch), \
+                mock.patch.object(cctv_download, "_wasm_decrypt_group", fake_group), \
+                mock.patch.object(cctv_download, "_run_with_cancel", fake_runner):
+            mp4 = download_wasm(resource, _GUID, "老视频", tmp, timeout=5)
+        self.assertEqual(mp4.name, "老视频.mp4")
+        self.assertEqual(mp4.read_bytes(), b"muxed-video")
+        # work dir cleaned up after success
+        self.assertFalse((tmp / f"{_GUID}_wasmwork").exists())
+
+    def test_downloader_rejects_wasm_output_failing_health_gate(self) -> None:
+        """A WASM fallback whose output still fails decode health is rejected."""
+
+        tmp = Path(self.enterContext(_tmp_dir()))
+
+        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event):
+            mp4 = job_dir / f"{title}.mp4"
+            mp4.write_bytes(b"garble")
+            return mp4
+
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
+            runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
+            health_checker=lambda path: 5000,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "老视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(cctv_download, "download_wasm", fake_wasm):
+            with self.assertRaises(DomainError) as ctx:
+                downloader.download(resource, "job7", "direct", threading.Event())
+        self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+        self.assertIn("WASM 降级体检失败", ctx.exception.message)
 
 
 class CctvInspectorTests(unittest.TestCase):

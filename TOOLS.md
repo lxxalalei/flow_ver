@@ -153,7 +153,9 @@ video               -> Download MP4          # 经 cctv-dl，guid 为下载键
 
 免登录。搜索双路：`ifsearch.php` 站内视频（叶子）+ `api.cntv.cn` 栏目目录（容器，A-Z 扫描后本地过滤）。单集/系列共用 `/YYYY/MM/DD/VID*.shtml` URL 形态，是否系列由页面真实剧集链接数（≥2）判定，不按 URL 猜测。画质上限 2000 档 720P。
 
-依赖本地 `cctv-dl` 二进制（CCTVVideoDownloader）：路径用环境变量 `CCTV_DL_EXE` 覆盖，画质用 `CCTV_QUALITY`（默认 0=最高档）；缺失时显式 `PROVIDER_UNAVAILABLE`。下载产物经 ffmpeg 全片解码体检（错误行 ≤100），坏文件删除重试至多 3 次。已知边界：2021 年老视频的 h5e 确定性解密失败本 MCP 不做 WASM 备用降级，如实报错提示人工处理。
+依赖本地 `cctv-dl` 二进制（CCTVVideoDownloader）：路径用环境变量 `CCTV_DL_EXE` 覆盖，画质用 `CCTV_QUALITY`（默认 0=最高档）；缺失时显式 `PROVIDER_UNAVAILABLE`。下载产物经 ffmpeg 全片解码体检（错误行 ≤100），坏文件删除重试至多 3 次。
+
+**老视频降级链**：2021 年及以前视频对 cctv-dl 存在已知确定性解密缺陷（产出乱码流），体检失败且重试仍失败后自动切换**官方 WASM worker** 重下：Python 并发拉 h5e 分片 → 分组并行 `node --import tsx` 解密（h5e_proj 工程，路径 `CCTV_H5E_PROJ` 覆盖）→ ffmpeg 封装 → 同体检门槛。m3u8 优先取视频自身 `h5e_url`（Inspect 提供），兜底模板可用 `CCTV_H5E_BASE` 覆盖。node / h5e_proj 缺失是显式失败，不静默跳过；下载结果带 `route`（cctv-dl / wasm）与体检数据。
 
 ## SmartEdu
 

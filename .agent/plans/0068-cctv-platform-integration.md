@@ -29,8 +29,9 @@ Download guid -> cctv-dl.exe -> MP4（720P 上限），ffmpeg 解码体检 + 重
 ## Non-goals
 
 - 不新增 MCP Tool；公共面保持 Search / Expand / Inspect / Download 不变。
-- 不集成 h5e WASM 备用解密（依赖 node + tsx + mediacrawler/h5e_proj）。
-  2021 年老视频的确定性解密失败如实报错并提示人工路径，不静默降级。
+- 不重写 cctv-dl 的 C++ 解密核心为纯 Python（h5e 算法 Python 移植 459 行
+  已存在且被弃用；生产级覆盖是 WASM 官方 worker 才解决的）。降级走
+  官方 WASM worker（node + h5e_proj），算法不自己重写。
 - 不为栏目列举编造未确认的 cntv 公共接口；栏目全集枚举走已验证的
   cctv-dl `list`（本地二进制，`CCTV_DL_EXE` 可覆盖路径）。
 - 不接 m.cctv.com / 央视新闻等非 tv.cctv.com 形态。
@@ -46,9 +47,19 @@ Download guid -> cctv-dl.exe -> MP4（720P 上限），ffmpeg 解码体检 + 重
    不假装平台不可用，也不静默跳过。
 4. 下载产物经 ffmpeg 全片解码体检（错误行 <=100 为干净），坏文件删除重试，
    最多 3 次；最终失败携带真实原因（rc / failed 分片数 / 体检错误数）。
-5. 无法解析 guid 的系列剧集不静默消失：以 URL 中的 VID 标识占位入候选，
+5. **老视频（2021 及以前，cctv-dl 确定性解密坏/乱码）自动降级官方 WASM
+   worker 重下**：Python 并发拉分片 → 分组并行 `node --import tsx` 解密 →
+   拼接 → ffmpeg 封装 → 同体检门槛。降级不静默：成功/失败都在结果里
+   携带路径（cctv-dl / wasm）与体检数据。
+6. WASM 的 m3u8 **优先取视频自身的 `h5e_url`**（getHttpVideoInfo manifest，
+   inspect 已存入 platform_signals）；为空才回退 `H5E_BASE` 模板
+   （`CCTV_H5E_BASE` 可覆盖，默认 mediacrawler 常量 `2000/0303000a/3/default`，
+   该模板通用性未确认，仅作兜底）。
+7. node / h5e_proj 缺失是显式失败（附 `CCTV_H5E_PROJ` 指引），不静默跳过；
+   `CCTV_H5E_PROJ` 默认 mediacrawler 的 h5e_proj，与 cctv-dl 同部署模式。
+8. 无法解析 guid 的系列剧集不静默消失：以 URL 中的 VID 标识占位入候选，
    后续 Inspect/Download 再补齐事实。
-6. 平台结构事实（接口、画质档位、系列页拓扑）记录在 TOOLS.md 平台节。
+9. 平台结构事实（接口、画质档位、系列页拓扑、降级链）记录在 TOOLS.md 平台节。
 
 ## Expected change surface
 
@@ -56,17 +67,20 @@ Download guid -> cctv-dl.exe -> MP4（720P 上限），ffmpeg 解码体检 + 重
   `iter_column`（cctv-dl list）、系列页链接提取与逐集解析助手。
 - `adapters/cctv_download.py`（新增）：exe 解析（env `CCTV_DL_EXE` + 默认
   mediacrawler 安装路径）、带取消的子进程运行、download_complete 事件解析、
-  ffmpeg 体检、`CctvVideoDownloader`。
+  ffmpeg 体检、`CctvVideoDownloader`；**WASM 降级链**（cctv-dl 确定性失败后
+  Python 拉分片 → node 分组解密 → 拼接 → ffmpeg → 体检），`CCTV_H5E_PROJ` /
+  `CCTV_H5E_BASE` env 覆盖。
 - `adapters/inspect_cctv.py`（新增）：栏目/系列 -> 容器指引（不可下载）；
-  单集 -> guid + 详情事实 + primary video/mp4 表示。
+  单集 -> guid + 详情事实 + primary video/mp4 表示（含 `h5e_url` 供降级）。
 - `adapters/resource_urls.py`：tv.cctv.com /lm/ -> column；
   /YYYY/MM/DD/VID*.shtml -> 视频。
 - `adapters/expansion.py`：`_expand_cctv` 路由。
 - `inspection_registry.py`、`acquisition/planner.py`（cctv-video spec）、
   `service.py`（import 平台识别 + provider 注册）。
 - 测试：`tests/test_cctv_platform.py`（离线：URL 识别、栏目/系列展开、
-  叶子错误、下载成功/体检失败重试/exe 缺失、检查器三形态）。
-- 文档：`TOOLS.md` 平台视图表 + CCTV 节。
+  叶子错误、下载成功/体检失败重试/exe 缺失、**WASM 降级成功 / node 缺失 /**
+  **h5e_url 优先**、检查器三形态）。
+- 文档：`TOOLS.md` 平台视图表 + CCTV 节（含降级链说明）。
 
 ## Verification
 
