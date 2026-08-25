@@ -92,7 +92,7 @@ class WebMaterializerTests(unittest.TestCase):
         self.assertEqual(1, readable.casefold().count("<body"))
         self.assertIn('class="reader-bar"', readable)
         self.assertIn('class="reader-main"', readable)
-        self.assertIn("网页资料 · 清洗版", readable)
+        self.assertIn("网页资料", readable)
         self.assertIn("example.org", readable)
         self.assertIn("Reader base theme: Simple.css 2.3.7", readable)
         self.assertIn("MIT License", readable)

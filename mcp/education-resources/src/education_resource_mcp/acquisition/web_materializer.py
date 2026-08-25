@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from dataclasses import dataclass
 import hashlib
 import html as html_module
@@ -45,45 +46,119 @@ _READER_TEMPLATE = "clean-reader-v2"
 _IMAGE_FETCH_ATTEMPTS = 3
 _VENDOR_DIR = Path(__file__).with_name("vendor")
 _READER_OVERRIDES = """
-body {
-  grid-template-columns: 1fr min(52rem, calc(100% - 2rem)) 1fr;
-  font-size: 17px;
-  line-height: 1.75;
+/* ===== tokens: classic Chinese book-page reading =====
+   Light = rice-paper ground, ink text, ochre/seal accents.
+   Dark  = midnight ink ground, warm paper-text, amber accents.
+   Components reference tokens only — never literals inside media blocks. */
+:root {
+  --paper: #FBF6EC;
+  --paper-deep: #F4ECDB;
+  --ink: #2B2723;
+  --ink-soft: #6E6454;
+  --seal: #A63A2B;
+  --seal-text: #FBF6EC;
+  --rule: #E0D5BC;
+  --code-bg: #F2EADA;
+  --bg: var(--paper);
+  --text: var(--ink);
+  --text-light: var(--ink-soft);
+  --border: var(--rule);
+  --accent-bg: var(--paper-deep);
+  --accent: var(--seal);
+  --link: #8A4B26;
+  --sans-font: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", system-ui, sans-serif;
+  --serif-font: "Songti SC", "Noto Serif SC", "Source Han Serif SC", STSong, SimSun, Georgia, serif;
+  --mono-font: Consolas, "Cascadia Code", "Noto Sans Mono CJK SC", monospace;
 }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1B1916;
+    --paper-deep: #252119;
+    --ink: #E8E0CF;
+    --ink-soft: #A79E8A;
+    --seal: #C96A52;
+    --seal-text: #1B1916;
+    --rule: #3B352A;
+    --code-bg: #272218;
+    --bg: var(--paper);
+    --text: var(--ink);
+    --text-light: var(--ink-soft);
+    --border: var(--rule);
+    --accent-bg: var(--paper-deep);
+    --accent: var(--seal);
+    --link: #C9A06B;
+  }
+}
+
+/* ===== page ===== */
+body {
+  grid-template-columns: 1fr min(38em, calc(100% - 3rem)) 1fr;
+  font-family: var(--serif-font);
+  font-size: 18px;
+  line-height: 1.95;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ===== source bar ===== */
 body > header.reader-bar {
-  background: var(--accent-bg);
-  border-bottom: var(--border-width) solid var(--border);
-  padding: .85rem 1rem;
-  text-align: left;
+  background: var(--paper-deep);
+  border-bottom: 1px solid var(--rule);
+  padding: .9rem 0;
 }
 .reader-meta {
   align-items: center;
   display: flex;
-  gap: .75rem;
+  gap: .8rem;
   margin: 0 auto;
-  max-width: 52rem;
+  max-width: 38em;
   min-width: 0;
+  padding: 0 1.5rem;
 }
 .reader-badge {
-  font-size: .84rem;
+  align-items: center;
+  background: var(--seal);
+  color: var(--seal-text);
+  display: inline-flex;
+  font-family: var(--sans-font);
+  font-size: .78rem;
   font-weight: 700;
-  letter-spacing: .02em;
+  gap: .35rem;
+  letter-spacing: .14em;
+  line-height: 1;
+  padding: .38rem .6rem;
   white-space: nowrap;
+}
+.reader-badge::before {
+  content: "文";
+  font-family: var(--serif-font);
+  font-size: .85rem;
+  font-weight: 400;
 }
 .reader-domain {
   color: var(--text-light);
-  font-size: .9rem;
+  font-family: var(--sans-font);
+  font-size: .82rem;
+  letter-spacing: .04em;
   overflow-wrap: anywhere;
 }
 .reader-source-link {
-  font-size: .9rem;
+  color: var(--link);
+  font-family: var(--sans-font);
+  font-size: .82rem;
   margin-inline-start: auto;
   text-decoration: none;
   white-space: nowrap;
 }
+.reader-source-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ===== body ===== */
 .reader-main {
   min-width: 0;
-  padding-top: 2rem;
+  padding-top: 2.4rem;
 }
 .reader-main article {
   border: 0;
@@ -92,67 +167,153 @@ body > header.reader-bar {
 }
 .reader-main section {
   border: 0;
-  margin: 2.75rem 0;
+  margin: 2.6rem 0;
   padding: 0;
 }
 .reader-main h1:first-child {
-  margin-top: .25rem;
+  margin-top: .2rem;
+}
+.reader-main h1,
+.reader-main h2,
+.reader-main h3,
+.reader-main h4 {
+  font-family: var(--serif-font);
+  font-weight: 700;
+  letter-spacing: .03em;
+  line-height: 1.45;
+  text-wrap: balance;
+}
+.reader-main h1 {
+  font-size: 1.7rem;
+  padding-bottom: .7rem;
+  position: relative;
+}
+.reader-main h1::after {
+  background: var(--seal);
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  top: 100%;
+  width: 3.2rem;
+}
+.reader-main h2 {
+  font-size: 1.3rem;
+  margin-top: 2.4rem;
+}
+.reader-main h3 {
+  font-size: 1.12rem;
+}
+.reader-main p {
+  margin: 1.05em 0;
+}
+.reader-main a {
+  color: var(--link);
+  overflow-wrap: anywhere;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 .reader-main img {
-  box-shadow: 0 10px 30px rgb(0 0 0 / 10%);
+  border-radius: 2px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 14%);
   display: block;
-  margin: 1.75rem auto;
+  margin: 1.9rem auto;
+  max-width: 100%;
 }
-.reader-image-missing {
-  background: var(--accent-bg);
-  border: var(--border-width) dashed var(--border);
+.reader-main blockquote {
+  border-left: 3px solid var(--seal);
   color: var(--text-light);
-  display: block;
-  margin: 1.75rem 0;
-  padding: .85rem 1rem;
-  text-align: center;
+  font-style: normal;
+  margin: 1.4rem 0;
+  padding: .1rem 1.1rem;
+}
+.reader-main code,
+.reader-footer code {
+  background: var(--code-bg);
+  border-radius: 3px;
+  font-family: var(--mono-font);
+  font-size: .88em;
+  padding: .12em .4em;
+}
+.reader-main pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-family: var(--mono-font);
+  font-size: .88em;
+  line-height: 1.7;
+  overflow-x: auto;
+  padding: 1rem 1.1rem;
+}
+.reader-main pre code {
+  background: transparent;
+  padding: 0;
 }
 .reader-main table {
   display: block;
+  font-family: var(--sans-font);
+  font-size: .92em;
   max-width: 100%;
   overflow-x: auto;
 }
-.reader-main a {
-  overflow-wrap: anywhere;
+.reader-main th {
+  background: var(--paper-deep);
+  font-weight: 700;
 }
-.reader-footer {
-  margin-top: 3rem;
-}
-.reader-footer p {
-  margin: .4rem auto;
-  max-width: 52rem;
+.reader-image-missing {
+  background: var(--paper-deep);
+  border: 1px dashed var(--rule);
+  color: var(--text-light);
+  display: block;
+  font-family: var(--sans-font);
+  font-size: .88rem;
+  margin: 1.75rem 0;
+  padding: .9rem 1.1rem;
+  text-align: center;
 }
 .reader-empty {
-  background: var(--accent-bg);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--standard-border-radius);
-  padding: 1rem 1.25rem;
+  background: var(--paper-deep);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1.1rem 1.3rem;
 }
+
+/* ===== footer ===== */
+.reader-footer {
+  border-top: 1px solid var(--rule);
+  margin-top: 3.2rem;
+  padding-top: 1.1rem;
+}
+.reader-footer p {
+  color: var(--text-light);
+  font-family: var(--sans-font);
+  font-size: .82rem;
+  margin: .35rem auto;
+  max-width: 38em;
+  padding: 0 1.5rem;
+}
+
 @media (prefers-color-scheme: dark) {
-  .reader-main img { box-shadow: none; }
+  .reader-main img { box-shadow: 0 6px 24px rgb(0 0 0 / 45%); }
 }
 @media only screen and (width <= 720px) {
   body {
-    grid-template-columns: 1fr min(52rem, calc(100% - 1.25rem)) 1fr;
-    font-size: 16px;
-    line-height: 1.7;
+    grid-template-columns: 1fr min(38em, calc(100% - 1.4rem)) 1fr;
+    font-size: 16.5px;
+    line-height: 1.85;
   }
+  .reader-meta, .reader-footer p { padding: 0 .7rem; }
   .reader-domain { display: none; }
-  .reader-main { padding-top: 1.25rem; }
+  .reader-main { padding-top: 1.6rem; }
 }
 @media print {
   body > header.reader-bar {
     background: transparent;
     border-bottom: 1px solid #bbb;
-    padding: 0 0 .5rem;
+    padding: 0 0 .6rem;
   }
   .reader-source-link { display: none; }
-  .reader-main { padding-top: .5rem; }
+  .reader-main { padding-top: .6rem; }
 }
 """.strip()
 
@@ -388,13 +549,20 @@ def _embed_reader_images(
     )
 
 
-def _readable_document(fragment: str, *, title: str, source_url: str) -> str:
+def _readable_document(
+    fragment: str,
+    *,
+    title: str,
+    source_url: str,
+    generated_at: str = "",
+) -> str:
     """Render cleaned Trafilatura HTML inside the stable Reader shell."""
 
     safe_title = html_module.escape(title or "教育资源", quote=False)
     safe_url = html_module.escape(source_url, quote=True)
     hostname = urlsplit(source_url).hostname or source_url
     safe_hostname = html_module.escape(hostname, quote=False)
+    safe_generated = html_module.escape(generated_at, quote=False)
     content = _cleaned_body(fragment)
     if not content:
         content = (
@@ -415,21 +583,28 @@ def _readable_document(fragment: str, *, title: str, source_url: str) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f'<meta http-equiv="Content-Security-Policy" content="{html_module.escape(csp, quote=True)}">\n'
         f"<title>{safe_title}</title>\n"
+        "<!--\n"
+        f"  来源: {safe_url}\n"
+        f"  生成: {safe_generated}\n"
+        f"  模板: {_READER_TEMPLATE} ({_READER_THEME} {_READER_THEME_VERSION})\n"
+        "  本文件为自包含离线阅读页；原始响应见同目录 source.html。\n"
+        "-->\n"
         "<style>\n"
         f"{_reader_css()}"
         "</style>\n"
         "</head>\n<body>\n"
         '<header class="reader-bar">\n'
         '<div class="reader-meta">\n'
-        '<span class="reader-badge">网页资料 · 清洗版</span>\n'
+        '<span class="reader-badge">网页资料</span>\n'
         f'<span class="reader-domain">{safe_hostname}</span>\n'
-        f'<a class="reader-source-link" href="{safe_url}">查看原网页 ↗</a>\n'
+        f'<a class="reader-source-link" href="{safe_url}">原网页</a>\n'
         "</div>\n</header>\n"
         '<main class="reader-main" id="content">\n'
         f"{content}\n"
         "</main>\n"
         '<footer class="reader-footer">\n'
-        '<p>由网页正文清洗结果生成 · 原始响应保存在 <code>source.html</code></p>\n'
+        "<p>由网页正文清洗结果生成 · 本文件可离线独立打开 · 原始响应保存在 "
+        "<code>source.html</code></p>\n"
         "</footer>\n"
         "</body>\n</html>\n"
     )
@@ -574,10 +749,14 @@ class WebMaterializer:
                 "正文抽取未得到可读内容；原始 HTML 已保存为 `source.html`。\n\n"
                 f"来源：{response.url}\n"
             )
+        generated_at = datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        ).replace("+00:00", "Z")
         readable = _readable_document(
             readable_fragment,
             title=title,
             source_url=response.url,
+            generated_at=generated_at,
         )
         metadata = {
             "schema_version": "web-materialization-v2",
