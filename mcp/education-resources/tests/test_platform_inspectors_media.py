@@ -5,7 +5,7 @@ import unittest
 
 from education_resource_mcp.adapters.inspect_bilibili import BilibiliInspector
 from education_resource_mcp.adapters.inspect_smartedu import SmartEduInspector
-from education_resource_mcp.adapters.smartedu_download import (
+from education_resource_mcp.adapters.smartedu_resource import (
     _detail_api_url,
     _resolve_content,
 )

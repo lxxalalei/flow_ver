@@ -1,12 +1,10 @@
 # 计划管理规范
 
-## 当前唯一执行路线
+## 当前执行路线
 
-- 主计划：[0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md)，统一公共能力为 Search / Expand / Inspect / Download，并完成 active 文档与验证收口。
-- 验收子计划：[0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md)，统一承接真实 OpenClaw、真实平台、Session 与 Job durability 证据。
-- 专项子计划：[0068-cctv-platform-integration.md](0068-cctv-platform-integration.md)，只在同一公共能力面内接入 CCTV，不定义第二条架构路线。
+- 当前没有未完成的 active 实施计划。0072 的平台 Expand 与 SmartEdu 内部依赖边界收敛已经完成并归档。
 
-0058、0060、0061、0062、0063、0064 已归档；其中尚未完成的真实验收责任已合并到 0028。它们正文中的旧 Tool/Batch 术语只代表当时上下文，不是当前契约。
+既有实现、CCTV 专项、HTML Design、SmartEdu 文件资源与暂未执行的真实平台验收计划均已退出顶层；它们只作为归档证据或后续真实验收清单。新的工作开始前应建立一份唯一 active 计划，避免并行路线漂移。
 
 发生冲突时以运行时 Tool schema 为机器事实、以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。不要从旧计划恢复另一条公共能力面。
 

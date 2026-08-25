@@ -75,7 +75,7 @@ Platform Search / Inspect
 ## 后续入口
 
 - 当前执行：[`0037 获取状态链简化`](../0037-acquisition-state-simplification.md)
-- 真实平台/Agent 验收：[`0028 Real OpenClaw and Real Platform E2E`](../0028-real-openclaw-platform-e2e.md)
+- 真实平台/Agent 验收：[`0028 Real OpenClaw and Real Platform E2E`](0028-real-openclaw-platform-e2e.md)
 - 长期路线：[`../../../docs/DEVELOPMENT_PLAN.md`](../../../docs/DEVELOPMENT_PLAN.md)
 
 0036 的原始详细内容保留在 Git 历史中，不再作为 current execution authority。

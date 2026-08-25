@@ -98,7 +98,7 @@ class SmartEduTextbookIteratorTests(unittest.TestCase):
 
         summary: dict = {}
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_cdn_json",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_cdn_json",
             side_effect=fetch,
         ):
             resources = list(expand_resource(self.provider, _target(), summary=summary))
@@ -139,7 +139,7 @@ class SmartEduTextbookIteratorTests(unittest.TestCase):
 
         summary: dict = {}
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_cdn_json",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_cdn_json",
             side_effect=fetch,
         ):
             resources = list(expand_resource(self.provider, _target(), summary=summary))
@@ -152,7 +152,7 @@ class SmartEduTextbookIteratorTests(unittest.TestCase):
         failure = HTTPError("https://cdn.invalid", 503, "unavailable", {}, None)
         summary: dict = {}
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_cdn_json",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_cdn_json",
             side_effect=failure,
         ):
             with self.assertRaises(HTTPError):
@@ -191,7 +191,7 @@ class SmartEduTextbookJobTests(unittest.TestCase):
         started = start_expand(self.service, source_url=TEXTBOOK_URL)
         directory = self.root / "jobs" / started["job_id"]
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_cdn_json",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_cdn_json",
             side_effect=fetch,
         ):
             self.assertEqual(0, run_expand(directory, self.service))

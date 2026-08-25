@@ -21,7 +21,7 @@ from education_resource_mcp.acquisition.router import (
     ProviderRegistration,
 )
 from education_resource_mcp.adapters.inspect_smartedu import SmartEduInspector
-from education_resource_mcp.adapters.smartedu_download import (
+from education_resource_mcp.adapters.smartedu_resource import (
     _detail_api_url,
     _find_files,
     _resolve_content,

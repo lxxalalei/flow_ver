@@ -1,6 +1,6 @@
 # 0063 — 清洗网页 Reader HTML 模板
 
-> 处置：completed/superseded。当前 Generic Web 事实以 [`docs/CURRENT_ARCHITECTURE.md`](../../../docs/CURRENT_ARCHITECTURE.md) 为准；剩余真实页面验收已并入 [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md)。
+> 处置：completed/superseded。当前 Generic Web 事实以 [`docs/CURRENT_ARCHITECTURE.md`](../../../docs/CURRENT_ARCHITECTURE.md) 为准；剩余真实页面验收已并入 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md)。
 
 - 状态：in_progress
 - 创建日期：2026-08-20

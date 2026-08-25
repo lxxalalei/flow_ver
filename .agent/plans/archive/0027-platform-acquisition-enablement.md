@@ -5,7 +5,7 @@
 - 完成日期：2026-08-11
 - 范围：`mcp/education-resources` 中现有 Bilibili、Douyin、Ximalaya、Anna's Archive 下载实现与通用浏览器捕获机制的正式能力接入
 - 前置计划：[`0025 Platform Capability Contract Alignment`](0025-platform-capability-contract-alignment.md)（completed）
-- 后续验收：[`0028 Real OpenClaw and Real Platform E2E`](../0028-real-openclaw-platform-e2e.md)
+- 后续验收：[`0028 Real OpenClaw and Real Platform E2E`](0028-real-openclaw-platform-e2e.md)
 - 实现基线：`4c7bdb9`（已推送至 `origin/codex/growth-resource-taxonomy-rework`）
 
 ## 目标

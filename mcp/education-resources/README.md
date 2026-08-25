@@ -249,6 +249,10 @@ src/education_resource_mcp/
 ├── sessions.py            # 单一 SessionStore
 ├── windows_dpapi.py
 ├── adapters/
+│   ├── expansion.py          # 仅做平台 Expand 路由
+│   ├── *_expand.py           # 平台专属展开实现
+│   ├── smartedu_resource.py  # SmartEdu 共享纯资源事实
+│   └── smartedu_download.py  # SmartEdu 网络与文件物化
 ├── acquisition/
 │   ├── web_fetch.py
 │   └── web_materializer.py

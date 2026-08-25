@@ -1,6 +1,6 @@
 # 0060 — Resource 多文件自然交付与 Skill-first 批量获取收敛
 
-> 处置：superseded by [0067-resource-capability-surface-unification.md](../0067-resource-capability-surface-unification.md)。多文件自然交付继续有效；旧 Batch 公共面不再有效，剩余真实验收已并入 [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md)。
+> 处置：superseded by [0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md)。多文件自然交付继续有效；旧 Batch 公共面不再有效，剩余真实验收已并入 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md)。
 
 - 状态：in_progress
 - 创建日期：2026-08-19

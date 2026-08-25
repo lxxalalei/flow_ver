@@ -11,11 +11,19 @@
 
 ## 当前顶层计划
 
-当前保留三份直接跟踪计划：
+当前没有未完成的顶层计划；新的非平凡实施工作开始时只建立一份 active 路线。
 
-- [0067-resource-capability-surface-unification.md](../0067-resource-capability-surface-unification.md) — `in_progress`，唯一主计划，统一公共能力面与剩余实现缺口；
-- [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) — `in_progress`，0067 的真实 OpenClaw / 平台 / Session / Job 验收子计划；
-- [0068-cctv-platform-integration.md](../0068-cctv-platform-integration.md) — `in_progress`，同一公共能力面下的 CCTV 专项。
+## 2026-08-26 路线收口
+
+| 文件 | 原状态 | 归档说明 / 剩余事项 |
+| --- | --- | --- |
+| [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) | in_progress | 实现计划已退出；真实平台/OpenClaw 验收仍未执行，保留为后续证据清单，不与当前结构重构并行激活 |
+| [0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md) | in_progress | 公共能力收敛主体、LibGen、SmartEdu 文件身份和 schema 回归均已由后续提交完成；真实验收事实以 0028 历史清单为准 |
+| [0068-cctv-platform-integration.md](0068-cctv-platform-integration.md) | in_progress | 已被 0069 的自研下载链和当前 CCTV 实现替代 |
+| [0069-cctv-native-python-rewrite.md](0069-cctv-native-python-rewrite.md) | in_progress | 正文阶段已经完成，状态未及时收口；当前实现与依赖边界以 active 架构文档为准 |
+| [0070-adaptive-html-design.md](0070-adaptive-html-design.md) | completed | 功能、Skill、测试与视觉验收完成 |
+| [0071-smartedu-course-file-resources.md](0071-smartedu-course-file-resources.md) | completed | course 文件级 Expand/Inspect/Download 与全量回归完成 |
+| [0072-platform-expansion-boundaries.md](0072-platform-expansion-boundaries.md) | completed | 六个平台 Expand 已回到平台模块，集中 `expansion.py` 仅保留路由；SmartEdu 纯资源事实已由 Inspector/Expander/Downloader 共用 |
 
 ## 2026-08-25 统一路线归档
 

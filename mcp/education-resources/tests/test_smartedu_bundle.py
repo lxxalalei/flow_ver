@@ -19,6 +19,8 @@ from education_resource_mcp.adapters import smartedu_download as sd
 from education_resource_mcp.adapters.smartedu_download import (
     SmartEduDownloader,
     _SmartEduHttpClient,
+)
+from education_resource_mcp.adapters.smartedu_resource import (
     _detail_api_url,
     _find_files,
     _resolve_content,

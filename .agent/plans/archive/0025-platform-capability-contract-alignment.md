@@ -298,7 +298,7 @@ eligibility/provider outcome 引用，不得由各模块复制第二套状态。
   Archive。Legacy Outcome 缺少合法 execution digest 时，公共 `resource_job_status` 省略
   `execution`，不会输出伪造值或字符串 `"None"`。
 - 真实平台合法凭据、认证 readiness、逐平台 Search -> Acquire -> Archive -> Recover 矩阵属于
-  [`0028`](../0028-real-openclaw-platform-e2e.md)；benchmark 与 release gate 属于
+  [`0028`](0028-real-openclaw-platform-e2e.md)；benchmark 与 release gate 属于
   [`0029`](../0029-retrieval-benchmark-release-gate.md)，未被伪装为 0025 已完成。
 - 剩余非阻塞风险：`RawMcpClient` 的 `select.select(TextIOWrapper)` 仍有 POSIX 文本预读和原生
   Windows pipe 兼容风险；runner 信号 smoke 尚未固化为自动测试；OpenClaw `mcp status` 存在

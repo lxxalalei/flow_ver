@@ -1,6 +1,6 @@
 # 0062 — Bilibili 合集/系列展开
 
-> 处置：superseded by [0067-resource-capability-surface-unification.md](../0067-resource-capability-surface-unification.md)。Bilibili collection 现在通过通用 `resource_expand` 暴露；剩余真实 smoke 已并入 [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md)。
+> 处置：superseded by [0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md)。Bilibili collection 现在通过通用 `resource_expand` 暴露；剩余真实 smoke 已并入 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md)。
 
 - 状态：in_progress
 - 创建日期：2026-08-20

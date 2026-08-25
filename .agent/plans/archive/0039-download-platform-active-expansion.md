@@ -5,7 +5,7 @@
 - 完成日期：2026-08-14
 - 分支：`codex/growth-resource-taxonomy-rework`
 - 优先级：已完成的工程接入切片；真实平台验收继续由 0028 跟踪
-- 关联验收：[`0028 Real OpenClaw and Real Platform E2E`](../0028-real-openclaw-platform-e2e.md)，由用户执行真实 OpenClaw/平台测试
+- 关联验收：[`0028 Real OpenClaw and Real Platform E2E`](0028-real-openclaw-platform-e2e.md)，由用户执行真实 OpenClaw/平台测试
 
 ## Objective
 

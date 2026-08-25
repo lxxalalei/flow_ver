@@ -3,7 +3,7 @@
 - 交接状态：0025 `completed`；下一阶段 0028 `pending`
 - 交接日期：2026-08-10
 - 已完成计划：[0025 Platform Capability Contract Alignment](0025-platform-capability-contract-alignment.md)
-- 下一阶段：[0028 Real OpenClaw and Real Platform E2E](../0028-real-openclaw-platform-e2e.md)
+- 下一阶段：[0028 Real OpenClaw and Real Platform E2E](0028-real-openclaw-platform-e2e.md)
 - 后续发布门禁：[0029 Retrieval Benchmark Release Gate](../0029-retrieval-benchmark-release-gate.md)
 - 工作区：`/home/admin_quanxiao/projects/quanxiao/collector_flow_ver`
 - 分支：`codex/growth-resource-taxonomy-rework`

@@ -13,22 +13,24 @@ from ..inspection import INSPECTOR_VERSION, InspectionResult
 from ..policy import NetworkPolicy, PolicyViolation
 from .inspect_bilibili import _PlatformWebInspector
 from .smartedu_download import (
-    _ACTIVE_PRIMARY_FORMATS,
-    _COURSE_TYPES,
     _SMARTEDU_DETAIL_HOSTS,
     _SmartEduHttpClient,
     _close_response,
+    _raise_for_http_status,
+    _smartedu_headers,
+)
+from .smartedu_resource import (
+    _ACTIVE_PRIMARY_FORMATS,
+    _COURSE_TYPES,
     _detail_api_url,
     _find_files,
     _primary_candidate,
-    _raise_for_http_status,
     _resolve_content,
     _role_for_candidate,
     _select_course_files,
     _smartedu_file_key,
     _smartedu_file_key_from_resource,
     _smartedu_representation_id,
-    _smartedu_headers,
 )
 
 

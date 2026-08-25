@@ -291,6 +291,10 @@ mcp/education-resources/
     ├── sessions.py
     ├── windows_dpapi.py
     ├── adapters/
+    │   ├── expansion.py          # 仅按平台分派 Expand
+    │   ├── *_expand.py           # 各平台展开协议与分页实现
+    │   ├── smartedu_resource.py  # SmartEdu 纯身份/关系/文件选择事实
+    │   └── smartedu_download.py  # SmartEdu 网络与文件物化
     └── acquisition/
         ├── web_fetch.py
         ├── web_materializer.py

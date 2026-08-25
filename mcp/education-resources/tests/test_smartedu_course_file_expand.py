@@ -86,12 +86,12 @@ def _target() -> dict:
 class SmartEduCourseFileExpandTests(unittest.TestCase):
     def test_file_keys_ignore_signed_urls_and_detail_order(self) -> None:
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_course_detail",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_course_detail",
             return_value=("course-1", "quality_course", _detail("first")),
         ):
             first = list(expand_resource(_Provider(), _target()))
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_course_detail",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_course_detail",
             return_value=(
                 "course-1",
                 "quality_course",
@@ -116,7 +116,7 @@ class SmartEduCourseFileExpandTests(unittest.TestCase):
     def test_unstable_file_is_reported_but_not_emitted(self) -> None:
         summary: dict = {}
         with mock.patch(
-            "education_resource_mcp.adapters.expansion._smartedu_course_detail",
+            "education_resource_mcp.adapters.smartedu_expand._smartedu_course_detail",
             return_value=(
                 "course-1",
                 "quality_course",
@@ -152,7 +152,7 @@ class SmartEduCourseFileExpandTests(unittest.TestCase):
                     resource_id=remembered_course[0]["resource_id"],
                 )
                 with mock.patch(
-                    "education_resource_mcp.adapters.expansion._smartedu_course_detail",
+                    "education_resource_mcp.adapters.smartedu_expand._smartedu_course_detail",
                     return_value=("course-1", "quality_course", _detail("secret")),
                 ):
                     directory = settings.jobs_dir / started["job_id"]

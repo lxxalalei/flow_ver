@@ -82,7 +82,7 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
             "source_url": "https://www.ximalaya.com/zhubo/12345",
         }
         with mock.patch(
-            "education_resource_mcp.adapters.expansion.urlopen_with_fallback",
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
             side_effect=transport,
         ):
             results = list(expand_resource(_Provider(), target))
@@ -133,7 +133,7 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
             "source_url": "https://www.ximalaya.com/zhubo/12345",
         }
         with mock.patch(
-            "education_resource_mcp.adapters.expansion.urlopen_with_fallback",
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
             side_effect=lambda request, *, timeout: _Response(payloads.pop(0)),
         ):
             with self.assertRaises(DomainError) as ctx:
@@ -148,7 +148,7 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
             "source_url": "https://www.ximalaya.com/zhubo/12345",
         }
         with mock.patch(
-            "education_resource_mcp.adapters.expansion.urlopen_with_fallback",
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
             return_value=_Response([]),
         ):
             with self.assertRaises(DomainError) as ctx:

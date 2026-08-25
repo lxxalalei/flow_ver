@@ -1,6 +1,6 @@
 # 0058 — 系统收敛、能力接通与资源保真
 
-> 处置：superseded by [0067-resource-capability-surface-unification.md](../0067-resource-capability-surface-unification.md)。未完成的真实验收已并入 [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md)。
+> 处置：superseded by [0067-resource-capability-surface-unification.md](0067-resource-capability-surface-unification.md)。未完成的真实验收已并入 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md)。
 
 - 状态：in_progress
 - 创建日期：2026-08-18
@@ -151,7 +151,7 @@ BoundedWebFetcher
 
 ### AC-06 — 真实 OpenClaw 闭环
 
-仍需用户本机实际完成，详细队列以 [0028-real-openclaw-platform-e2e.md](../0028-real-openclaw-platform-e2e.md) 为主验收入口；局部真实问题可由对应 active 计划补充记录：
+仍需用户本机实际完成，详细队列以 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) 为主验收入口；局部真实问题可由对应 active 计划补充记录：
 
 1. Host Web 找到已接入平台 URL → Import → 专门 Inspector/Downloader → 文件；
 2. SmartEdu 已保存 session 环境下公共 Search 仍匿名，并能区分真实 AUTH_REQUIRED 与 IP/网络出口限制；SmartEdu 课程多文件自然交付由 `0060-resource-multifile-delivery.md` 跟踪；
