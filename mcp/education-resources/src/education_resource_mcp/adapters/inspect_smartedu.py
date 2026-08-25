@@ -25,6 +25,8 @@ from .smartedu_download import (
     _resolve_content,
     _role_for_candidate,
     _select_course_files,
+    _smartedu_file_key,
+    _smartedu_file_key_from_resource,
     _smartedu_representation_id,
     _smartedu_headers,
 )
@@ -256,6 +258,7 @@ class SmartEduInspector(_PlatformWebInspector):
             payload["failures"] = [*payload.get("failures", []), failure]
         else:
             assert detail is not None and content_type is not None
+            file_key = _smartedu_file_key_from_resource(resource)
             active_files = [
                 candidate
                 for candidate in _find_files(detail)
@@ -272,15 +275,41 @@ class SmartEduInspector(_PlatformWebInspector):
                 content_type,
                 supported_formats=_ACTIVE_PRIMARY_FORMATS,
             )
+            course_role = ""
+            if file_key and primary is not None:
+                content_id, _resolved_type = _resolve_content(
+                    str(resource.get("source_url") or "")
+                )
+                matches = [
+                    candidate
+                    for candidate in selected
+                    if _smartedu_file_key(content_id, candidate) == file_key
+                ]
+                if len(matches) == 1:
+                    course_role = _role_for_candidate(
+                        matches[0],
+                        primary_key=str(primary.get("item_key") or ""),
+                        content_type=content_type,
+                    )
+                    selected = matches
+                    primary = matches[0]
+                else:
+                    primary = None
             if primary is None:
                 payload["resolution_status"] = "partial"
-                resolved["availability"] = {"status": "unknown"}
+                resolved["availability"] = {
+                    "status": "unavailable" if file_key else "unknown"
+                }
                 payload["failures"] = [
                     *payload.get("failures", []),
                     self._failure(
                         resource,
-                        "CONTENT_VALIDATION_FAILED",
-                        "SmartEdu 资源详情未提供受支持的主文件",
+                        "RESOURCE_NOT_FOUND" if file_key else "CONTENT_VALIDATION_FAILED",
+                        (
+                            "SmartEdu 课程中已找不到该文件"
+                            if file_key
+                            else "SmartEdu 资源详情未提供受支持的主文件"
+                        ),
                         False,
                     ),
                 ]
@@ -288,15 +317,21 @@ class SmartEduInspector(_PlatformWebInspector):
                 # 非课程资源继续只公开主文件；课程资源则公开自然交付包中的
                 # 主视频/主文件 + 文档附件 + 伴随音频。一个 Resource 可以自然
                 # 物化成多个文件，不要求 Agent 先猜一个扩展名。
-                if content_type not in _COURSE_TYPES:
+                if file_key:
+                    selected = [primary]
+                elif content_type not in _COURSE_TYPES:
                     selected = [primary]
                 primary_key = str(primary.get("item_key") or "")
                 concrete: list[dict[str, Any]] = []
                 for candidate in selected:
-                    role = _role_for_candidate(
-                        candidate,
-                        primary_key=primary_key,
-                        content_type=content_type,
+                    role = (
+                        "primary"
+                        if file_key
+                        else _role_for_candidate(
+                            candidate,
+                            primary_key=primary_key,
+                            content_type=content_type,
+                        )
                     )
                     scope = "primary_resource" if role == "primary" else "representation"
                     representation = self._representation(
@@ -326,7 +361,21 @@ class SmartEduInspector(_PlatformWebInspector):
                     primary_representation = next(
                         item for item in concrete if item.get("role") == "primary"
                     )
-                    if content_type in _COURSE_TYPES:
+                    if file_key:
+                        resolved["resource_type"] = {
+                            "document": "document",
+                            "video": "video",
+                            "audio": "audio",
+                        }[primary_representation["kind"]]
+                        metadata = dict(resolved.get("metadata") or {})
+                        metadata.update(
+                            {
+                                "file_key": file_key,
+                                "course_role": course_role,
+                            }
+                        )
+                        resolved["metadata"] = metadata
+                    elif content_type in _COURSE_TYPES:
                         resolved["resource_type"] = "course"
                     else:
                         resolved["resource_type"] = {

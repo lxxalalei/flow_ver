@@ -269,7 +269,7 @@ def run_expand(directory: Path, service: Any = None) -> int:
             cancel_event=cancel,
             summary=summary,
         )
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str]] = set()
         with results_path.open("w", encoding="utf-8") as handle:
             for resource in iterator:
                 if cancel.is_set():
@@ -281,7 +281,15 @@ def run_expand(directory: Path, service: Any = None) -> int:
                 title = str(resource.get("title") or "").strip()
                 if not url or not title:
                     continue
-                key = (platform, url)
+                metadata = resource.get("metadata")
+                signals = (
+                    metadata.get("platform_signals")
+                    if isinstance(metadata, Mapping)
+                    and isinstance(metadata.get("platform_signals"), Mapping)
+                    else {}
+                )
+                child_key = str(signals.get("file_key") or "").strip()
+                key = (platform, url, child_key)
                 if key in seen:
                     continue
                 seen.add(key)

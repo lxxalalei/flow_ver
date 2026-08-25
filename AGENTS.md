@@ -94,9 +94,9 @@ Skill 不负责复制 MCP 参数表、返回字段、Provider 内部实现、Job
 
 `education-resources` 是能力和 IO 数据面，不是资源工作流后端。
 
-当前 11 个 Tool 分为两组：
+当前 12 个 Tool 分为两组：
 
-资源能力：Search、Expand、Import URL、Inspect、Download、Job Status/Cancel/Read、Archive。
+资源能力：Search、Expand、Import URL、Inspect、Download、Job Status/Cancel/Read、HTML Design、Archive。
 
 Session 辅助能力：Session Status、Session Manage（save/delete）。
 
@@ -109,6 +109,8 @@ Session 辅助能力：Session Status、Session Manage（save/delete）。
 - 不持久化 Flow、Selection、Plan、Asset、Outcome 或证明链。
 
 用户已经明确选择资源并要求下载时，可直接调用下载能力，不增加 `prepare -> confirm -> start` 形式化二次确认。成功与否只依据真实 Job/文件结果。
+
+HTML Design 只在用户明确要求视觉优化时使用。Agent 依据有界设计上下文产生 DesignSpec；MCP 必须原样保留完整清洗正文并同步真实文件记录，不允许模型正文替代 `content.md`。
 
 Expand 的读取分页只控制单次 Tool Result，不得变成完整枚举的数据上限。平台枚举必须依据真实终止信号，不得偷偷增加条目或分片上限。
 

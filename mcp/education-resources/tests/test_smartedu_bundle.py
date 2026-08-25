@@ -22,6 +22,8 @@ from education_resource_mcp.adapters.smartedu_download import (
     _detail_api_url,
     _find_files,
     _resolve_content,
+    _select_course_files,
+    _smartedu_file_key,
     _smartedu_representation_id,
 )
 from education_resource_mcp.config import Settings
@@ -286,6 +288,7 @@ class SmartEduBundleTests(unittest.TestCase):
         cancel_on_format: str | None = None,
         cancel_event: threading.Event | None = None,
         extra_bodies: dict[str, bytes] | None = None,
+        file_key: str = "",
     ) -> tuple[object, _Transport]:
         invalid_formats = invalid_formats or set()
         failure_formats = failure_formats or set()
@@ -332,12 +335,19 @@ class SmartEduBundleTests(unittest.TestCase):
             "title": "固定夹具资源",
             "platform": "smartedu",
         }
+        if file_key:
+            resource["metadata"] = {"platform_signals": {"file_key": file_key}}
         candidates = _find_files(detail)
         primary = next(
             (
                 candidate
-                for candidate in candidates
-                if str(candidate.get("format") or "").casefold() == planned_container
+                for candidate in _select_course_files(candidates)
+                if (
+                    _smartedu_file_key(content_id, candidate) == file_key
+                    if file_key
+                    else str(candidate.get("format") or "").casefold()
+                    == planned_container
+                )
             ),
             {"item_key": "missing", "format": planned_container},
         )
@@ -360,6 +370,27 @@ class SmartEduBundleTests(unittest.TestCase):
         self.assertEqual("video/mp4", results[0].media_type)
         requested = [request.full_url for request, _timeout in transport.requests]
         self.assertFalse(any(".m3u8" in url for url in requested))
+
+    def test_course_file_resource_downloads_only_selected_attachment(self) -> None:
+        detail = _course_detail()
+        handout = next(
+            item for item in _find_files(detail) if item["format"] == "pdf"
+        )
+        file_key = _smartedu_file_key("course-1", handout)
+
+        raw, transport = self._download(
+            detail,
+            planned_container="pdf",
+            file_key=file_key,
+        )
+        results, failures = _batch_parts(raw)
+
+        self.assertEqual([], failures)
+        self.assertEqual(1, len(results))
+        self.assertEqual("primary", results[0].role)
+        requested = [request.full_url for request, _timeout in transport.requests]
+        self.assertTrue(any("handout.pdf" in url for url in requested))
+        self.assertFalse(any("video.mp4" in url or "audio.mp3" in url for url in requested))
 
     def test_only_m3u8_does_not_match_confirmed_mp4(self) -> None:
         with self.assertRaises(DomainError) as context:

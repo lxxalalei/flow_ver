@@ -419,8 +419,8 @@ def _check_cancel(cancel_event: Any) -> None:
         raise DomainError("JOB_CANCELLED", "任务已取消")
 
 
-def _reader_css() -> str:
-    """Load the vendored MIT theme and keep its license inside generated HTML."""
+def _reader_base_css() -> str:
+    """Load the vendored MIT base theme and keep its license in generated HTML."""
 
     try:
         base_css = (_VENDOR_DIR / "simple.min.css").read_text(encoding="utf-8")
@@ -431,7 +431,13 @@ def _reader_css() -> str:
         f"/* Reader base theme: {_READER_THEME} {_READER_THEME_VERSION}\n"
         f"{license_text}\n*/"
     )
-    return f"{notice}\n{base_css}\n{_READER_OVERRIDES}\n"
+    return f"{notice}\n{base_css}\n"
+
+
+def _reader_css() -> str:
+    """Build the stable default Reader theme."""
+
+    return f"{_reader_base_css()}{_READER_OVERRIDES}\n"
 
 
 _LD_JSON_RE = re.compile(

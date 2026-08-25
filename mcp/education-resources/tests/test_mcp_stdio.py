@@ -22,6 +22,7 @@ EXPECTED_TOOLS = {
     "resource_job_status",
     "resource_job_cancel",
     "resource_job_read",
+    "resource_html_design",
     "resource_archive",
     "resource_session_status",
     "resource_session_manage",
@@ -93,6 +94,13 @@ class McpStdioTests(unittest.TestCase):
         expand_tool = next(item for item in tools if item["name"] == "resource_expand")
         expand_properties = expand_tool["inputSchema"]["properties"]
         self.assertEqual({"resource_id", "source_url"}, set(expand_properties))
+
+        design_tool = next(item for item in tools if item["name"] == "resource_html_design")
+        design_schema = json.dumps(design_tool["inputSchema"], ensure_ascii=False)
+        self.assertIn('"light_palette"', design_schema)
+        self.assertIn('"dark_palette"', design_schema)
+        self.assertNotIn('"custom_css"', design_schema)
+        self.assertNotIn('"html"', design_schema.casefold())
 
         all_schema = json.dumps(tools, ensure_ascii=False)
         for removed in (

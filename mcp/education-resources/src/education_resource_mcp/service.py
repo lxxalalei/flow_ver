@@ -12,7 +12,7 @@ import logging
 import secrets
 import threading
 import urllib.parse
-from typing import Any
+from typing import Any, Mapping
 
 from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistration
 from .acquisition.models import AcquisitionStrategy
@@ -22,6 +22,7 @@ from .archive import archive_downloaded_files
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
+from .html_design import design_context, render_design
 from .inspection import InspectionRouter
 from .inspection_registry import default_inspection_router
 from .job_state import (
@@ -267,7 +268,7 @@ class ResourceService:
         include_summary: bool = True,
     ) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str]] = set()
         for raw in raw_resources:
             if not isinstance(raw, dict):
                 continue
@@ -279,7 +280,15 @@ class ResourceService:
             if not title:
                 continue
             platform = str(raw.get("platform") or "generic").strip() or "generic"
-            dedup_key = (platform, source_url)
+            metadata = raw.get("metadata")
+            signals = (
+                metadata.get("platform_signals")
+                if isinstance(metadata, dict)
+                and isinstance(metadata.get("platform_signals"), dict)
+                else {}
+            )
+            child_key = str(signals.get("file_key") or "").strip()
+            dedup_key = (platform, source_url, child_key)
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)
@@ -298,7 +307,6 @@ class ResourceService:
                     ),
                 }
             )
-            metadata = raw.get("metadata")
             resource["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
             with self._lock:
                 self._resources[resource_id] = resource
@@ -545,6 +553,24 @@ class ResourceService:
             return {"job_id": job_id, "status": "cancelling"}
         write_job(directory, {**job, "status": "cancelled"})
         return {"job_id": job_id, "status": "cancelled"}
+
+    def html_design_context(self, job_id: str) -> dict[str, Any]:
+        """Return a bounded design brief for one completed Generic Web Job."""
+
+        directory, job = self._load_job(job_id)
+        job = self._reconcile(directory, job)
+        return design_context(directory, job)
+
+    def html_design_render(
+        self,
+        job_id: str,
+        design_spec: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a controlled DesignSpec and keep the terminal Job truthful."""
+
+        directory, job = self._load_job(job_id)
+        job = self._reconcile(directory, job)
+        return render_design(directory, job, design_spec)
 
     def archive(
         self,

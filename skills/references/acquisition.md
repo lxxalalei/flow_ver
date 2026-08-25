@@ -48,12 +48,13 @@ Generic Web 页面
   -> source.html      # 原始 HTML 响应
   -> content.md
   -> metadata.json
-  -> webbundle.zip    # 上述四个文件的打包交付
 ```
 
 因此 `resource_inspect` 看到 landing webpage，不代表这个逻辑资源只能按网页保存；应继续依据同一次 Inspect 返回的真实可获取内容判断。
 
 Generic Web 的 `index.html` 是清洗正文的主要交付物，不依赖 CDN、在线字体或远程正文图片，但它不是对原站脚本、广告、视频和浏览器状态的完整克隆。正文图片无法获取或格式不受支持时，Reader 会写入占位并让 Job 保持 `partial`；Agent 应按最终 `files` / `failures` 说明哪些文件仍可使用。
+
+用户明确要求精美或内容感知的 HTML 时，先等单网页 Download Job 到达终态，再按 [`html-design.md`](html-design.md) 取得设计上下文并渲染；默认下载不自动增加模型设计步骤。
 
 默认 `preferred_container="original"` 表示：**按资源本身的自然交付方式获取**。自然交付可以是一个文件，也可以是同一资源的一组文件。Agent 不要为了让后端“看起来可下载”而自行猜 `mp4`、`pdf` 等扩展名。
 
@@ -69,7 +70,7 @@ Generic Web 的 `index.html` 是清洗正文的主要交付物，不依赖 CDN�
 - “PDF 都要，视频只要最高画质”；
 - “除了封面其他都保存”。
 
-细粒度语义由 Skill/模型理解，不把自然语言预先硬编码成 Component/Bundle/DeliveryPolicy 状态机。当前 Tool 尚未暴露某种细粒度选择能力时，应如实说明能力边界，不用格式猜测代替用户选择。
+细粒度语义由 Skill/模型理解，不把自然语言预先硬编码成 Component/Bundle/DeliveryPolicy 状态机。SmartEdu 课程在用户需要查看或筛选内部文件时可以 Expand，再按返回的文件级 `resource_id` 选择视频、文档或音频；直接说“下载整课”时仍走课程自然交付包。当前 Tool 尚未暴露的其他细粒度选择能力应如实说明，不用格式猜测代替用户选择。
 
 ## 5. 不替用户制造格式要求
 

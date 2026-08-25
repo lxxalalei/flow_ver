@@ -102,16 +102,12 @@ MCP 直接读取完整 `results.jsonl`。Expand 自身不产生下载授权。
 | Bilibili | `creator`, `collection` | `video[]` | `video` → MP4 |
 | Douyin | `creator`, `collection` | `video[]` | `video` → MP4 |
 | Ximalaya | `creator`, `album` | `album[]` / `track[]` | `track` → MP3/M4A |
-| SmartEdu | `textbook`, `course` | `textbook → course[]`; `course → file[]` 尚未稳定落地 | course 可自然交付多文件 |
+| SmartEdu | `textbook`, `course` | `textbook → course[]`; `course → video/document/audio[]` | course 可整体自然交付，也可下载稳定子文件 |
 | Zjer | `course` | `video[]` | `video` → MP4 |
 | CCTV | `column`, `series` | `video[]` | `video` → MP4（720P 上限） |
 | LibGen | 无 | — | `book` → ebook file，身份为 MD5 |
 | Generic Web | 无 | — | `webpage` → offline web bundle |
 | Generic File | 无 | — | `file` → 原文件 |
-
-### 当前明确 gap
-
-- SmartEdu `course → file[]`：Inspector 已能看到课程组成文件，但独立子文件还没有稳定 Resource 身份；课程本身仍可按自然交付方式下载多个真实文件。
 
 ## Bilibili
 
@@ -162,12 +158,15 @@ video               -> Download MP4          # 自研下载链，guid 为下载�
 ```text
 textbook -> Expand -> course[]
 course   -> Download -> 自然课程交付包（可能多个文件）
-course   -> Expand -> file[]   # 待稳定 Resource 身份
+course   -> Expand -> video/document/audio[]
+file     -> Inspect/Download -> 当前单文件
 ```
 
 新旧教材、六三/五四、版本、课程类型等属于平台返回事实，不作为公共 Tool 的 `tabs/specs/mode` 参数。
 
 教材 Expand 匿名读取平台 CDN 连续分片，直到真实 404 或空分片。同步课和精品课生成真实子 Resource；`singing`、未来未知类型和无效条目不伪造 URL，计数写入 Expand Job 的 `summary.smartedu`。
+
+课程文件子资源使用课程原生 ID + relation + 平台 item/group ID 形成稳定文件键；不保存签名 CDN URL。Inspect/Download 都重新读取课程 Detail 定位当前表示。同一视频的 MP4/HLS/清晰度变体保持一个逻辑子资源；没有平台稳定键的条目只保留在课程整体交付包中，并计入 Expand summary 的 `unstable_files`。
 
 ## LibGen
 
@@ -231,6 +230,8 @@ metadata.json # 物化事实
 ```
 
 正文抽取失败不能删除已经成功抓取的 `source.html`。Reader 是清洗正文的离线阅读视图，不是原网页浏览器级镜像。
+
+用户明确要求精美或内容感知的 HTML 时，在单网页 Download Job 完成后调用 `resource_html_design`：先读取有界 `context`，由 Agent 的 HTML Design Skill 判断主题、受众、页面任务与 DesignSpec，再由 `render` 将磁盘上的完整清洗正文原样注入 `adaptive-reader-v1`。默认下载不自动设计；`source.html` / `content.md` 始终不被模型改写。
 
 ## 不再使用的架构
 

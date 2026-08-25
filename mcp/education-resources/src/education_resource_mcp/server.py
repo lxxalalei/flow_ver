@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Callable, Literal
 
 from mcp.server.mcpserver import MCPServer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .errors import DomainError
 from .expand import (
@@ -41,6 +41,42 @@ class SearchTask(BaseModel):
             '["火山喷发 原理 动画"]。'
         ),
     )
+
+
+class HtmlDesignPalette(BaseModel):
+    """Complete palette for one viewer theme."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    background: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    surface: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    text: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    muted: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    accent: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    accent_soft: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    border: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class HtmlDesignSpec(BaseModel):
+    """Semantic design decision; never carries page content or arbitrary CSS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme_name: str = Field(min_length=1, max_length=80)
+    subject: str = Field(min_length=1, max_length=160)
+    audience: str = Field(min_length=1, max_length=160)
+    page_purpose: str = Field(min_length=1, max_length=240)
+    rationale: str = Field(min_length=1, max_length=600)
+    treatment: Literal["utilitarian", "editorial"] = "utilitarian"
+    light_palette: HtmlDesignPalette
+    dark_palette: HtmlDesignPalette
+    type_system: Literal["editorial", "humanist", "technical", "rounded", "classical"] = "humanist"
+    layout: Literal["focused", "standard", "wide", "visual"] = "standard"
+    hero: Literal["understated", "editorial", "banner", "poster"] = "editorial"
+    section_style: Literal["plain", "ruled", "banded", "cards"] = "plain"
+    image_style: Literal["natural", "framed", "full_bleed", "gallery"] = "natural"
+    density: Literal["compact", "comfortable", "spacious"] = "comfortable"
+    signature: Literal["accent_rule", "corner_mark", "side_rail", "none"] = "accent_rule"
 
 
 def _call(function: Callable[[], dict[str, Any]], **ids: str) -> dict[str, Any]:
@@ -138,6 +174,23 @@ def _download(
     return service.download(ids, preferred_container=preferred_container)
 
 
+def _html_design(
+    service: ResourceService,
+    action: Literal["context", "render"],
+    job_id: str,
+    design_spec: HtmlDesignSpec | None,
+) -> dict[str, Any]:
+    if action == "context":
+        if design_spec is not None:
+            raise DomainError("INVALID_ARGUMENT", "context 操作不接受 design_spec")
+        return service.html_design_context(job_id)
+    if action == "render":
+        if design_spec is None:
+            raise DomainError("INVALID_ARGUMENT", "render 操作需要 design_spec")
+        return service.html_design_render(job_id, design_spec.model_dump())
+    raise DomainError("INVALID_ARGUMENT", f"未知 HTML 设计操作：{action}")
+
+
 def create_server(service: ResourceService | None = None) -> MCPServer:
     resource_service = service or ResourceService()
     server = MCPServer(
@@ -159,7 +212,8 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             "Search or Expand is never implicit download authorization. A logical resource may naturally "
             "materialize into multiple files. Resource handles are process-local; Download and Expand Job "
             "handles are persistent. Session tools are not a preflight step: use them after AUTH_REQUIRED "
-            "or when the user explicitly asks to manage a platform session."
+            "or when the user explicitly asks to manage a platform session. HTML Design is optional and "
+            "runs only after the user asks for a visually designed single-page Generic Web deliverable."
         ),
     )
 
@@ -325,6 +379,36 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     ) -> dict[str, Any]:
         return _call(
             lambda: read_expand(resource_service, job_id, offset=offset, limit=limit),
+            job_id=job_id,
+        )
+
+    @server.tool(structured_output=True)
+    def resource_html_design(
+        action: Annotated[
+            Literal["context", "render"],
+            Field(
+                description=(
+                    "context 从单个已完成 Generic Web Download Job 读取有界设计摘要；"
+                    "render 使用 HTML Design Skill 根据该摘要产生的 DesignSpec 重绘 index.html。"
+                )
+            ),
+        ],
+        job_id: Annotated[
+            str,
+            Field(description="包含单个 Generic Web 清洗产物的 succeeded/partial Download Job。"),
+        ],
+        design_spec: Annotated[
+            HtmlDesignSpec | None,
+            Field(
+                description=(
+                    "仅 render 使用。它只描述主题、受众、页面任务和受控视觉 token；"
+                    "不得包含正文、HTML、CSS 或脚本。"
+                )
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        return _call(
+            lambda: _html_design(resource_service, action, job_id, design_spec),
             job_id=job_id,
         )
 

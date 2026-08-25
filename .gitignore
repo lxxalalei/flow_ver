@@ -15,3 +15,5 @@ HEARTBEAT.md
 openclaw-workspace-state.json
 # Local isolated runtime/test data
 .openclaw-test/
+mcp/education-resources/smoke_user_data/
+mcp/education-resources/smoke_web/

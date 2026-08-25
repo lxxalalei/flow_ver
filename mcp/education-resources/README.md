@@ -16,7 +16,7 @@ education-resources MCP
 
 MCP 不维护 Flow、ResultSet、Presentation、Selection、Download Plan、confirmation token、AssetBundle、authority/binding/digest 链，也不保存“用户看过第几个候选”这类对话状态。
 
-## 11 个 Tool
+## 12 个 Tool
 
 资源能力：
 
@@ -28,14 +28,17 @@ MCP 不维护 Flow、ResultSet、Presentation、Selection、Download Plan、conf
 6. `resource_job_status`
 7. `resource_job_cancel`
 8. `resource_job_read`
-9. `resource_archive`
+9. `resource_html_design`
+10. `resource_archive`
 
 Session 辅助能力：
 
-10. `resource_session_status`
-11. `resource_session_manage`
+11. `resource_session_status`
+12. `resource_session_manage`
 
 容器资源统一通过 `resource_expand` 完整展开，结果通过 `resource_job_read` 分页进入上下文。旧 `resource_browse_creator` / `resource_batch_collect` / `resource_batch_read` 及其 mode 不属于公共能力。
+
+`resource_html_design` 只处理用户明确要求视觉优化的单网页 Download Job：`context` 返回有界且显式标记截断的设计摘要，`render` 接收受控 DesignSpec 并完整保留已经清洗的正文。默认网页下载仍直接产生稳定 Reader，不强制调用模型设计。
 
 SmartEdu 教材 Expand 匿名读取连续 CDN 分片，以真实 404 或空分片结束。同步课、精品课写入结果；没有独立详情 URL 的类型、未知类型和无效项进入 `summary.smartedu`，不会伪造 URL 或静默消失。
 
@@ -97,6 +100,8 @@ Inspect 会从当前 detail JSON 中确定主视频/主文件，并把自然交�
 
 默认 `preferred_container="original"` 时，SmartEdu Downloader 按同一 detail 事实下载自然交付包；因此 Agent 不需要、也不应该为了“让课程可下载”先猜 `mp4`。具体 Detail / Download 如果真实返回 `AUTH_REQUIRED` 才进入 Session；IP/出口限制不能自动解释为登录问题。
 
+用户需要查看或筛选课程内部文件时，`resource_expand` 会把具有平台稳定 item/group ID 的视频、文档和音频作为逻辑子资源返回。子资源只保存课程详情入口和稳定文件键；Inspect/Download fresh Detail 后解析当前 CDN 地址并只下载所选文件。无稳定平台键的附件不会用文件名、数组序号或签名 URL 伪造身份，仍随课程整体交付。
+
 ## Generic Web Resource
 
 Generic HTML 获取继续使用 `BoundedWebFetcher`。保存流程：
@@ -111,6 +116,8 @@ HTTP response
 ```
 
 `source.html` 保存 fetch 成功取得的原始 HTML 响应，正文抽取是衍生视图。Trafilatura 抽取失败时 Job 可以是 partial，但 source snapshot 不会因此丢失。
+
+默认 `index.html` 使用稳定 `clean-reader-v2`。用户明确要求精美或内容感知的 HTML 时，`resource_html_design(action=context)` 返回有界设计摘要，Agent 的 HTML Design Skill 产生受控 DesignSpec，再由 `action=render` 把完整清洗正文原样注入 `adaptive-reader-v1`。模型不接收或重写全文，`source.html` 与 `content.md` 不变。
 
 当前不下载并重写所有 CDN 资产，也不接 Monolith / SingleFile / ArchiveBox；目标不是浏览器级网页克隆。以后如果出现明确的“离线打开仍要尽量完整还原”需求，再单独评估 Monolith。
 

@@ -9,6 +9,7 @@ Reference: tchMaterial-parser (happycola233) and smartedu-dl-go (hantang).
 from __future__ import annotations
 
 import base64
+from collections.abc import Mapping
 import hashlib
 import json
 import re
@@ -437,10 +438,11 @@ def _validate_downloaded_file(path: Path, media_type: str) -> None:
 def _smartedu_representation_id(
     resource: Mapping[str, Any], candidate: Mapping[str, Any]
 ) -> str:
+    file_key = _smartedu_file_key_from_resource(resource)
     seed = "|".join(
         (
             "smartedu-primary-v1",
-            str(resource.get("resource_id") or ""),
+            file_key or str(resource.get("resource_id") or ""),
             str(resource.get("source_url") or ""),
             str(candidate.get("item_key") or ""),
             str(candidate.get("format") or "").casefold(),
@@ -703,6 +705,22 @@ def _stable_digest(*parts: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()[:20]
 
 
+def _provider_item_id(item: Mapping[str, Any]) -> str:
+    """Return only a platform-provided item identity, never a locator."""
+
+    for candidate in (
+        item.get("ti_item_id"),
+        item.get("item_id"),
+        item.get("id"),
+        item.get("resource_id"),
+        item.get("resourceId"),
+    ):
+        text = _safe_fact(candidate)
+        if text:
+            return text
+    return ""
+
+
 def _stable_provider_item_key(
     relation_key: str,
     item: dict[str, Any],
@@ -714,18 +732,7 @@ def _stable_provider_item_key(
 ) -> str:
     """Build a stable opaque provider key without exposing a source URL."""
 
-    explicit = ""
-    for candidate in (
-        item.get("ti_item_id"),
-        item.get("item_id"),
-        item.get("id"),
-        item.get("resource_id"),
-        item.get("resourceId"),
-    ):
-        text = _safe_fact(candidate)
-        if text:
-            explicit = text
-            break
+    explicit = _provider_item_id(item)
     if explicit:
         suffix = explicit
     else:
@@ -743,10 +750,7 @@ def _stable_provider_item_key(
     return key
 
 
-def _source_group_key(
-    relation_key: str, parent: dict[str, Any], label: str, source_order: int
-) -> str:
-    explicit = ""
+def _provider_group_id(parent: Mapping[str, Any]) -> str:
     for candidate in (
         parent.get("resource_id"),
         parent.get("resourceId"),
@@ -755,8 +759,14 @@ def _source_group_key(
     ):
         text = _safe_fact(candidate)
         if text:
-            explicit = text
-            break
+            return text
+    return ""
+
+
+def _source_group_key(
+    relation_key: str, parent: dict[str, Any], label: str, source_order: int
+) -> str:
+    explicit = _provider_group_id(parent)
     if explicit:
         return f"smartedu-group:{_safe_relation_key(relation_key)}:{explicit}"
     # Without a provider resource ID, keep variants from the same named
@@ -867,6 +877,7 @@ def _find_files(
                 "explicit_role": _bounded_text(
                     item.get("role") or item.get("asset_role") or item.get("ti_role"), 64
                 ),
+                "provider_item_id": _provider_item_id(item),
             }
             candidate["item_key"] = _stable_provider_item_key(
                 relation_key,
@@ -883,6 +894,7 @@ def _find_files(
             candidate["source_group_key"] = _source_group_key(
                 relation_key, obj, label, source_order
             )
+            candidate["provider_group_id"] = _provider_group_id(obj)
             candidate["metadata"] = _safe_item_metadata(candidate)
             results.append(candidate)
 
@@ -1047,6 +1059,54 @@ def _select_course_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for group in groups.values():
         selected.append(max(group, key=_video_quality))
     return sorted(selected, key=lambda item: int(item.get("source_order") or 0))
+
+
+def _smartedu_file_key(content_id: str, candidate: Mapping[str, Any]) -> str:
+    """Identify one logical course file only from stable provider facts.
+
+    Video variants share the native relation-group identity. Other files use
+    their native item identity. A signed storage URL, filename, source order,
+    size, or inferred fallback key is never accepted as child identity.
+    """
+
+    native_content_id = _safe_fact(content_id)
+    relation_key = _safe_relation_key(candidate.get("relation_key"))
+    if not native_content_id:
+        return ""
+    if _is_video(dict(candidate)):
+        identity_kind = "group"
+        native_item_id = _safe_fact(candidate.get("provider_group_id"))
+    else:
+        identity_kind = "item"
+        native_item_id = _safe_fact(candidate.get("provider_item_id"))
+    if not native_item_id:
+        return ""
+    digest = hashlib.sha256(
+        "\x1f".join(
+            ("smartedu-file-v1", native_content_id, relation_key, identity_kind, native_item_id)
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    return f"smartedu-file:{digest}"
+
+
+def _smartedu_file_key_from_resource(resource: Mapping[str, Any]) -> str:
+    metadata = resource.get("metadata")
+    signals = (
+        metadata.get("platform_signals")
+        if isinstance(metadata, Mapping)
+        and isinstance(metadata.get("platform_signals"), Mapping)
+        else {}
+    )
+    key = str(signals.get("file_key") or "").strip()
+    if not key:
+        return ""
+    if re.fullmatch(r"smartedu-file:[0-9a-f]{32}", key):
+        return key
+    raise DomainError(
+        "CONTENT_VALIDATION_FAILED",
+        "SmartEdu 文件资源身份无效",
+        retryable=False,
+    )
 
 
 def _role_for_candidate(
@@ -1538,11 +1598,28 @@ class SmartEduDownloader:
             if str(candidate.get("format") or "").casefold()
             in _ACTIVE_PRIMARY_FORMATS
         ]
-        current_primary = _primary_candidate(
-            active_files,
-            content_type,
-            supported_formats=_ACTIVE_PRIMARY_FORMATS,
-        )
+        file_key = _smartedu_file_key_from_resource(resource)
+        if file_key:
+            course_files = _select_course_files(active_files)
+            matches = [
+                candidate
+                for candidate in course_files
+                if _smartedu_file_key(content_id, candidate) == file_key
+            ]
+            if len(matches) != 1:
+                raise DomainError(
+                    "RESOURCE_NOT_FOUND",
+                    "SmartEdu 课程中已找不到所选文件",
+                    retryable=False,
+                )
+            current_primary = matches[0]
+            selected = [current_primary]
+        else:
+            current_primary = _primary_candidate(
+                active_files,
+                content_type,
+                supported_formats=_ACTIVE_PRIMARY_FORMATS,
+            )
         if current_primary is None or str(
             current_primary.get("format") or ""
         ).casefold() != planned_container or _smartedu_representation_id(
@@ -1554,7 +1631,9 @@ class SmartEduDownloader:
                 retryable=False,
             )
 
-        if content_type in _COURSE_TYPES:
+        if file_key:
+            pass
+        elif content_type in _COURSE_TYPES:
             selected = _select_course_files(active_files)
         else:
             primary_source = [
@@ -1612,7 +1691,15 @@ class SmartEduDownloader:
         used_names: set[str] = set()
         for candidate in selected:
             required = str(candidate.get("item_key") or "") == primary_key
-            role = _role_for_candidate(candidate, primary_key=primary_key, content_type=content_type)
+            role = (
+                "primary"
+                if file_key
+                else _role_for_candidate(
+                    candidate,
+                    primary_key=primary_key,
+                    content_type=content_type,
+                )
+            )
             destination = job_dir / _safe_destination_name(
                 str(candidate.get("title") or title),
                 str(candidate.get("format") or "bin"),

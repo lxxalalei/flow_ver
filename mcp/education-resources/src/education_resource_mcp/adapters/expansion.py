@@ -377,14 +377,163 @@ def _expand_smartedu(
         )
         return
     if kind == "course":
-        raise DomainError(
-            "FEATURE_NOT_SUPPORTED",
-            "SmartEdu 课程当前支持自然完整资源包下载；独立附件子资源尚未形成稳定 Resource 身份",
+        yield from _iter_smartedu_course_files(
+            adapter,
+            target,
+            cancel_event=cancel_event,
+            summary=summary,
         )
+        return
     raise DomainError(
         "FEATURE_NOT_SUPPORTED",
         "SmartEdu 当前资源没有已实现的结构展开能力",
     )
+
+
+def _smartedu_course_detail(
+    adapter: Any,
+    source_url: str,
+) -> tuple[str, str, dict[str, Any]]:
+    from .smartedu_download import (
+        _COURSE_TYPES,
+        _DETAIL_MAX_BYTES,
+        _SMARTEDU_DETAIL_HOSTS,
+        _SmartEduHttpClient,
+        _detail_api_url,
+        _raise_for_http_status,
+        _read_json_object,
+        _resolve_content,
+        _smartedu_headers,
+    )
+
+    content_id, content_type = _resolve_content(source_url)
+    if content_type not in _COURSE_TYPES:
+        raise DomainError("FEATURE_NOT_SUPPORTED", "SmartEdu 当前资源不是可展开课程")
+    token = ""
+    session_store = getattr(adapter, "session_store", None)
+    if session_store is not None:
+        session_data = session_store.get_session_data("smartedu") or {}
+        tokens = session_data.get("tokens") or {}
+        raw_token = str(tokens.get("accessToken") or "")
+        token = raw_token[7:].strip() if raw_token.casefold().startswith("bearer ") else raw_token
+    client = _SmartEduHttpClient(allowed_hosts=_SMARTEDU_DETAIL_HOSTS)
+    request = Request(
+        _detail_api_url(content_id, content_type, source_url),
+        headers=_smartedu_headers(token),
+    )
+    try:
+        with client.open(request, timeout=float(getattr(adapter, "timeout", 30.0))) as response:
+            _raise_for_http_status(response)
+            detail = _read_json_object(response, _DETAIL_MAX_BYTES, label="课程详情")
+    except DomainError:
+        raise
+    except Exception as exc:
+        raise DomainError(
+            "PARTIAL_FAILURE",
+            "SmartEdu 课程文件详情读取失败",
+            retryable=True,
+        ) from exc
+    return content_id, content_type, detail
+
+
+def _iter_smartedu_course_files(
+    adapter: Any,
+    target: Mapping[str, Any],
+    *,
+    cancel_event: Any = None,
+    summary: dict[str, Any] | None = None,
+) -> Iterator[dict[str, Any]]:
+    from .smartedu_download import (
+        _ACTIVE_PRIMARY_FORMATS,
+        _find_files,
+        _primary_candidate,
+        _role_for_candidate,
+        _select_course_files,
+        _smartedu_file_key,
+    )
+
+    source_url = _url(target)
+    content_id, content_type, detail = _smartedu_course_detail(adapter, source_url)
+    active = [
+        candidate
+        for candidate in _find_files(detail)
+        if str(candidate.get("format") or "").casefold() in _ACTIVE_PRIMARY_FORMATS
+    ]
+    selected = _select_course_files(active)
+    primary = _primary_candidate(
+        selected,
+        content_type,
+        supported_formats=_ACTIVE_PRIMARY_FORMATS,
+    )
+    if primary is None:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            "SmartEdu 课程详情未提供受支持的主文件",
+        )
+    primary_key = str(primary.get("item_key") or "")
+    report = {
+        "course_id": content_id,
+        "files_seen": len(selected),
+        "emitted": 0,
+        "unstable_files": 0,
+    }
+    if summary is not None:
+        summary["smartedu"] = report
+    seen_keys: set[str] = set()
+    role_labels = {
+        "primary": "主文件",
+        "attachment": "附件",
+        "companion": "伴随资源",
+        "subtitle": "字幕",
+    }
+    type_by_format = {
+        "mp4": "video",
+        "m3u8": "video",
+        "mp3": "audio",
+        "m4a": "audio",
+        "pdf": "document",
+    }
+    for candidate in selected:
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        file_key = _smartedu_file_key(content_id, candidate)
+        if not file_key:
+            report["unstable_files"] += 1
+            continue
+        if file_key in seen_keys:
+            raise DomainError(
+                "CONTENT_VALIDATION_FAILED",
+                "SmartEdu 课程详情包含重复的平台文件身份",
+            )
+        seen_keys.add(file_key)
+        fmt = str(candidate.get("format") or "").casefold()
+        role = _role_for_candidate(
+            candidate,
+            primary_key=primary_key,
+            content_type=content_type,
+        )
+        title = str(candidate.get("title") or "").strip() or f"课程文件 {len(seen_keys)}"
+        size = int(candidate.get("size") or 0)
+        summary_parts = [role_labels.get(role, role), fmt.upper()]
+        if size > 0:
+            summary_parts.append(f"{size} bytes")
+        report["emitted"] += 1
+        yield {
+            "platform": "smartedu",
+            "title": title,
+            "source_url": source_url,
+            "resource_type": type_by_format.get(fmt, "other"),
+            "summary": " · ".join(summary_parts),
+            "metadata": {
+                "platform_signals": {
+                    "course_id": content_id,
+                    "file_key": file_key,
+                    "relation_key": str(candidate.get("relation_key") or "root"),
+                    "course_role": role,
+                    "format": fmt,
+                }
+            },
+        }
 
 
 def _iter_smartedu_textbook(

@@ -23,7 +23,9 @@ from education_resource_mcp.acquisition.router import (
 from education_resource_mcp.adapters.inspect_smartedu import SmartEduInspector
 from education_resource_mcp.adapters.smartedu_download import (
     _detail_api_url,
+    _find_files,
     _resolve_content,
+    _smartedu_file_key,
 )
 
 
@@ -117,11 +119,11 @@ def _candidate() -> dict:
     }
 
 
-def _inspect() -> tuple[dict, dict]:
-    candidate = _candidate()
+def _inspect(candidate: dict | None = None, detail: dict | None = None) -> tuple[dict, dict]:
+    candidate = candidate or _candidate()
     content_id, content_type = _resolve_content(candidate["source_url"])
     detail_url = _detail_api_url(content_id, content_type, candidate["source_url"])
-    detail_body = json.dumps(_course_detail(), ensure_ascii=False).encode("utf-8")
+    detail_body = json.dumps(detail or _course_detail(), ensure_ascii=False).encode("utf-8")
 
     page_transport = _Transport(
         lambda request: _Response(
@@ -147,6 +149,55 @@ def _inspect() -> tuple[dict, dict]:
 
 
 class SmartEduResourceDeliveryTests(unittest.TestCase):
+    def test_course_file_inspect_exposes_only_selected_file_as_primary(self) -> None:
+        detail = _course_detail()
+        handout = next(item for item in _find_files(detail) if item["format"] == "pdf")
+        candidate = _candidate()
+        candidate["resource_type"] = "document"
+        candidate["title"] = "handout.pdf"
+        candidate["metadata"] = {
+            "platform_signals": {
+                "course_id": "course-1",
+                "file_key": _smartedu_file_key("course-1", handout),
+                "course_role": "attachment",
+            }
+        }
+
+        _candidate_value, mapped = _inspect(candidate, detail)
+        resolved = mapped["resolved_resource"]
+        concrete = [
+            item for item in resolved["representations"]
+            if item.get("kind") != "webpage"
+        ]
+
+        self.assertEqual("resolved", mapped["resolution_status"])
+        self.assertEqual("document", resolved["resource_type"])
+        self.assertEqual(
+            [("document", "pdf", "primary", "primary_resource")],
+            [
+                (item["kind"], item["container"], item["role"], item["scope"])
+                for item in concrete
+            ],
+        )
+        self.assertEqual("attachment", resolved["metadata"]["course_role"])
+        router = AcquisitionRouter(
+            [
+                ProviderRegistration(
+                    provider_id="smartedu-resource",
+                    provider=object(),
+                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
+                    scopes=("primary_resource",),
+                )
+            ]
+        )
+        route = AcquisitionPlanner(router).route(
+            candidate,
+            mapped,
+            preferred_container="original",
+        )
+        self.assertEqual("smartedu-resource", route["provider_id"])
+        self.assertEqual("pdf", route["container"])
+
     def test_course_inspect_exposes_primary_and_natural_companions(self) -> None:
         _candidate_value, mapped = _inspect()
         resolved = mapped["resolved_resource"]

@@ -28,7 +28,7 @@
 
 ## Current architecture
 
-- Public MCP 已收敛为 11 个 Tool；资源核心是 Search / Expand / Import / Inspect / Download，完整展开结果由通用 Job + `results.jsonl` + `resource_job_read` 承载。
+- Public MCP 当前为 12 个 Tool；资源核心是 Search / Expand / Import / Inspect / Download，完整展开结果由通用 Job + `results.jsonl` + `resource_job_read` 承载；用户明确要求时，HTML Design 对单网页 Download Job 做受控衍生呈现。
 - `resource_browse_creator`、`resource_batch_collect`、`resource_batch_read` 及其 mode 已退出公共 Tool schema，旧 `batch.py` 和专属测试已经删除。
 - Bilibili creator/collection、Douyin creator/collection、Ximalaya creator/album、SmartEdu textbook、Zjer course 与 CCTV column/series 已进入通用 Expand 路线。
 - SmartEdu course 独立 file Resource 身份仍是明确缺口，不猜身份。

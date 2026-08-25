@@ -53,7 +53,7 @@ Skill 不复制 MCP 参数说明，也不把搜索、Inspect、下载、归档�
 
 Session 代码职责仍与资源 Adapter 分离，但共用同一进程和同一数据目录，不再经过 `session_bridge.py` 或 standalone/local 双路径。
 
-## 3. 当前 11 个 Tool
+## 3. 当前 12 个 Tool
 
 资源能力：
 
@@ -65,12 +65,13 @@ Session 代码职责仍与资源 Adapter 分离，但共用同一进程和同一
 6. `resource_job_status`
 7. `resource_job_cancel`
 8. `resource_job_read`
-9. `resource_archive`
+9. `resource_html_design`
+10. `resource_archive`
 
 Session 辅助能力：
 
-10. `resource_session_status`
-11. `resource_session_manage`
+11. `resource_session_status`
+12. `resource_session_manage`
 
 公共面不再暴露 `resource_browse_creator`、`resource_batch_collect`、`resource_batch_read`，也不暴露 `creator_full`、`time_range_search`、`catalog_expand`、`collection_expand`、`start_day/end_day/specs/tabs` 等平台 mode 或参数。容器统一通过 `resource_expand` 展开，结果统一通过 `resource_job_read` 分页读取。
 
@@ -185,6 +186,11 @@ Trafilatura
           ↓
        index.html                    # 单文件可读 HTML，CSS 与正文图片内嵌
 
+用户明确要求视觉设计时：
+resource_html_design(context)        # 有界摘录、提纲、结构统计，显式标记截断
+  -> Agent HTML Design Skill         # 主题 / 受众 / 页面任务 / DesignSpec
+  -> resource_html_design(render)    # 完整清洗正文原样注入 adaptive-reader-v1
+
 metadata.json                        # 获取 / 抽取 / Reader 事实
 ```
 
@@ -193,9 +199,11 @@ metadata.json                        # 获取 / 抽取 / Reader 事实
 - `source.html` 与正文抽取解耦；抽取失败不能删除已经取得的源响应；
 - Trafilatura 继续负责成熟的正文/结构抽取，不继续扩展自研 `web_blocks.py`；
 - Reader 只包装 Trafilatura 的清洗后派生 HTML，不参与正文判断，也不反向修改 `source.html` / `content.md`；
-- 当前单文件模板标识为 `clean-reader-v2`；
+- 默认单文件模板标识为 `clean-reader-v2`；用户明确要求设计后为 `adaptive-reader-v1`；
 - Reader 基础主题使用 vendored Simple.css 2.3.7，保留 MIT 许可证；生成的 CSS 和正文图片直接内嵌进 `index.html`，不依赖 CDN、npm、JS 或在线字体；
 - Reader 统一处理正文宽度、中文/英文系统字体、标题层级、链接、图片、表格、引用、代码块、移动端、dark mode 与打印；
+- HTML Design Context 只给模型有界摘录、提纲和结构统计，并显式暴露截断；网页内容视为不可信数据。DesignSpec 不包含正文、HTML、CSS 或脚本；本地 Renderer 保持 main 正文片段逐字不变，使用受控的明暗 token、字体栈、布局与构件变体更新终态文件记录；
+- HTML Design 只支持恰好含一个 Generic Web 网页产物、尚未归档的终态 Download Job；多网页歧义和缺失文件显式失败；
 - Trafilatura 抽取失败时仍生成同一个 Reader 外壳，并明确提示原始响应位于 `source.html`；Job 仍保持 partial，不把模板成功误报为正文抽取成功；
 - 链接、图片和表格继续以 Trafilatura 清洗后的真实内容为准；清洗后保留的有效栅格图片会经同一网络与格式校验边界获取并转换为 `data:` URL，重复地址只获取一次；
 - 图片无法获取或格式不支持时，不保留会继续联网的图片地址，而是写入可读占位，并将 Job 标记为 partial、在 metadata/warnings 中显式记录；Reader 不克隆原网页脚本、广告、视频、原站 CSS 或浏览器运行状态，因此它是“清洗正文的单文件离线阅读页”，不是完整网页镜像；
@@ -242,7 +250,7 @@ Resource 是用户选择的逻辑对象；Representation 是 Inspect 确认的�
 
 `preferred_container="original"` 表示按资源自身的自然交付方式获取。自然交付可以是一个文件，也可以是多个文件；Agent 不应因为 landing URL 本身是 webpage 就判断资源不可下载，也不应为了让它“可下载”自行补一个扩展名。只有用户明确要求当前真实存在的某个主表示时才指定容器；指定不存在的主格式应显式失败。
 
-SmartEdu 课程是当前第一个明确的复合资源案例：课程 detail 可以同时确认主视频、PDF 资料和伴随音频；同一视频的 MP4/HLS/码率变体只选择一个当前主版本，而独立文档/音频保留为 attachment/companion。SmartEdu Downloader 已可为一个课程 Resource 返回多个真实文件，Job 的 `files` / `failures` 是最终事实。
+SmartEdu 课程是当前第一个明确的复合资源案例：课程 detail 可以同时确认主视频、PDF 资料和伴随音频；同一视频的 MP4/HLS/码率变体只选择一个当前主版本，而独立文档/音频保留为 attachment/companion。课程可以整体自然交付多个文件，也可以按需 Expand 为具有平台稳定 item/group 身份的文件级 Resource。子资源不持久化签名 CDN URL，Inspect/Download 每次从课程 Detail 重新定位当前表示；缺少稳定平台键的条目不伪造独立身份。Job 的 `files` / `failures` 是最终事实。
 
 用户已明确选定普通候选并要求下载时直接：
 
@@ -303,7 +311,7 @@ mcp/education-resources/
 6. LibGen 是否始终使用 `libgen` 平台身份且不触发登录；
 7. Host Web URL → Import 是否能恢复明确的平台身份；
 8. Generic Web 是否同时保留原始 `source.html`、Trafilatura `content.md`，并把清洗 HTML 与正文图片放进无 CDN/JS/远程图片依赖的统一 Reader `index.html`；
-9. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job；
+9. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job，course Expand 的稳定子文件是否可单独 Inspect/Download；
 10. JobRead 子集候选是否能得到 `resource_id`，完整 succeeded Expand Job 是否能在用户明确选择全部后直接交给现有 Download Job；
 11. Expand / Download / Archive 既有行为是否未被多文件/完整枚举衔接语义破坏；
 12. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且 Expand 不会自动触发下载。
