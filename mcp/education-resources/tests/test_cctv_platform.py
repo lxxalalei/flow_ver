@@ -105,6 +105,134 @@ class CctvUrlIdentificationTests(unittest.TestCase):
         self.assertEqual(generic["platform"], "generic")
 
 
+class CctvColumnNativeApiTests(unittest.TestCase):
+    """M1: native getVideoListByColumn listing (0069)."""
+
+    def test_column_id_from_page_finds_topic_id(self) -> None:
+        html = '<script>var topicID = "TOPC1234567890";</script>'
+        with mock.patch.object(
+            cctv_adapter, "page_text", lambda url, *, timeout: html
+        ):
+            column_id = cctv_adapter.column_id_from_page(
+                _COLUMN_URL, timeout=5
+            )
+        self.assertEqual(column_id, "TOPC1234567890")
+
+    def test_column_id_falls_back_to_videoset_page(self) -> None:
+        def fake_page(url: str, *, timeout: float) -> str:
+            if "videoset" in url:
+                return '<script>var lmtopId = "TOPC999999";</script>'
+            return "<html>no id here</html>"
+
+        with mock.patch.object(cctv_adapter, "page_text", fake_page):
+            column_id = cctv_adapter.column_id_from_page(
+                _COLUMN_URL, timeout=5
+            )
+        self.assertEqual(column_id, "TOPC999999")
+
+    def test_column_id_missing_raises(self) -> None:
+        with mock.patch.object(
+            cctv_adapter, "page_text",
+            lambda url, *, timeout: "<html>nothing</html>",
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                cctv_adapter.column_id_from_page(_COLUMN_URL, timeout=5)
+        self.assertEqual(ctx.exception.code, "CONTENT_VALIDATION_FAILED")
+
+    def test_iter_column_via_api_paginates_and_parses(self) -> None:
+        page1 = {
+            "data": [
+                {
+                    "guid": _GUID,
+                    "title": "第一期",
+                    "time": "2021-02-12 12:00",
+                    "channel": "CCTV-1",
+                    "brief": "简介",
+                    "length": "45:00",
+                }
+            ],
+            "pageCount": 2,
+        }
+        page2 = {"data": [], "pageCount": 2}
+
+        responses = [page1, page2]
+
+        def fake_open(request, timeout):
+            payload = json.dumps(responses.pop(0)).encode("utf-8")
+            return mock.MagicMock(
+                __enter__=lambda self: self,
+                __exit__=lambda *a: None,
+                read=lambda: payload,
+            )
+
+        with mock.patch.object(
+            cctv_adapter, "column_id_from_page", lambda url, *, timeout: "TOPC1"
+        ), mock.patch.object(cctv_adapter, "urlopen_with_fallback", fake_open):
+            results = cctv_adapter.iter_column_via_api(
+                _COLUMN_URL, timeout=5
+            )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["metadata"]["platform_signals"]["guid"], _GUID)
+        self.assertEqual(results[0]["metadata"]["platform_signals"]["publish_time"], "2021-02-12 12:00")
+        self.assertEqual(results[0]["resource_type"], "视频")
+
+    def test_iter_column_via_api_stops_on_short_page(self) -> None:
+        page1 = {
+            "data": [
+                {"guid": "a" * 32, "title": "only one"},
+            ],
+            "pageCount": 9,
+        }
+        responses = [page1]
+
+        def fake_open(request, timeout):
+            payload = json.dumps(responses.pop(0)).encode("utf-8")
+            return mock.MagicMock(
+                __enter__=lambda self: self,
+                __exit__=lambda *a: None,
+                read=lambda: payload,
+            )
+
+        with mock.patch.object(
+            cctv_adapter, "column_id_from_page", lambda url, *, timeout: "TOPC1"
+        ), mock.patch.object(cctv_adapter, "urlopen_with_fallback", fake_open):
+            results = cctv_adapter.iter_column_via_api(_COLUMN_URL, timeout=5)
+        # short page terminates despite pageCount=9
+        self.assertEqual(len(results), 1)
+
+    def test_iter_column_falls_back_to_cctv_dl_on_api_failure(self) -> None:
+        adapter = CctvSearchAdapter(None, _settings(Path(".")))
+        events = [
+            {
+                "event": "video",
+                "guid": _GUID,
+                "title": "兜底视频",
+                "url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            }
+        ]
+        with mock.patch.object(
+            cctv_adapter, "iter_column_via_api",
+            side_effect=DomainError("PARTIAL_FAILURE", "api 挂了", True),
+        ), mock.patch.object(
+            cctv_download, "run_cctv_dl_list", lambda url, **kw: events
+        ):
+            results = adapter.iter_column(_COLUMN_URL)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], "兜底视频")
+
+    def test_iter_column_via_api_partial_failure_raises(self) -> None:
+        def fake_open(request, timeout):
+            raise OSError("boom")
+
+        with mock.patch.object(
+            cctv_adapter, "column_id_from_page", lambda url, *, timeout: "TOPC1"
+        ), mock.patch.object(cctv_adapter, "urlopen_with_fallback", fake_open):
+            with self.assertRaises(DomainError) as ctx:
+                cctv_adapter.iter_column_via_api(_COLUMN_URL, timeout=5)
+        self.assertEqual(ctx.exception.code, "PARTIAL_FAILURE")
+        self.assertTrue(ctx.exception.retryable)
+
+
 class CctvExpansionTests(unittest.TestCase):
     def test_column_expand_routes_to_adapter(self) -> None:
         fake = _FakeCctvAdapter()
@@ -160,10 +288,15 @@ class CctvExpansionTests(unittest.TestCase):
                 )
         self.assertEqual(ctx.exception.code, "FEATURE_NOT_SUPPORTED")
 
-    def test_column_list_requires_cctv_dl_exe(self) -> None:
+    def test_column_list_requires_cctv_dl_exe_on_fallback(self) -> None:
+        """API path down + cctv-dl missing -> explicit PROVIDER_UNAVAILABLE."""
+
         adapter = CctvSearchAdapter(None, _settings(Path(".")))
         missing = Path("Z:/definitely/missing/cctv-dl.exe")
-        with mock.patch.object(cctv_download, "DEFAULT_CCTV_DL_EXE", missing), \
+        with mock.patch.object(
+            cctv_adapter, "iter_column_via_api",
+            side_effect=DomainError("PARTIAL_FAILURE", "api 挂了", True),
+        ), mock.patch.object(cctv_download, "DEFAULT_CCTV_DL_EXE", missing), \
                 mock.patch.dict(os.environ, {"CCTV_DL_EXE": ""}):
             with self.assertRaises(DomainError) as ctx:
                 adapter.iter_column(_COLUMN_URL)
@@ -171,6 +304,8 @@ class CctvExpansionTests(unittest.TestCase):
         self.assertIn("CCTV_DL_EXE", ctx.exception.message)
 
     def test_iter_column_normalizes_events(self) -> None:
+        """cctv-dl fallback events are normalized into video resources."""
+
         adapter = CctvSearchAdapter(None, _settings(Path(".")))
         events = [
             {
@@ -183,6 +318,9 @@ class CctvExpansionTests(unittest.TestCase):
             {"event": "status", "ignored": True},
         ]
         with mock.patch.object(
+            cctv_adapter, "iter_column_via_api",
+            side_effect=DomainError("PARTIAL_FAILURE", "api 挂了", True),
+        ), mock.patch.object(
             cctv_download, "run_cctv_dl_list", lambda url, **kwargs: events
         ):
             results = adapter.iter_column(_COLUMN_URL)

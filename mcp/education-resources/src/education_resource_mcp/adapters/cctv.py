@@ -34,7 +34,17 @@ COLUMN_SEARCH_API = "https://api.cntv.cn/lanmu/columnSearch"
 COLUMN_SEARCH_REFERER = "https://tv.cctv.com/lm/index.shtml"
 COLUMN_INDEX_URL = "https://tv.cctv.com/lm/index.shtml"
 VIDEO_INFO_API = "https://vdn.apps.cntv.cn/api/getHttpVideoInfo.do"
+# Column video list (public JSON API, same endpoint the cctv-dl tool uses):
+#   sort=desc&id={columnId}&n={pageSize}&p={page}&d={date}&mode=0&serviceId=tvcctv
+COLUMN_LIST_API = "https://api.cntv.cn/NewVideo/getVideoListByColumn"
 PAGE_REFERER = "https://tv.cctv.com/"
+
+# Column id is embedded in the column page as a TOPC... token.
+_TOPIC_ID_RE = re.compile(
+    r'\bvar\s+(?:topicID|lmtopId)\s*=\s*["\'](TOPC[A-Za-z0-9_-]+)["\']'
+)
+_LM_PATH_RE = re.compile(r"tv\.cctv\.com/lm/([^/?#]+)")
+_COLUMN_PAGE_SIZE = 100
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -232,6 +242,158 @@ def _jsonp_json(text: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def column_id_from_page(
+    column_url: str,
+    *,
+    timeout: float,
+) -> str:
+    """Extract the TOPC... column id from a column page (or its videoset page).
+
+    Raises DomainError when the id cannot be located.
+    """
+
+    def find_id(html: str) -> str:
+        match = _TOPIC_ID_RE.search(html)
+        return match.group(1) if match else ""
+
+    html = page_text(column_url, timeout=timeout)
+    column_id = find_id(html)
+    if column_id:
+        return column_id
+    lm_match = _LM_PATH_RE.search(column_url)
+    if lm_match:
+        try:
+            videoset_html = page_text(
+                f"https://tv.cctv.com/lm/{lm_match.group(1)}/videoset",
+                timeout=timeout,
+            )
+        except Exception:
+            videoset_html = ""
+        column_id = find_id(videoset_html)
+    if not column_id:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            "无法从栏目页解析 TOPC 栏目 id",
+            retryable=False,
+        )
+    return column_id
+
+
+def iter_column_via_api(
+    column_url: str,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> list[dict[str, Any]]:
+    """List all episodes of a column via the public getVideoListByColumn API.
+
+    Paginates until the API reports the last page or returns an empty page.
+    Field parsing is lenient (multiple key spellings) because the JSON shape
+    has drifted across cctv endpoints over time.
+    """
+
+    column_id = column_id_from_page(column_url, timeout=timeout)
+    page = 1
+    total_pages: int | None = None
+    resources: list[dict[str, Any]] = []
+
+    while total_pages is None or page <= total_pages:
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        params = urlencode(
+            {
+                "sort": "desc",
+                "id": column_id,
+                "n": str(_COLUMN_PAGE_SIZE),
+                "p": str(page),
+                "d": "",
+                "mode": "0",
+                "serviceId": "tvcctv",
+            }
+        )
+        request = Request(
+            f"{COLUMN_LIST_API}?{params}",
+            headers={
+                "User-Agent": UA,
+                "Referer": PAGE_REFERER,
+                "Accept": "application/json, text/plain, */*",
+            },
+        )
+        try:
+            with urlopen_with_fallback(request, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except Exception as exc:
+            raise DomainError(
+                "PARTIAL_FAILURE",
+                f"央视网栏目列表接口失败（第 {page} 页）：{type(exc).__name__}: {exc}",
+                retryable=True,
+            ) from exc
+        if not isinstance(data, dict):
+            raise DomainError(
+                "PARTIAL_FAILURE",
+                "央视网栏目列表响应结构异常",
+                retryable=True,
+            )
+
+        items = data.get("data") or data.get("list") or []
+        if not isinstance(items, list) or not items:
+            break
+        if total_pages is None:
+            raw_pages = data.get("pageCount") or data.get("totalPages") or data.get("pages")
+            try:
+                total_pages = int(raw_pages)
+            except (TypeError, ValueError):
+                total_pages = None
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            resource = _column_video_item(item)
+            if resource is not None:
+                resources.append(resource)
+        if len(items) < _COLUMN_PAGE_SIZE:
+            break
+        page += 1
+    return resources
+
+
+def _column_video_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize one getVideoListByColumn entry into a CCTV video resource."""
+
+    def first(*keys: str) -> Any:
+        for key in keys:
+            value = item.get(key)
+            if value not in (None, ""):
+                return value
+        return ""
+
+    guid = str(first("guid", "id", "videoId", "contentId") or "").strip()
+    title = _clean(first("title", "videoTitle", "name"))
+    if not guid or not title:
+        return None
+    detail_url = str(first("url", "pageUrl", "detailUrl") or "").strip()
+    if not detail_url.startswith("http"):
+        detail_url = ""
+    channel = _clean(first("channel", "channelName"))
+    signals: dict[str, Any] = {"guid": guid}
+    duration = str(first("length", "duration", "videoTime") or "").strip()
+    if duration:
+        signals["duration"] = duration
+    pub_time = str(first("time", "pubTime", "publishTime") or "").strip()
+    if pub_time:
+        signals["publish_time"] = pub_time
+    brief = _clean(first("brief", "description", "intro"))
+    return make_resource(
+        platform="cctv",
+        title=title,
+        source_url=detail_url or f"https://tv.cctv.com/v/{guid}",
+        resource_type="视频",
+        summary=brief or None,
+        author=channel or None,
+        platform_signals=signals,
+    )
+
+
 def _normalize_column(item: dict[str, Any]) -> dict[str, Any]:
     def first(*keys: str) -> Any:
         for key in keys:
@@ -418,8 +580,25 @@ class CctvSearchAdapter:
     def iter_column(
         self, column_url: str, *, cancel_event: Any = None
     ) -> list[dict[str, Any]]:
-        """List all episodes of a column via the cctv-dl binary."""
+        """List all episodes of a column: native API first, cctv-dl fallback.
 
+        The public getVideoListByColumn endpoint is the primary route (0069
+        M1). The cctv-dl binary remains only as a transitional fallback until
+        M3 removes the external dependency entirely.
+        """
+
+        try:
+            return iter_column_via_api(
+                column_url, timeout=self.timeout, cancel_event=cancel_event
+            )
+        except DomainError as exc:
+            if exc.code == "JOB_CANCELLED":
+                raise
+            # Transitional fallback: the native API path failed for any reason
+            # (id resolution, partial failure, structure) — fall back to the
+            # cctv-dl binary until M3 removes it entirely.
+        except Exception:
+            pass
         from .cctv_download import run_cctv_dl_list
 
         events = run_cctv_dl_list(column_url, cancel_event=cancel_event)
@@ -452,7 +631,9 @@ __all__ = [
     "CctvSearchAdapter",
     "EPISODE_PATH_RE",
     "SERIES_MIN_LINKS",
+    "column_id_from_page",
     "episode_links",
+    "iter_column_via_api",
     "iter_episodes",
     "page_guid",
     "page_text",
