@@ -146,16 +146,16 @@ track   -> Download
 ## CCTV
 
 ```text
-column (栏目 /lm/ 页) -> Expand -> video[]   # 经 cctv-dl list
+column (栏目 /lm/ 页) -> Expand -> video[]   # 公共 API getVideoListByColumn 分页
 series (纪录片系列页) -> Expand -> video[]   # 页面内嵌剧集链接
-video               -> Download MP4          # 经 cctv-dl，guid 为下载键
+video               -> Download MP4          # 自研下载链，guid 为下载键
 ```
 
-免登录。搜索双路：`ifsearch.php` 站内视频（叶子）+ `api.cntv.cn` 栏目目录（容器，A-Z 扫描后本地过滤）。单集/系列共用 `/YYYY/MM/DD/VID*.shtml` URL 形态，是否系列由页面真实剧集链接数（≥2）判定，不按 URL 猜测。画质上限 2000 档 720P。
+免登录。搜索双路：`ifsearch.php` 站内视频（叶子）+ `api.cntv.cn` 栏目目录（容器，A-Z 扫描后本地过滤）。单集/系列共用 `/YYYY/MM/DD/VID*.shtml` URL 形态，是否系列由页面真实剧集链接数（≥2）判定，不按 URL 猜测。画质上限 2000 档 720P。搜索候选的 `VIDE...` 标识在下载时自动解析为 32 位真实 guid。
 
-依赖本地 `cctv-dl` 二进制（CCTVVideoDownloader）：路径用环境变量 `CCTV_DL_EXE` 覆盖，画质用 `CCTV_QUALITY`（默认 0=最高档）；缺失时显式 `PROVIDER_UNAVAILABLE`。下载产物经 ffmpeg 全片解码体检（错误行 ≤100），坏文件删除重试至多 3 次。
+**下载链**（全部自研，无外部下载器）：普通流（HLS/直链）Python 直下；h5e 加密流分片下载 + 多进程解密（`cctv_h5e`，GPLv3 渊源标注）+ ffmpeg 封装。所有产物经 ffmpeg 全片解码体检（错误行 ≤100），脏文件自动降级。
 
-**老视频降级链**：2021 年及以前视频对 cctv-dl 存在已知确定性解密缺陷（产出乱码流），体检失败且重试仍失败后自动切换**官方 WASM worker** 重下：Python 并发拉 h5e 分片 → 分组并行 `node --import tsx` 解密 → ffmpeg 封装 → 同体检门槛。解密工程 **vendored 在包内**（`education_resource_mcp/vendor/cctv-h5e`，MIT，github.com/xiaoxi-ij478/cctv-h5e-decrypt）；首次部署需 `cd mcp/education-resources/src/education_resource_mcp/vendor/cctv-h5e && npm ci` 生成 node_modules，`CCTV_H5E_PROJ` 可覆盖其他安装。m3u8 优先取视频自身 `h5e_url`（Inspect 提供），兜底模板可用 `CCTV_H5E_BASE` 覆盖。node / h5e 工程缺失是显式失败，不静默跳过；下载结果带 `route`（native / wasm）与体检数据。
+**老视频降级链**：2021 年及以前视频的个别 NAL（01a8 flip 家族）为官方 WASM 独有变换，native 解密会脏 → 体检失败后自动切换**官方 WASM worker** 重下：Python 并发拉 h5e 分片 → 分组并行 `node --import tsx` 解密 → ffmpeg 封装 → 同体检门槛。解密工程 **vendored 在包内**（`education_resource_mcp/vendor/cctv-h5e`，MIT，github.com/xiaoxi-ij478/cctv-h5e-decrypt）；首次部署需 `cd mcp/education-resources/src/education_resource_mcp/vendor/cctv-h5e && npm ci` 生成 node_modules，`CCTV_H5E_PROJ` 可覆盖其他安装。m3u8 优先取视频自身 `h5e_url`（Inspect 提供），兜底模板可用 `CCTV_H5E_BASE` 覆盖。node / h5e 工程缺失是显式失败，不静默跳过；下载结果带 `route`（native / wasm）与体检数据。
 
 ## SmartEdu
 
@@ -224,11 +224,10 @@ Session Tool 不是 Search/Download 的固定前置流程。只有：
 Generic 网页物化当前产生：
 
 ```text
-source.html
-index.html
-content.md
-metadata.json
-webbundle.zip
+source.html   # 原始 HTML（保真，抽取失败也不丢）
+index.html    # 单文件可读页（用户交付物，自包含）
+content.md    # 清洗 Markdown
+metadata.json # 物化事实
 ```
 
 正文抽取失败不能删除已经成功抓取的 `source.html`。Reader 是清洗正文的离线阅读视图，不是原网页浏览器级镜像。

@@ -186,7 +186,6 @@ Trafilatura
        index.html                    # 单文件可读 HTML，CSS 与正文图片内嵌
 
 metadata.json                        # 获取 / 抽取 / Reader 事实
-webbundle.zip
 ```
 
 原则：

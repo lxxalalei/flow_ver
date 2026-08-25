@@ -8,7 +8,6 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
-import zipfile
 
 from education_resource_mcp.errors import DomainError
 from education_resource_mcp.acquisition.models import AcquisitionRequest, AcquisitionStrategy
@@ -119,14 +118,11 @@ class WebMaterializerTests(unittest.TestCase):
         self.assertTrue(metadata["links_requested"])
         self.assertTrue(metadata["images_requested"])
 
-        with zipfile.ZipFile(job / "webbundle.zip") as archive:
-            self.assertEqual(
-                ["content.md", "index.html", "metadata.json", "source.html"],
-                archive.namelist(),
-            )
-            bundled_reader = archive.read("index.html").decode("utf-8")
-            self.assertIn("Reader base theme: Simple.css 2.3.7", bundled_reader)
-            self.assertIn('src="data:image/png;base64,', bundled_reader)
+        # webbundle.zip was removed (user-facing single-file deliverable only)
+        self.assertFalse((job / "webbundle.zip").exists())
+        reader = (job / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Reader base theme: Simple.css 2.3.7", reader)
+        self.assertIn('src="data:image/png;base64,', reader)
 
     def test_duplicate_images_are_fetched_once(self) -> None:
         html = b'''<html><body><article><h1>Images</h1>

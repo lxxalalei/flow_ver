@@ -108,7 +108,6 @@ HTTP response
        -> index.html
        -> content.md
        -> metadata.json
-  -> webbundle.zip
 ```
 
 `source.html` 保存 fetch 成功取得的原始 HTML 响应，正文抽取是衍生视图。Trafilatura 抽取失败时 Job 可以是 partial，但 source snapshot 不会因此丢失。

@@ -14,14 +14,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import html as html_module
-from io import BytesIO
 import json
 from pathlib import Path
 import re
 import time
 from typing import Any
 from urllib.parse import urljoin, urlsplit
-import zipfile
 
 from bs4 import BeautifulSoup
 from trafilatura import extract as trafilatura_extract
@@ -240,26 +238,6 @@ def _write(path: Path, data: bytes, root: Path) -> None:
 def _check_cancel(cancel_event: Any) -> None:
     if cancel_event is not None and cancel_event.is_set():
         raise DomainError("JOB_CANCELLED", "任务已取消")
-
-
-def _zip_bytes(files: Mapping[str, bytes], *, cancel_event: Any = None) -> bytes:
-    buffer = BytesIO()
-    with zipfile.ZipFile(
-        buffer,
-        mode="w",
-        compression=zipfile.ZIP_DEFLATED,
-        compresslevel=9,
-        strict_timestamps=True,
-    ) as archive:
-        for name in sorted(files):
-            _check_cancel(cancel_event)
-            info = zipfile.ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.create_system = 3
-            info.external_attr = 0o100644 << 16
-            info.flag_bits = 0x800
-            archive.writestr(info, files[name])
-    return buffer.getvalue()
 
 
 def _reader_css() -> str:
@@ -630,7 +608,6 @@ class WebMaterializer:
                 json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             ).encode("utf-8"),
         }
-        files["webbundle.zip"] = _zip_bytes(files, cancel_event=cancel_event)
 
         try:
             for filename, data in files.items():
@@ -644,7 +621,6 @@ class WebMaterializer:
         specs = [
             ("index.html", "text/html", "primary", True),
             ("source.html", "text/html", "attachment", False),
-            ("webbundle.zip", "application/zip", "bundle", False),
             ("content.md", "text/markdown", "markdown", False),
             ("metadata.json", "application/json", "metadata", False),
         ]
