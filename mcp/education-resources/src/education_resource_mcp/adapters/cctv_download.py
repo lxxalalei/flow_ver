@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -26,6 +27,8 @@ from urllib.request import Request
 
 from ..config import Settings
 from ..downloader import DownloadResult
+
+LOGGER = logging.getLogger(__name__)
 from ..errors import DomainError
 from ..policy import ensure_within_root
 from ..sessions import SessionStore
@@ -358,6 +361,7 @@ def download_h5e_native(
     takes precedence over the resource signals / template.
     """
 
+    t0 = time.monotonic()
     m3u8_url = h5e_url or resolve_wasm_m3u8(resource, guid)
     m3u8_url, segment_names = _fetch_media_m3u8(
         m3u8_url, timeout=timeout, cancel_event=cancel_event
@@ -400,10 +404,12 @@ def download_h5e_native(
                 f"h5e 分片下载 {ok_count}/{len(segment_names)} 失败",
                 retryable=True,
             )
+        LOGGER.info("cctv native: %d segments downloaded in %.1fs", len(segment_names), time.monotonic() - t0)
 
         # 2) parallel native decryption (each segment independent)
         from concurrent.futures import ProcessPoolExecutor
 
+        t1 = time.monotonic()
         work_items = [
             (
                 str(encrypted_dir / f"seg_{i:05d}.ts"),
@@ -414,8 +420,10 @@ def download_h5e_native(
         workers = max(1, min(os.cpu_count() or 4, 8))
         with ProcessPoolExecutor(max_workers=workers) as pool:
             nal_counts = list(pool.map(_decrypt_segment, work_items))
+        LOGGER.info("cctv native: decrypt %d segments in %.1fs", len(segment_names), time.monotonic() - t1)
 
         # 3) join in order and remux
+        t2 = time.monotonic()
         full_ts = work_dir / "full.ts"
         with full_ts.open("wb") as out:
             for i in range(len(segment_names)):
@@ -429,6 +437,7 @@ def download_h5e_native(
                 out.write(decrypted.read_bytes())
         mp4 = job_dir / f"{title}.mp4"
         _remux_to_mp4(full_ts, mp4, timeout=timeout, cancel_event=cancel_event)
+        LOGGER.info("cctv native: mux+health in %.1fs (total %.1fs)", time.monotonic() - t2, time.monotonic() - t0)
         return mp4
     finally:
         import shutil as _shutil
@@ -577,6 +586,7 @@ def download_wasm(
             segment_file.write_bytes(data)
             return True
 
+        t0 = time.monotonic()
         ok_count = 0
         with ThreadPoolExecutor(max_workers=_WASM_DL_THREADS) as pool:
             futures = [pool.submit(download_segment, i) for i in range(len(segment_names))]
@@ -589,8 +599,10 @@ def download_wasm(
                 f"WASM 降级失败：分片下载 {ok_count}/{len(segment_names)}",
                 retryable=True,
             )
+        LOGGER.info("cctv wasm: %d segments downloaded in %.1fs", len(segment_names), time.monotonic() - t0)
 
         # 2) decrypt in parallel groups (equal-length transforms, order fixed)
+        t1 = time.monotonic()
         group_count = max(1, min(_WASM_PARALLEL, len(segment_names)))
         groups = [
             [f"seg_{i:05d}.ts" for i in range(g, len(segment_names), group_count)]
@@ -621,8 +633,10 @@ def download_wasm(
                 f"WASM 降级失败：解密 {failed}/{group_count} 组失败",
                 retryable=True,
             )
+        LOGGER.info("cctv wasm: %d groups decrypted in %.1fs", group_count, time.monotonic() - t1)
 
         # 3) concatenate groups in order, then mux with ffmpeg
+        t2 = time.monotonic()
         full_ts = work_dir / "full.ts"
         with full_ts.open("wb") as out:
             for g in range(group_count):
@@ -640,6 +654,7 @@ def download_wasm(
                 f"WASM 降级失败：ffmpeg 封装失败（{stderr.strip()[-200:]}）",
                 retryable=True,
             )
+        LOGGER.info("cctv wasm: mux in %.1fs (total %.1fs)", time.monotonic() - t2, time.monotonic() - t0)
         return mp4
     finally:
         import shutil as _shutil
