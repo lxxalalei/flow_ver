@@ -29,6 +29,7 @@ education_resource_mcp = [
   "library-taxonomy.json",
   "acquisition/vendor/simple.min.css",
   "acquisition/vendor/SIMPLE_CSS_LICENSE.txt",
+  "vendor/cctv-h5e/**",
 ]
 
 [tool.pytest.ini_options]

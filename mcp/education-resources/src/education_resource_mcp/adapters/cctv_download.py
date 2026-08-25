@@ -30,7 +30,11 @@ from ..policy import ensure_within_root
 from ..sessions import SessionStore
 from .http_client import urlopen_with_fallback
 
-DEFAULT_H5E_PROJ = Path(r"C:\Users\admin\projects\mediacrawler\h5e_proj")
+# Vendored inside this package (MIT, github.com/xiaoxi-ij478/cctv-h5e-decrypt);
+# node_modules is regenerated with `npm ci` there.
+DEFAULT_H5E_PROJ = (
+    Path(__file__).resolve().parent.parent / "vendor" / "cctv-h5e"
+)
 # Fixed h5e m3u8 template used only when the per-video h5e_url is unavailable.
 # Its generality is unconfirmed; CCTV_H5E_BASE can override it.
 DEFAULT_H5E_BASE = "https://dh5ws01.v.cntv.cn/asp/h5e/hls/2000/0303000a/3/default"
@@ -367,10 +371,13 @@ def download_h5e_native(
 
 
 def resolve_h5e_proj() -> Path:
-    """Locate the WASM worker project: ``CCTV_H5E_PROJ`` env override first."""
+    """Locate the WASM worker project: the package-internal vendor first,
+    ``CCTV_H5E_PROJ`` as an override."""
 
+    candidates: list[Path] = []
     configured = os.environ.get("CCTV_H5E_PROJ", "").strip()
-    candidates = [Path(configured)] if configured else []
+    if configured:
+        candidates.append(Path(configured))
     candidates.append(DEFAULT_H5E_PROJ)
     for candidate in candidates:
         try:
@@ -380,8 +387,9 @@ def resolve_h5e_proj() -> Path:
             continue
     raise DomainError(
         "PROVIDER_UNAVAILABLE",
-        "未找到 h5e_proj（官方 WASM 解密工程，含 src/cli/main.ts）。"
-        "请设置环境变量 CCTV_H5E_PROJ 指向该工程目录",
+        "未找到 h5e 解密工程（含 src/cli/main.ts）。包内 vendor 目录缺失或未安装"
+        "依赖：请运行 `cd mcp/education-resources/vendor/cctv-h5e && npm ci`；"
+        "或用环境变量 CCTV_H5E_PROJ 指向其他安装",
         retryable=False,
     )
 

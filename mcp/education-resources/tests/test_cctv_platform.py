@@ -468,12 +468,12 @@ def _classic_encrypted_ts() -> tuple[bytes, bytes]:
     else:
         raise AssertionError("无法构造不含假 start code 的加密 NAL")
 
-    def packet(payload: bytes, pusi: bool) -> bytes:
+    def packet(payload: bytes, pusi: bool, cc: int) -> bytes:
         pkt = bytearray(188)
         pkt[0] = 0x47
         pkt[1] = 0x41 if pusi else 0x01  # PID 0x100 + PUSI
         pkt[2] = 0x00
-        pkt[3] = 0x10  # afc=1 payload only, full 184-byte payload
+        pkt[3] = 0x10 | (cc & 0x0F)  # afc=1 payload only, continuity counter
         pkt[4:4 + len(payload)] = payload
         return bytes(pkt)
 
@@ -483,10 +483,10 @@ def _classic_encrypted_ts() -> tuple[bytes, bytes]:
     plain_nal = build(0x55)
     body = pes_header + start_code + bytes(plain_nal) + trailer
     assert len(body) == 368
-    plain = packet(body[:184], True) + packet(body[184:], False)
+    plain = packet(body[:184], True, 0) + packet(body[184:], False, 1)
     enc_body = pes_header + start_code + bytes(nal) + trailer
     assert len(enc_body) == 368
-    encrypted = packet(enc_body[:184], True) + packet(enc_body[184:], False)
+    encrypted = packet(enc_body[:184], True, 0) + packet(enc_body[184:], False, 1)
     return plain, encrypted
 
 

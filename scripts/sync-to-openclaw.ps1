@@ -31,7 +31,7 @@ $RetiredPkgDir    = "$WinLocal\packages\session-manager"
 $RetiredDataDir   = "$WinLocal\session-manager"
 $RetiredSkillLink = "$env:USERPROFILE\.openclaw\skills\session-login-flow"
 
-$ExcludeDirs  = @('__pycache__', '.pytest_cache', 'venv', '.venv', 'build', '.git')
+$ExcludeDirs  = @('__pycache__', '.pytest_cache', 'venv', '.venv', 'build', '.git', 'node_modules')
 $ExcludeFiles = @('*.pyc', '*.egg-info', 'database.sqlite')
 
 # ---------------------------------------------------------------------------

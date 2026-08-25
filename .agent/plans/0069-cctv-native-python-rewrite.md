@@ -75,6 +75,12 @@ h5e 解密 -> cctv_h5e_decrypt.hpp 的 decrypt_ts_inplace(data,len,Session,vpid)
   独有的全覆盖变换（非 TEA 变体，参数扫描不匹配），离线无法复现 → 含此类
   NAL 的老视频 native 解码脏（20 片 1762 错）→ **自动 WASM 降级兜底**（现有
   体检门槛架构生效）。结论：**WASM 仍是必要兜底，不可移除**；native 是主路径。
+- **部署独立性（用户要求）**：h5e 解密工程从 mediacrawler 目录 **vendored 进
+  包内** `src/education_resource_mcp/vendor/cctv-h5e/`（MIT，
+  github.com/xiaoxi-ij478/cctv-h5e-decrypt；6.5M 源码 + LICENSE，node_modules
+  排除于 git，部署 `npm ci` 生成）；`resolve_h5e_proj()` 默认包内 vendor，
+  `CCTV_H5E_PROJ` 仅作覆盖。pyproject package-data 含 vendor/**。项目不再
+  依赖任何本机其他项目目录。
 - **GPL 合规**：`adapters/cctv_h5e.py` 头部标注 GPLv3 渊源；分发时该文件按
   GPLv3 条款处理（含源码获取说明）。
 - 更新 TOOLS.md / 0068 计划引用 / 同步 OpenClaw。

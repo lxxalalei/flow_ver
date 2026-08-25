@@ -7,6 +7,9 @@ __pycache__/
 *.zip
 *.egg-info
 
+# Vendored node project runtime deps (npm ci regenerates them)
+mcp/education-resources/src/education_resource_mcp/vendor/cctv-h5e/node_modules/
+
 # OpenClaw runtime / control files
 HEARTBEAT.md
 openclaw-workspace-state.json
