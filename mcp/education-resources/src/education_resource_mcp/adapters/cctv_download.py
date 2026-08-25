@@ -21,6 +21,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from urllib.request import Request
 
 from ..config import Settings
@@ -56,29 +57,41 @@ def _run_with_cancel(
     *,
     timeout: float,
     cancel_event: Any = None,
+    cwd: Path | None = None,
 ) -> tuple[int, str, str]:
-    """Run a subprocess while staying responsive to job cancellation."""
+    """Run a subprocess while staying responsive to job cancellation.
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    deadline = time.monotonic() + timeout
-    while proc.poll() is None:
-        if cancel_event is not None and cancel_event.is_set():
-            proc.kill()
-            raise DomainError("JOB_CANCELLED", "下载已取消")
-        if time.monotonic() > deadline:
-            proc.kill()
-            raise DomainError(
-                "DOWNLOAD_FAILED", "子进程执行超时", retryable=True
-            )
-        time.sleep(0.5)
-    stdout, stderr = proc.communicate()
+    Output is redirected to temp files instead of PIPE: a child that floods
+    stderr (e.g. ffmpeg decoding a corrupt stream) would otherwise block on a
+    full pipe buffer while the poll loop never drains it (PIPE deadlock).
+    ``cwd`` matters for the node/tsx WASM worker — tsx resolves from the
+    vendored project's node_modules, never from the caller's directory.
+    """
+
+    import tempfile
+
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            cwd=cwd,
+        )
+        deadline = time.monotonic() + timeout
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                raise DomainError("JOB_CANCELLED", "下载已取消")
+            if time.monotonic() > deadline:
+                proc.kill()
+                raise DomainError(
+                    "DOWNLOAD_FAILED", "子进程执行超时", retryable=True
+                )
+            time.sleep(0.5)
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read().decode("utf-8", "replace")
+        stderr = stderr_file.read().decode("utf-8", "replace")
     return proc.returncode, stdout or "", stderr or ""
 
 
@@ -261,23 +274,17 @@ def _decrypt_segment(work: tuple[str, str]) -> int:
     return nal_count
 
 
-def download_h5e_native(
-    resource: Mapping[str, Any],
-    guid: str,
-    title: str,
-    job_dir: Path,
+def _fetch_media_m3u8(
+    m3u8_url: str,
     *,
     timeout: float,
     cancel_event: Any = None,
-) -> Path:
-    """Download + decrypt an h5e stream natively (no external runtime).
+) -> tuple[str, list[str]]:
+    """Fetch an h5e m3u8, resolving a master playlist to its 2000 variant.
 
-    Segments are fetched concurrently, decrypted in parallel worker processes
-    (each segment is an independent equal-length TEA/type transform), joined
-    in order and remuxed with ffmpeg.
+    Returns (media_url, segment_names). Raises DomainError on fetch failure.
     """
 
-    m3u8_url = resolve_wasm_m3u8(resource, guid)
     body = _http_fetch_bytes(m3u8_url, timeout=timeout, cancel_event=cancel_event)
     if body is None:
         raise DomainError(
@@ -285,9 +292,43 @@ def download_h5e_native(
             f"h5e m3u8 获取失败（{m3u8_url[:120]}）",
             retryable=True,
         )
+    text = body.decode("utf-8", "replace")
+    if "#EXT-X-STREAM-INF" in text:
+        variant = next(
+            (
+                line.strip()
+                for line in text.splitlines()
+                if line.strip() and not line.startswith("#")
+            ),
+            None,
+        )
+        if variant is None:
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                "h5e master 播放列表没有变体",
+                retryable=True,
+            )
+        # h5e_url carries query params (main.m3u8?maxbr=2048&...) — strip them
+        # before deriving the base; variants may be absolute paths.
+        base = m3u8_url.split("?", 1)[0].rsplit("/", 1)[0]
+        if variant.startswith("/"):
+            parsed = urlsplit(m3u8_url)
+            m3u8_url = f"{parsed.scheme}://{parsed.netloc}{variant}"
+        elif variant.startswith("http"):
+            m3u8_url = variant
+        else:
+            m3u8_url = f"{base}/{variant}"
+        body = _http_fetch_bytes(m3u8_url, timeout=timeout, cancel_event=cancel_event)
+        if body is None:
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                f"h5e 变体 m3u8 获取失败（{m3u8_url[:120]}）",
+                retryable=True,
+            )
+        text = body.decode("utf-8", "replace")
     segment_names = [
         line.strip()
-        for line in body.decode("utf-8", "replace").splitlines()
+        for line in text.splitlines()
         if line.strip() and not line.startswith("#")
     ]
     if not segment_names:
@@ -296,7 +337,32 @@ def download_h5e_native(
             "h5e m3u8 没有分片列表",
             retryable=True,
         )
-    base_url = m3u8_url.rsplit("/", 1)[0]
+    return m3u8_url, segment_names
+
+
+def download_h5e_native(
+    resource: Mapping[str, Any],
+    guid: str,
+    title: str,
+    job_dir: Path,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+    h5e_url: str | None = None,
+) -> Path:
+    """Download + decrypt an h5e stream natively (no external runtime).
+
+    Segments are fetched concurrently, decrypted in parallel worker processes
+    (each segment is an independent equal-length TEA/type transform), joined
+    in order and remuxed with ffmpeg. ``h5e_url`` (from getHttpVideoInfo)
+    takes precedence over the resource signals / template.
+    """
+
+    m3u8_url = h5e_url or resolve_wasm_m3u8(resource, guid)
+    m3u8_url, segment_names = _fetch_media_m3u8(
+        m3u8_url, timeout=timeout, cancel_event=cancel_event
+    )
+    base_url = m3u8_url.split("?", 1)[0].rsplit("/", 1)[0]
     work_dir = job_dir / f"{guid}_native_work"
     work_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -460,6 +526,7 @@ def _wasm_decrypt_group(
         ],
         timeout=timeout,
         cancel_event=cancel_event,
+        cwd=h5e_proj,
     )
     return code == 0 and output_ts.is_file() and output_ts.stat().st_size > 0
 
@@ -472,6 +539,7 @@ def download_wasm(
     *,
     timeout: float,
     cancel_event: Any = None,
+    h5e_url: str | None = None,
 ) -> Path:
     """Download + decrypt + mux via the official WASM worker; returns MP4 path.
 
@@ -485,27 +553,11 @@ def download_wasm(
             retryable=False,
         )
     h5e_proj = resolve_h5e_proj()
-    m3u8_url = resolve_wasm_m3u8(resource, guid)
-
-    body = _http_fetch_bytes(m3u8_url, timeout=timeout, cancel_event=cancel_event)
-    if body is None:
-        raise DomainError(
-            "DOWNLOAD_FAILED",
-            f"WASM 降级失败：h5e m3u8 获取失败（{m3u8_url[:120]}）",
-            retryable=True,
-        )
-    segment_names = [
-        line.strip()
-        for line in body.decode("utf-8", "replace").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
-    if not segment_names:
-        raise DomainError(
-            "DOWNLOAD_FAILED",
-            "WASM 降级失败：h5e m3u8 没有分片列表",
-            retryable=True,
-        )
-    base_url = m3u8_url.rsplit("/", 1)[0]
+    m3u8_url = h5e_url or resolve_wasm_m3u8(resource, guid)
+    m3u8_url, segment_names = _fetch_media_m3u8(
+        m3u8_url, timeout=timeout, cancel_event=cancel_event
+    )
+    base_url = m3u8_url.split("?", 1)[0].rsplit("/", 1)[0]
 
     work_dir = job_dir / f"{guid}_wasmwork"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -632,7 +684,10 @@ class CctvVideoDownloader:
         guid = str(signals.get("guid") or "").strip()
         title = _safe_title(str(resource.get("title") or "").strip() or guid)
 
-        if not guid:
+        # Search results carry a VIDE/VIDA page token (14-16 chars), not the
+        # real 32-hex guid that getHttpVideoInfo/cctv download need. Resolve
+        # the page whenever the guid is not a full 32-hex value.
+        if not re.fullmatch(r"[0-9a-f]{32}", guid):
             from .cctv import resolve_episode
 
             resolved = resolve_episode(
@@ -642,10 +697,10 @@ class CctvVideoDownloader:
                 guid = resolved["guid"]
                 if not str(resource.get("title") or "").strip():
                     title = _safe_title(resolved["title"])
-        if not guid:
+        if not re.fullmatch(r"[0-9a-f]{32}", guid):
             raise DomainError(
                 "CONTENT_VALIDATION_FAILED",
-                "央视视频缺少 guid，且无法从页面解析",
+                "央视视频缺少有效 32 位 guid，且无法从页面解析",
                 retryable=False,
             )
 
@@ -658,6 +713,7 @@ class CctvVideoDownloader:
 
         native_mp4: Path | None = None
         native_reason = ""
+        hls_h5e = ""
         try:
             manifest = (
                 self._video_info_func(guid, timeout=self.timeout)
@@ -669,6 +725,7 @@ class CctvVideoDownloader:
                 native_mp4 = download_h5e_native(
                     resource, guid, title, job_dir,
                     timeout=self.timeout, cancel_event=cancel_event,
+                    h5e_url=hls_h5e,
                 )
             else:
                 stream_url = str((manifest or {}).get("hls_url") or "").strip()
@@ -732,6 +789,7 @@ class CctvVideoDownloader:
                 job_dir,
                 timeout=self.timeout,
                 cancel_event=cancel_event,
+                h5e_url=hls_h5e if hls_h5e.startswith("http") else None,
             )
         except DomainError as exc:
             raise DomainError(

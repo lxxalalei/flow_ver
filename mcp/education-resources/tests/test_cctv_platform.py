@@ -295,7 +295,7 @@ class CctvDownloaderTests(unittest.TestCase):
     def test_native_h5e_success(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
 
-        def fake_h5e(resource, guid, title, job_dir, *, timeout, cancel_event):
+        def fake_h5e(resource, guid, title, job_dir, *, timeout, cancel_event, h5e_url=None):
             mp4 = job_dir / f"{title}.mp4"
             mp4.write_bytes(b"decrypted-data")
             return mp4
@@ -323,7 +323,7 @@ class CctvDownloaderTests(unittest.TestCase):
     def test_native_failure_falls_back_to_wasm(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
 
-        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event):
+        def fake_wasm(resource, guid, title, job_dir, *, timeout, cancel_event, h5e_url=None):
             mp4 = job_dir / f"{title}.mp4"
             mp4.write_bytes(b"wasm-data")
             return mp4
