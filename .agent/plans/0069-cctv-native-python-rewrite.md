@@ -41,12 +41,22 @@ h5e 解密 -> cctv_h5e_decrypt.hpp 的 decrypt_ts_inplace(data,len,Session,vpid)
 - `iter_column` 改为 **API 优先，cctv-dl 兜底**（过渡；M3 移除兜底）。
 - 测试：离线 mock（id 解析两路径、分页终止、字段宽容解析、API 失败降级）。
 
-### M2 下载自研
-- 普通流：Python 分片/直链下载 → ffmpeg 封装（复用 smartedu_download 的 HLS 骨架）。
-- H5E 流：Python 拉分片 → `cctv_h5e_decrypt.py` 解密（核对 Session 派生是否完整，
-  与 h5e_proj 官方 WASM 对照）→ 拼接 → ffmpeg → 体检。
-- `CctvVideoDownloader` 改为自研链，cctv-dl 仅 WASM 前的过渡兜底。
-- 测试：离线 mock 全链 + 体检门槛。
+### M2 下载自研（已完成 2026-08-25）
+- **核对发现并修复移植 bug**：mediacrawler `cctv_h5e_decrypt.py` 与 hpp 逐行
+  对应，但 `tea_decrypt_block` 的 **`>>5` 项 key 对调**（v1 行误用 k1、v0 行
+  误用 k3）——这就是当年"老方案"被弃用的**真实原因**（解密结果错误=乱码，
+  不是性能）。已按 hpp 标准配对（v1: k2/k3、v0: k0/k1）修复。
+- 解密模块搬入：`adapters/cctv_h5e.py`（GPLv3 渊源标注：移植自
+  letr007/CCTVVideoDownloader 的 cctv_h5e_decrypt.hpp）。
+- 普通流：`getHttpVideoInfo` manifest 无 h5e 时 → 普通 HLS（m3u8 分片 +
+  ffmpeg 拼接）或直链 MP4 下载（`download_stream_native`）。
+- H5E 流：Python 拉分片 → **ProcessPool 分片级并行解密**（每分片独立 TEA，
+  天然并行）→ 顺序拼接 → ffmpeg → 体检（`download_h5e_native`）。
+- `CctvVideoDownloader.download` 三级：**native → cctv-dl → WASM**，最终失败
+  聚合三条路径原因。
+- 测试（34 个）：含 classic 模式 TEA 往返（加密 TS 构造 + 解密恢复）、
+  非视频 PID pass-through、native 普通流/h5e/降级全路径。往返测试还验证了
+  TS 层（PES 跨包、AF 零吸收、0xFF 残留）的字节级一致性。
 
 ### M3 清理与验收
 - 移除 cctv-dl 依赖（`CCTV_DL_EXE` 退役）、移除 cctv-dl 兜底路径。

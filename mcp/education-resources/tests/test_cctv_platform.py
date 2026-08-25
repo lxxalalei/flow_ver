@@ -331,7 +331,101 @@ class CctvExpansionTests(unittest.TestCase):
         self.assertEqual(results[0]["metadata"]["platform_signals"]["publish_time"], "2021-02-12 12:00")
 
 
+def _skip_native(guid: str, *, timeout: float) -> dict:
+    """Test helper: make the native route fail fast (falls through to cctv-dl)."""
+
+    raise DomainError("PARTIAL_FAILURE", "native 跳过", True)
+
+
 class CctvDownloaderTests(unittest.TestCase):
+    def test_native_plain_stream_success(self) -> None:
+        """M2: plain stream route succeeds with route=native."""
+
+        tmp = Path(self.enterContext(_tmp_dir()))
+
+        def fake_stream(url, title, job_dir, *, timeout, cancel_event):
+            mp4 = job_dir / f"{title}.mp4"
+            mp4.write_bytes(b"stream-data")
+            return mp4
+
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            video_info_func=lambda guid, *, timeout: {"hls_url": "https://cdn.example/v.m3u8"},
+            health_checker=lambda path: 0,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "新视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(
+            cctv_download, "download_stream_native", fake_stream
+        ):
+            result = downloader.download(resource, "job8", "direct", threading.Event())
+        self.assertEqual(result.metadata["route"], "native")
+        self.assertEqual(result.filename, "新视频.mp4")
+
+    def test_native_h5e_success(self) -> None:
+        """M2: h5e native decrypt route succeeds."""
+
+        tmp = Path(self.enterContext(_tmp_dir()))
+
+        def fake_h5e(resource, guid, title, job_dir, *, timeout, cancel_event):
+            mp4 = job_dir / f"{title}.mp4"
+            mp4.write_bytes(b"decrypted-data")
+            return mp4
+
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            video_info_func=lambda guid, *, timeout: {
+                "h5e_url": "https://dh5ws01.v.cntv.cn/asp/h5e/hls/x/y/abc/2000.m3u8"
+            },
+            health_checker=lambda path: 0,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "老视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        with mock.patch.object(
+            cctv_download, "download_h5e_native", fake_h5e
+        ):
+            result = downloader.download(resource, "job9", "direct", threading.Event())
+        self.assertEqual(result.metadata["route"], "native")
+
+    def test_native_failure_falls_back_to_cctv_dl(self) -> None:
+        """M2: native fails, cctv-dl succeeds -> route cctv-dl."""
+
+        tmp = Path(self.enterContext(_tmp_dir()))
+
+        def fake_runner(cmd, *, timeout, cancel_event):
+            output = Path(cmd[cmd.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "video.mp4").write_bytes(b"x" * 32)
+            return 0, '{"event":"download_complete","failed":0,"total":3}\n', ""
+
+        downloader = CctvVideoDownloader(
+            None,
+            _settings(tmp),
+            exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
+            runner=fake_runner,
+            health_checker=lambda path: 0,
+            video_info_func=_skip_native,
+        )
+        resource = {
+            "platform": "cctv",
+            "title": "视频",
+            "source_url": "https://tv.cctv.com/2021/02/12/VIDE001.shtml",
+            "metadata": {"platform_signals": {"guid": _GUID}},
+        }
+        result = downloader.download(resource, "job10", "direct", threading.Event())
+        self.assertEqual(result.metadata["attempts"], 1)
+        self.assertTrue(result.path.name.endswith(".mp4"))
+
     def test_download_success(self) -> None:
         tmp = Path(self.enterContext(_tmp_dir()))
         payload = b"x" * 128
@@ -351,6 +445,7 @@ class CctvDownloaderTests(unittest.TestCase):
             exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
             runner=fake_runner,
             health_checker=lambda path: 0,
+            video_info_func=_skip_native,
         )
         resource = {
             "platform": "cctv",
@@ -383,6 +478,7 @@ class CctvDownloaderTests(unittest.TestCase):
             exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
             runner=fake_runner,
             health_checker=lambda path: next(health_results),
+            video_info_func=_skip_native,
         )
         resource = {
             "platform": "cctv",
@@ -403,6 +499,7 @@ class CctvDownloaderTests(unittest.TestCase):
             exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
             runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
             health_checker=lambda path: 0,
+            video_info_func=_skip_native,
         )
         resource = {
             "platform": "cctv",
@@ -456,6 +553,7 @@ class CctvDownloaderTests(unittest.TestCase):
             exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
             runner=failing_runner,
             health_checker=lambda path: 0,
+            video_info_func=_skip_native,
         )
         resource = {
             "platform": "cctv",
@@ -470,6 +568,8 @@ class CctvDownloaderTests(unittest.TestCase):
         self.assertEqual(result.byte_size, len(payload))
 
     def test_wasm_fallback_fails_when_node_missing(self) -> None:
+        """native fails, cctv-dl fails, node missing -> final failure with cause."""
+
         tmp = Path(self.enterContext(_tmp_dir()))
         downloader = CctvVideoDownloader(
             None,
@@ -477,6 +577,7 @@ class CctvDownloaderTests(unittest.TestCase):
             exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
             runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
             health_checker=lambda path: 0,
+            video_info_func=_skip_native,
         )
         resource = {
             "platform": "cctv",
@@ -489,8 +590,116 @@ class CctvDownloaderTests(unittest.TestCase):
         ):
             with self.assertRaises(DomainError) as ctx:
                 downloader.download(resource, "job6", "direct", threading.Event())
-        self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
+        self.assertEqual(ctx.exception.code, "DOWNLOAD_FAILED")
+        self.assertIn("WASM", ctx.exception.message)
         self.assertIn("node", ctx.exception.message)
+
+
+def _tea_encrypt_block(data: bytearray, pos: int, key: bytes) -> None:
+    """Test-only TEA-16 encrypt matching the hpp reference implementation.
+
+    Standard key pairing (v0: k0/k1, v1: k2/k3) with ``sum`` advanced before
+    each round (1..16 delta) — the exact shape of ``tea_encrypt_block`` in
+    cctv_h5e_decrypt.hpp.
+    """
+
+    import struct as _struct
+
+    M32 = 0xFFFFFFFF
+    v0, v1 = _struct.unpack_from("<II", data, pos)
+    k0, k1, k2, k3 = _struct.unpack_from("<IIII", key, 0)
+    delta = 0x9E3779B9
+    s = 0
+    for _ in range(16):
+        s = (s + delta) & M32
+        v0 = (v0 + ((((v1 << 4) & M32) + k0) ^ (v1 + s) ^ ((v1 >> 5) + k1))) & M32
+        v1 = (v1 + ((((v0 << 4) & M32) + k2) ^ (v0 + s) ^ ((v0 >> 5) + k3))) & M32
+    _struct.pack_into("<II", data, pos, v0, v1)
+
+
+def _classic_encrypted_ts() -> tuple[bytes, bytes]:
+    """Build a plaintext 2-packet TS with one classic NAL, plus the encrypted form.
+
+    The NAL body is filled with 0x55 (never 0x00) and the encrypted form is
+    regenerated until no fake 00 00 01 start-code sequence appears inside the
+    NAL — otherwise the TS parser would split the NAL at a false boundary.
+    """
+
+    import random as _random
+
+    key = bytes(range(16))
+
+    def build(fill: int) -> bytearray:
+        nal = bytearray(200)
+        nal[0] = 0x65  # type 5, classic mode (new_mode stays False)
+        nal[1:16] = bytes([fill]) * 15
+        nal[16:32] = key  # classic reads the key from nal[16:32]
+        nal[32:] = bytes([fill]) * 168
+        return nal
+
+    def has_fake_start(nal: bytes) -> bool:
+        return b"\x00\x00\x01" in nal or b"\x00\x00\x00\x01" in nal
+
+    # encrypted NAL (TEA on classic cells at 32 + j*80)
+    nal = build(0x55)
+    for attempt in range(50):
+        candidate = bytearray(nal)
+        for j in range(0, 200, 80):
+            if 32 + j + 8 <= len(candidate):
+                _tea_encrypt_block(candidate, 32 + j, key)
+        if not has_fake_start(bytes(candidate)):
+            nal = candidate
+            break
+    else:
+        raise AssertionError("无法构造不含假 start code 的加密 NAL")
+
+    def packet(payload: bytes, pusi: bool) -> bytes:
+        pkt = bytearray(188)
+        pkt[0] = 0x47
+        pkt[1] = 0x41 if pusi else 0x01  # PID 0x100 + PUSI
+        pkt[2] = 0x00
+        pkt[3] = 0x10  # afc=1 payload only, full 184-byte payload
+        pkt[4:4 + len(payload)] = payload
+        return bytes(pkt)
+
+    pes_header = b"\x00\x00\x01\xe0\x00\x00\x80\x80\x00"
+    start_code = b"\x00\x00\x01"
+    # Two full 184-byte payloads (368). After PES(9)+start(3)+nal(200) a
+    # trailing empty NAL (00 00 01 09, type 9 = untouched) terminates the real
+    # NAL; nal2 = 1 header byte + 152 pad makes new_pes == capacity (368) so
+    # no AF steal occurs and the round-trip is byte-exact.
+    trailer = b"\x00\x00\x01\x09" + bytes([0x55]) * 152
+    plain_nal = build(0x55)
+    body = pes_header + start_code + bytes(plain_nal) + trailer
+    assert len(body) == 368
+    plain = packet(body[:184], True) + packet(body[184:], False)
+    enc_body = pes_header + start_code + bytes(nal) + trailer
+    assert len(enc_body) == 368
+    encrypted = packet(enc_body[:184], True) + packet(enc_body[184:], False)
+    return plain, encrypted
+
+
+class CctvH5eDecryptTests(unittest.TestCase):
+    """Round-trip proof that the ported h5e decryptor actually decrypts."""
+
+    def test_classic_mode_round_trip(self) -> None:
+        from education_resource_mcp.adapters.cctv_h5e import decrypt_ts
+
+        plain, encrypted = _classic_encrypted_ts()
+        out, nal_count = decrypt_ts(encrypted)
+        # 2 NALs: the real classic NAL + the trailing empty type-9 NAL
+        self.assertEqual(nal_count, 2)
+        self.assertEqual(out, plain)
+
+    def test_plain_ts_passthrough(self) -> None:
+        """TS without video payload (non-0x100 PID) passes through untouched."""
+
+        from education_resource_mcp.adapters.cctv_h5e import decrypt_ts
+
+        ts = b"\x47" + bytes(187)  # PID 0x700, not the video pid 0x100
+        out, nal_count = decrypt_ts(ts)
+        self.assertEqual(nal_count, 0)
+        self.assertEqual(out, ts)
 
 
 class CctvWasmFallbackTests(unittest.TestCase):
@@ -589,6 +798,7 @@ class CctvWasmFallbackTests(unittest.TestCase):
             exe_resolver=lambda: Path("C:/fake/cctv-dl.exe"),
             runner=lambda cmd, *, timeout, cancel_event: (1, "", "boom"),
             health_checker=lambda path: 5000,
+            video_info_func=_skip_native,
         )
         resource = {
             "platform": "cctv",

@@ -208,6 +208,263 @@ def _unique_destination(destination: Path) -> Path:
     return destination
 
 
+def _download_stream_url(
+    url: str,
+    destination: Path,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> None:
+    """Stream one direct media URL (plain MP4) into ``destination``."""
+
+    destination.unlink(missing_ok=True)
+    request = Request(url, headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+        ),
+        "Referer": "https://tv.cctv.com/",
+    })
+    try:
+        with urlopen_with_fallback(request, timeout=timeout) as resp:
+            with destination.open("wb") as out:
+                while True:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise DomainError("JOB_CANCELLED", "下载已取消")
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def _hls_segments(playlist_text: str, base_url: str) -> list[str]:
+    segments: list[str] = []
+    for line in playlist_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        segment = line if line.startswith("http") else f"{base_url}/{line}"
+        segments.append(segment)
+    return segments
+
+
+def _remux_to_mp4(
+    source_ts: Path,
+    destination_mp4: Path,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> None:
+    """ffmpeg remux TS -> MP4 (copy codecs, faststart)."""
+
+    if shutil.which("ffmpeg") is None:
+        raise DomainError(
+            "DOWNLOAD_FAILED",
+            "ffmpeg 未安装，无法将视频封装为 MP4",
+            retryable=False,
+        )
+    code, _, stderr = _run_with_cancel(
+        ["ffmpeg", "-y", "-i", str(source_ts), "-c", "copy",
+         "-movflags", "+faststart", str(destination_mp4)],
+        timeout=timeout,
+        cancel_event=cancel_event,
+    )
+    if code != 0 or not destination_mp4.is_file():
+        destination_mp4.unlink(missing_ok=True)
+        raise DomainError(
+            "DOWNLOAD_FAILED",
+            f"ffmpeg 封装失败：{stderr.strip()[-200:]}",
+            retryable=True,
+        )
+
+
+def download_stream_native(
+    url: str,
+    title: str,
+    job_dir: Path,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> Path:
+    """Download a plain CCTV stream (direct MP4 or HLS) to an MP4 file.
+
+    HLS playlists are fetched, segments downloaded and concatenated, then
+    remuxed with ffmpeg. Direct media URLs are streamed as-is.
+    """
+
+    if url.startswith("http") and (".m3u8" in url or ".m3u" in url):
+        text = _http_fetch_bytes(url, timeout=timeout, cancel_event=cancel_event)
+        if text is None:
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                "央视网 HLS 播放列表获取失败",
+                retryable=True,
+            )
+        if "#EXT-X-STREAM-INF" in text.decode("utf-8", "replace"):
+            raise DomainError(
+                "FEATURE_NOT_SUPPORTED",
+                "央视网多码率 HLS 主列表暂不支持自动选变体",
+                retryable=False,
+            )
+        base_url = url.rsplit("/", 1)[0]
+        segment_urls = _hls_segments(text.decode("utf-8", "replace"), base_url)
+        work_dir = job_dir / f"{title}_hls"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            full_ts = work_dir / "full.ts"
+            with full_ts.open("wb") as out:
+                for index, segment_url in enumerate(segment_urls):
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise DomainError("JOB_CANCELLED", "下载已取消")
+                    data = _http_fetch_bytes(
+                        segment_url, timeout=timeout, cancel_event=cancel_event
+                    )
+                    if data is None:
+                        raise DomainError(
+                            "DOWNLOAD_FAILED",
+                            f"HLS 分片下载失败（{index + 1}/{len(segment_urls)}）",
+                            retryable=True,
+                        )
+                    out.write(data)
+            mp4 = job_dir / f"{title}.mp4"
+            _remux_to_mp4(full_ts, mp4, timeout=timeout, cancel_event=cancel_event)
+            return mp4
+        finally:
+            import shutil as _shutil
+
+            _shutil.rmtree(work_dir, ignore_errors=True)
+
+    mp4 = job_dir / f"{title}.mp4"
+    _download_stream_url(url, mp4, timeout=timeout, cancel_event=cancel_event)
+    return mp4
+
+
+def _decrypt_segment(work: tuple[str, str]) -> int:
+    """Multiprocessing target: decrypt one h5e TS segment in place."""
+
+    from .cctv_h5e import decrypt_ts
+
+    source_path, target_path = work
+    with open(source_path, "rb") as handle:
+        encrypted = handle.read()
+    plain, nal_count = decrypt_ts(encrypted)
+    with open(target_path, "wb") as handle:
+        handle.write(plain)
+    return nal_count
+
+
+def download_h5e_native(
+    resource: Mapping[str, Any],
+    guid: str,
+    title: str,
+    job_dir: Path,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> Path:
+    """Download + decrypt an h5e stream natively (no external runtime).
+
+    Segments are fetched concurrently, decrypted in parallel worker processes
+    (each segment is an independent equal-length TEA/type transform), joined
+    in order and remuxed with ffmpeg.
+    """
+
+    m3u8_url = resolve_wasm_m3u8(resource, guid)
+    body = _http_fetch_bytes(m3u8_url, timeout=timeout, cancel_event=cancel_event)
+    if body is None:
+        raise DomainError(
+            "DOWNLOAD_FAILED",
+            f"h5e m3u8 获取失败（{m3u8_url[:120]}）",
+            retryable=True,
+        )
+    segment_names = [
+        line.strip()
+        for line in body.decode("utf-8", "replace").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    if not segment_names:
+        raise DomainError(
+            "DOWNLOAD_FAILED",
+            "h5e m3u8 没有分片列表",
+            retryable=True,
+        )
+    base_url = m3u8_url.rsplit("/", 1)[0]
+    work_dir = job_dir / f"{guid}_native_work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        encrypted_dir = work_dir / "enc"
+        decrypted_dir = work_dir / "dec"
+        encrypted_dir.mkdir(parents=True, exist_ok=True)
+        decrypted_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1) concurrent segment download
+        def download_segment(index: int) -> bool:
+            target = encrypted_dir / f"seg_{index:05d}.ts"
+            if target.exists() and target.stat().st_size > 0:
+                return True
+            data = _http_fetch_bytes(
+                f"{base_url}/{segment_names[index]}",
+                timeout=timeout,
+                cancel_event=cancel_event,
+            )
+            if data is None:
+                return False
+            target.write_bytes(data)
+            return True
+
+        ok_count = 0
+        with ThreadPoolExecutor(max_workers=_WASM_DL_THREADS) as pool:
+            futures = [
+                pool.submit(download_segment, i) for i in range(len(segment_names))
+            ]
+            for future in as_completed(futures):
+                if future.result():
+                    ok_count += 1
+        if ok_count < len(segment_names):
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                f"h5e 分片下载 {ok_count}/{len(segment_names)} 失败",
+                retryable=True,
+            )
+
+        # 2) parallel native decryption (each segment independent)
+        from concurrent.futures import ProcessPoolExecutor
+
+        work_items = [
+            (
+                str(encrypted_dir / f"seg_{i:05d}.ts"),
+                str(decrypted_dir / f"seg_{i:05d}.ts"),
+            )
+            for i in range(len(segment_names))
+        ]
+        workers = max(1, min(os.cpu_count() or 4, 8))
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            nal_counts = list(pool.map(_decrypt_segment, work_items))
+
+        # 3) join in order and remux
+        full_ts = work_dir / "full.ts"
+        with full_ts.open("wb") as out:
+            for i in range(len(segment_names)):
+                decrypted = decrypted_dir / f"seg_{i:05d}.ts"
+                if not decrypted.exists() or decrypted.stat().st_size == 0:
+                    raise DomainError(
+                        "DOWNLOAD_FAILED",
+                        f"h5e 分片 {i} 解密失败（NAL={nal_counts[i]}）",
+                        retryable=True,
+                    )
+                out.write(decrypted.read_bytes())
+        mp4 = job_dir / f"{title}.mp4"
+        _remux_to_mp4(full_ts, mp4, timeout=timeout, cancel_event=cancel_event)
+        return mp4
+    finally:
+        import shutil as _shutil
+
+        _shutil.rmtree(work_dir, ignore_errors=True)
+
+
 def resolve_h5e_proj() -> Path:
     """Locate the WASM worker project: ``CCTV_H5E_PROJ`` env override first."""
 
@@ -440,12 +697,14 @@ class CctvVideoDownloader:
         exe_resolver: Callable[[], Path] = resolve_cctv_dl_exe,
         runner: Callable[..., tuple[int, str, str]] | None = None,
         health_checker: Callable[[Path], int | None] | None = None,
+        video_info_func: Callable[[str, float], dict[str, Any] | None] | None = None,
     ) -> None:
         self.settings = settings
         self.timeout = float(settings.download_timeout_seconds)
         self._exe_resolver = exe_resolver
         self._runner = runner or _run_with_cancel
         self._health_checker = health_checker or ffmpeg_error_count
+        self._video_info_func = video_info_func
 
     def download(
         self,
@@ -485,12 +744,84 @@ class CctvVideoDownloader:
                 retryable=False,
             )
 
-        exe = self._exe_resolver()
         job_dir = self.settings.jobs_dir / job_id
         work_dir = job_dir / "cctv-dl"
         work_dir.mkdir(parents=True, exist_ok=True)
         ensure_within_root(job_dir, self.settings.jobs_dir)
 
+        # ---- native route first (0069 M2): plain stream or h5e decrypt ----
+        from .cctv import video_info  # local import: cctv imports cctv_download
+
+        native_mp4: Path | None = None
+        native_reason = ""
+        try:
+            manifest = (
+                self._video_info_func(guid, timeout=self.timeout)
+                if self._video_info_func is not None
+                else video_info(guid, timeout=self.timeout)
+            )
+            hls_h5e = str((manifest or {}).get("h5e_url") or "").strip()
+            if hls_h5e.startswith("http"):
+                native_mp4 = download_h5e_native(
+                    resource, guid, title, job_dir,
+                    timeout=self.timeout, cancel_event=cancel_event,
+                )
+            else:
+                stream_url = str((manifest or {}).get("hls_url") or "").strip()
+                if not stream_url.startswith("http"):
+                    stream_url = resolve_wasm_m3u8(resource, guid)
+                    # hls_url missing: try the plain h5e-less m3u8 only if it
+                    # actually exists; otherwise report the manifest gap.
+                    probe = _http_fetch_bytes(
+                        stream_url, timeout=self.timeout, cancel_event=cancel_event
+                    )
+                    if probe is None:
+                        raise DomainError(
+                            "CONTENT_VALIDATION_FAILED",
+                            "央视视频详情未提供可用流地址",
+                            retryable=False,
+                        )
+                native_mp4 = download_stream_native(
+                    stream_url, title, job_dir,
+                    timeout=self.timeout, cancel_event=cancel_event,
+                )
+        except DomainError as exc:
+            if exc.code == "JOB_CANCELLED":
+                raise
+            native_reason = f"自研下载失败：{exc.code}: {exc.message}"
+        except Exception as exc:
+            native_reason = f"自研下载异常：{type(exc).__name__}: {exc}"
+
+        if native_mp4 is not None:
+            native_errors = self._health_checker(native_mp4)
+            if native_errors is not None and native_errors <= HEALTH_ERROR_THRESHOLD:
+                byte_size = native_mp4.stat().st_size
+                digest = hashlib.sha256()
+                with native_mp4.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                        digest.update(chunk)
+                return DownloadResult(
+                    native_mp4,
+                    byte_size,
+                    "video/mp4",
+                    digest.hexdigest(),
+                    native_mp4.name,
+                    metadata={
+                        "guid": guid,
+                        "route": "native",
+                        "health_errors": native_errors,
+                        "attempts": 1,
+                    },
+                )
+            native_mp4.unlink(missing_ok=True)
+            native_reason = f"自研产物体检失败（{native_errors} 错）"
+
+        # ---- cctv-dl fallback (transitional, removed in M3) ----
+        try:
+            exe = self._exe_resolver()
+        except DomainError as exc:
+            exe = None
+            last_reason = f"cctv-dl 不可用：{exc.message}"
         quality = os.environ.get("CCTV_QUALITY", "0").strip() or "0"
         last_reason = "未执行"
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -553,14 +884,22 @@ class CctvVideoDownloader:
         #      decryption defect (garble); the official worker re-decrypts. ----
         if cancel_event is not None and cancel_event.is_set():
             raise DomainError("JOB_CANCELLED", "下载已取消")
-        wasm_mp4 = download_wasm(
-            resource,
-            guid,
-            title,
-            job_dir,
-            timeout=self.timeout,
-            cancel_event=cancel_event,
-        )
+        try:
+            wasm_mp4 = download_wasm(
+                resource,
+                guid,
+                title,
+                job_dir,
+                timeout=self.timeout,
+                cancel_event=cancel_event,
+            )
+        except DomainError as exc:
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                f"央视视频下载失败：{native_reason or '自研路径未尝试'}；"
+                f"cctv-dl 失败（{last_reason}）；WASM 降级失败（{exc.message}）",
+                retryable=False,
+            ) from exc
         wasm_errors = self._health_checker(wasm_mp4)
         if wasm_errors is None or wasm_errors <= HEALTH_ERROR_THRESHOLD:
             byte_size = wasm_mp4.stat().st_size
@@ -584,9 +923,9 @@ class CctvVideoDownloader:
         wasm_mp4.unlink(missing_ok=True)
         raise DomainError(
             "DOWNLOAD_FAILED",
-            f"央视视频下载失败：cctv-dl 确定性失败（{last_reason}）后，WASM 降级"
-            f"体检失败（{wasm_errors} 错 > {HEALTH_ERROR_THRESHOLD}）。"
-            "该视频可能加密形态特殊，需人工处理",
+            f"央视视频下载失败：{native_reason or '自研路径未尝试'}；cctv-dl 失败"
+            f"（{last_reason}）；WASM 降级体检失败（{wasm_errors} 错 > "
+            f"{HEALTH_ERROR_THRESHOLD}）。该视频可能加密形态特殊，需人工处理",
             retryable=False,
         )
 
