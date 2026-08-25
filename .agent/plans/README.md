@@ -2,9 +2,10 @@
 
 ## 当前执行路线
 
-- 当前没有未完成的 active 实施计划。0072 的平台 Expand 与 SmartEdu 内部依赖边界收敛已经完成并归档。
+- 当前唯一 active 实施计划：[`0073-correctness-hardening-openclaw-e2e.md`](0073-correctness-hardening-openclaw-e2e.md)。
+- 本轮停止新增平台，先修复已确认 correctness 问题、清理无业务依据的残余复杂度，并恢复真实 OpenClaw 用户链路为 release gate。
 
-既有实现、CCTV 专项、HTML Design、SmartEdu 文件资源与暂未执行的真实平台验收计划均已退出顶层；它们只作为归档证据或后续真实验收清单。新的工作开始前应建立一份唯一 active 计划，避免并行路线漂移。
+既有实现、CCTV 专项、HTML Design、SmartEdu 文件资源等已完成计划只作为归档证据。旧 `0028-real-openclaw-platform-e2e.md` 的真实验收责任由 0073 接替；在 0073 完成真实验收前，不得把后端测试、stdio probe 或历史 smoke 视为当前完整用户链路已通过。
 
 发生冲突时以运行时 Tool schema 为机器事实、以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。不要从旧计划恢复另一条公共能力面。
 
@@ -146,7 +147,7 @@ Scope drift detected?:
 | Validation | Result | What it proves | What it does NOT prove |
 | --- | --- | --- | --- |
 | targeted unit | | | |
-| integration | | | |
+| integration | | | real Agent/user flow |
 | backend E2E | | | real Agent/user flow |
 | real Agent/user flow | | | |
 | full regression | | | |
