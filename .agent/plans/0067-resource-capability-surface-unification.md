@@ -28,11 +28,11 @@
 
 ## Current architecture
 
-- Public MCP 已收敛为 13 个 Tool；资源核心是 Search / Expand / Import / Inspect / Download，完整展开结果由通用 Job + `results.jsonl` + `resource_job_read` 承载。
-- `resource_browse_creator`、`resource_batch_collect`、`resource_batch_read` 及其 mode 已退出公共 Tool schema；旧 `batch.py` 仍是待确认无调用后的内部清理项。
+- Public MCP 已收敛为 11 个 Tool；资源核心是 Search / Expand / Import / Inspect / Download，完整展开结果由通用 Job + `results.jsonl` + `resource_job_read` 承载。
+- `resource_browse_creator`、`resource_batch_collect`、`resource_batch_read` 及其 mode 已退出公共 Tool schema，旧 `batch.py` 和专属测试已经删除。
 - Bilibili creator/collection、Douyin creator/collection、Ximalaya creator/album、SmartEdu textbook、Zjer course 与 CCTV column/series 已进入通用 Expand 路线。
 - SmartEdu course 独立 file Resource 身份仍是明确缺口，不猜身份。
-- active 图书平台身份已改为 `libgen`；部分内部类名、Provider/Session 配置与 Anna 镜像候选仍待清理。
+- active 图书平台身份和内部 Search/Inspect/Download Provider 均已统一为 `libgen`，Anna 镜像候选和旧 Session 配置已经删除。
 - `TOOLS.md`、`CURRENT_ARCHITECTURE.md`、MCP README 与 active Skill references 统一描述当前公共面；旧计划只保留 superseded 标记。
 
 ## Expected change surface
@@ -75,9 +75,10 @@ Should not change:
 - [x] completed：完成 `libgen` 公共平台身份迁移与 Inspector 显式注册。
 - [x] completed：更新 Skill、TOOLS、MCP README、当前架构与计划入口，消除旧公共路线漂移。
 - [x] completed：基于喜马拉雅当前网页 `/revision/user/pub` 的 `totalCount` 分页实现 Ximalaya creator → album[]，提前断页显式失败。
-- [ ] in_progress：清理 active LibGen 内部 Anna 候选/Provider/Session 残留，并修正对应旧测试断言。
+- [x] completed：清理 active LibGen 内部 Anna 候选/Provider/Session 残留，并修正对应旧测试断言。
+- [x] completed：修复 SmartEdu 教材 Expand 匿名 CDN 路线，按真实终止信号完整分页，并显式报告不可路由绑定类型。
 - [ ] pending：调查并按真实证据决定 SmartEdu course 子资源缺口。
-- [ ] pending：运行最小充分测试与 Tool schema probe，修复回归。
+- [x] completed：通过 MCP 全量测试、静态编译与 stdio Tool schema probe；SmartEdu CDN 真实匿名 smoke 在当前网络出口收到 403，并已确认该失败不会被误判为正常分页结束。
 - [ ] pending：由 [0028-real-openclaw-platform-e2e.md](0028-real-openclaw-platform-e2e.md) 完成真实平台/Agent 验证，再记录 checkpoint 并归档计划。
 
 ## Milestone checkpoint

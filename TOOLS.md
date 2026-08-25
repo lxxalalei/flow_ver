@@ -165,6 +165,8 @@ course   -> Expand -> file[]   # 待稳定 Resource 身份
 
 新旧教材、六三/五四、版本、课程类型等属于平台返回事实，不作为公共 Tool 的 `tabs/specs/mode` 参数。
 
+教材 Expand 匿名读取平台 CDN 连续分片，直到真实 404 或空分片。同步课和精品课生成真实子 Resource；`singing`、未来未知类型和无效条目不伪造 URL，计数写入 Expand Job 的 `summary.smartedu`。
+
 ## LibGen
 
 运行时平台身份为：

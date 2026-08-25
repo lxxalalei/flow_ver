@@ -514,7 +514,7 @@ class ResourceService:
     def job_status(self, job_id: str) -> dict[str, Any]:
         directory, job = self._load_job(job_id)
         job = self._reconcile(directory, job)
-        return {
+        result = {
             "job_id": job_id,
             "status": job.get("status"),
             "progress": {
@@ -524,6 +524,9 @@ class ResourceService:
             "files": [dict(item) for item in job.get("files") or []],
             "failures": [dict(item) for item in job.get("failures") or []],
         }
+        if isinstance(job.get("summary"), dict) and job["summary"]:
+            result["summary"] = dict(job["summary"])
+        return result
 
     def job_cancel(self, job_id: str) -> dict[str, Any]:
         directory, job = self._load_job(job_id)

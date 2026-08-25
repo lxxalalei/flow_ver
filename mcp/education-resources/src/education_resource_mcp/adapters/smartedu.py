@@ -63,6 +63,7 @@ TAG_DIMENSIONS = {
     "zxxnj": "grade",
     "zxxbb": "version",
     "zxxcc": "volume",
+    "zxxxjjc": "edition",
 }
 
 RESOURCE_EXTENSIONS = {
@@ -331,7 +332,7 @@ def _item_to_resource(item: dict[str, Any], query: str) -> dict[str, Any] | None
     visit_count = _first_value(item, ["visit_count", "visitCount", "view_count", "viewCount"])
     if isinstance(visit_count, (int, float)):
         signals["views"] = int(visit_count)
-    for dim in ("stage", "grade", "subject", "version"):
+    for dim in ("stage", "grade", "subject", "volume", "version", "edition"):
         val = _norm(tag_values.get(dim))
         if val:
             signals[dim] = val

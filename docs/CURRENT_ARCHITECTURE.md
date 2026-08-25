@@ -134,6 +134,8 @@ Cookie 平台当前已确认域名边界，但并非每个平台都已经实测�
 
 公共 Search / Catalog 始终匿名，不自动重放已保存浏览器 token。公共 401/403 按网络出口/IP 风控/平台访问拒绝处理，不自动转成登录流程。
 
+教材 URL 的 Expand 直接匿名读取资源分片，按真实 404 或空分片结束，不设置任意分片上限。同步课、精品课生成真实子 Resource；无独立详情 URL 的绑定类型与无效条目通过 Job `summary.smartedu` 显式计数。
+
 只有具体 Inspect / Download 真实返回 `AUTH_REQUIRED` 时才进入 Session Tool。
 
 ### LibGen

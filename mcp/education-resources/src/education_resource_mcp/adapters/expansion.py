@@ -17,6 +17,10 @@ from .http_client import urlopen_with_fallback
 
 _XIMALAYA_TRACKS_URL = "https://www.ximalaya.com/revision/album/v1/getTracksList"
 _XIMALAYA_CREATOR_ALBUMS_URL = "https://www.ximalaya.com/revision/user/pub"
+_SMARTEDU_MATERIAL_PARTS_URL = (
+    "https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/national_lesson/"
+    "teachingmaterials/{textbook_id}/resources/part_{part_no}.json"
+)
 _XIMALAYA_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -28,6 +32,7 @@ def expand_resource(
     target: Mapping[str, Any],
     *,
     cancel_event: Any = None,
+    summary: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Expand one container Resource using platform-owned mechanics."""
 
@@ -53,6 +58,14 @@ def expand_resource(
             "FEATURE_NOT_SUPPORTED",
             f"平台 {platform} 当前没有结构展开能力",
         )
+    if platform == "smartedu":
+        yield from handler(
+            adapter,
+            target,
+            cancel_event=cancel_event,
+            summary=summary,
+        )
+        return
     yield from handler(adapter, target, cancel_event=cancel_event)
 
 
@@ -351,11 +364,17 @@ def _expand_smartedu(
     target: Mapping[str, Any],
     *,
     cancel_event: Any = None,
+    summary: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     url = _url(target)
     kind = _kind(target)
     if kind == "textbook" or "/tchMaterial/" in url:
-        yield from _iter_smartedu_textbook(adapter, url, cancel_event=cancel_event)
+        yield from _iter_smartedu_textbook(
+            adapter,
+            target,
+            cancel_event=cancel_event,
+            summary=summary,
+        )
         return
     if kind == "course":
         raise DomainError(
@@ -370,48 +389,87 @@ def _expand_smartedu(
 
 def _iter_smartedu_textbook(
     adapter: Any,
-    source_url: str,
+    target: Mapping[str, Any],
     *,
     cancel_event: Any = None,
+    summary: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
+    source_url = _url(target)
     textbook_id = str(
         (urllib.parse.parse_qs(urlsplit(source_url).query).get("contentId") or [""])[0]
     ).strip()
     if not textbook_id:
         raise DomainError("INVALID_ARGUMENT", "SmartEdu 教材 URL 缺少 contentId")
 
-    from .smartedu import CDN_MATERIAL_PARTS_TMPL
-
     headers = adapter._build_headers()  # noqa: SLF001 - same platform layer
-    for part_no in range(100, 150):
+    parent_metadata = target.get("metadata")
+    parent_signals = (
+        parent_metadata.get("platform_signals")
+        if isinstance(parent_metadata, Mapping)
+        and isinstance(parent_metadata.get("platform_signals"), Mapping)
+        else {}
+    )
+    report: dict[str, Any] = {
+        "textbook_id": textbook_id,
+        "parts_read": 0,
+        "resource_counts": {},
+        "emitted": 0,
+        "skipped_types": {},
+        "invalid_items": 0,
+        "termination": None,
+    }
+    if summary is not None:
+        summary["smartedu"] = report
+
+    part_no = 100
+    while True:
         if cancel_event is not None and cancel_event.is_set():
+            report["termination"] = "cancelled"
             return
         try:
-            values = adapter._cdn_json(  # noqa: SLF001 - same platform layer
-                CDN_MATERIAL_PARTS_TMPL.format(mid=textbook_id, n=part_no),
+            values = _smartedu_cdn_json(
+                adapter,
+                _SMARTEDU_MATERIAL_PARTS_URL.format(
+                    textbook_id=urllib.parse.quote(textbook_id),
+                    part_no=part_no,
+                ),
                 headers,
             )
         except HTTPError as exc:
             if exc.code == 404:
+                report["termination"] = "not_found"
                 break
+            report["termination"] = "error"
+            raise
+        except Exception:
+            report["termination"] = "error"
             raise
         if not isinstance(values, list):
+            report["termination"] = "error"
             raise DomainError(
                 "PARTIAL_FAILURE",
                 "SmartEdu 教材资源分片格式异常",
                 retryable=True,
             )
+        report["parts_read"] += 1
+        if not values:
+            report["termination"] = "empty_page"
+            break
         for entry in values:
             if not isinstance(entry, dict):
+                report["invalid_items"] += 1
                 continue
             resource_type = str(entry.get("resource_type_code") or "").strip()
             child_id = str(entry.get("id") or "").strip()
             title = str(entry.get("title") or "").strip()
-            if (
-                not child_id
-                or not title
-                or resource_type not in {"national_lesson", "elite_lesson"}
-            ):
+            if not resource_type or not child_id or not title:
+                report["invalid_items"] += 1
+                continue
+            counts = report["resource_counts"]
+            counts[resource_type] = int(counts.get(resource_type) or 0) + 1
+            if resource_type not in {"national_lesson", "elite_lesson"}:
+                skipped = report["skipped_types"]
+                skipped[resource_type] = int(skipped.get(resource_type) or 0) + 1
                 continue
             child_url = (
                 "https://basic.smartedu.cn/syncClassroom/classActivity?activityId="
@@ -420,18 +478,37 @@ def _iter_smartedu_textbook(
                 else "https://basic.smartedu.cn/qualityCourse?courseId="
                 + urllib.parse.quote(child_id)
             )
+            child_signals = {
+                "textbook_id": textbook_id,
+                "resource_type_code": resource_type,
+            }
+            for key in ("subject", "grade", "volume", "version", "edition", "stage"):
+                if parent_signals.get(key) not in (None, ""):
+                    child_signals[key] = parent_signals[key]
+            report["emitted"] += 1
             yield {
                 "platform": "smartedu",
                 "title": title,
                 "source_url": child_url,
                 "resource_type": "course",
                 "metadata": {
-                    "platform_signals": {
-                        "textbook_id": textbook_id,
-                        "resource_type_code": resource_type,
-                    }
+                    "platform_signals": child_signals
                 },
             }
+        part_no += 1
+
+
+def _smartedu_cdn_json(
+    adapter: Any,
+    url: str,
+    headers: Mapping[str, str],
+) -> Any:
+    request = Request(url, headers=dict(headers))
+    with urlopen_with_fallback(
+        request,
+        timeout=float(getattr(adapter, "timeout", 30.0)),
+    ) as response:
+        return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
 def _expand_cctv(

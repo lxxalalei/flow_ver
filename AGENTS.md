@@ -96,7 +96,7 @@ Skill 不负责复制 MCP 参数表、返回字段、Provider 内部实现、Job
 
 当前 11 个 Tool 分为两组：
 
-资源能力：Search、Browse Creator、Import URL、Inspect、Download、Job Status/Cancel、Batch Collect/Read、Archive。
+资源能力：Search、Expand、Import URL、Inspect、Download、Job Status/Cancel/Read、Archive。
 
 Session 辅助能力：Session Status、Session Manage（save/delete）。
 
@@ -104,13 +104,13 @@ Session 辅助能力：Session Status、Session Manage（save/delete）。
 
 - `resource_id` 是当前 MCP 进程内的临时操作句柄，不持久化；
 - 真正稳定的资源身份是 URL、平台原生稳定 ID 等；
-- `job_id` 只为真实下载/Batch 长任务提供持久运行身份；
+- `job_id` 只为真实 Download/Expand 长任务提供持久运行身份；
 - SessionStore 只持久化平台真正需要的登录态；
 - 不持久化 Flow、Selection、Plan、Asset、Outcome 或证明链。
 
 用户已经明确选择资源并要求下载时，可直接调用下载能力，不增加 `prepare -> confirm -> start` 形式化二次确认。成功与否只依据真实 Job/文件结果。
 
-Batch 的分页大小只控制单次 Tool Result，不得变成完整枚举的数据上限。除非用户明确要求“最多 N 条”，否则完整枚举不得偷偷加 `max_items`。
+Expand 的读取分页只控制单次 Tool Result，不得变成完整枚举的数据上限。平台枚举必须依据真实终止信号，不得偷偷增加条目或分片上限。
 
 归档由 Agent 决定分类，MCP 只移动下载 Job 已产生的真实文件；不要恢复 ArchiveRecord、AssetBundle 或 archive digest/version 状态链。
 

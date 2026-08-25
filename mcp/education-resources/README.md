@@ -37,6 +37,8 @@ Session 辅助能力：
 
 容器资源统一通过 `resource_expand` 完整展开，结果通过 `resource_job_read` 分页进入上下文。旧 `resource_browse_creator` / `resource_batch_collect` / `resource_batch_read` 及其 mode 不属于公共能力。
 
+SmartEdu 教材 Expand 匿名读取连续 CDN 分片，以真实 404 或空分片结束。同步课、精品课写入结果；没有独立详情 URL 的类型、未知类型和无效项进入 `summary.smartedu`，不会伪造 URL 或静默消失。
+
 Session Tool 不应在每次资源操作前调用。只有真实资源能力返回 `AUTH_REQUIRED`，或用户主动要求管理平台会话时才使用。
 
 ## Resource 与 File

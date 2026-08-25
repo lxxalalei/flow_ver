@@ -159,7 +159,7 @@ def read_expand(
         int(job.get("completed") or 0),
     )
     status = str(job.get("status") or "")
-    return {
+    result = {
         "job_id": job_id,
         "kind": "resource_expand",
         "status": status,
@@ -172,6 +172,9 @@ def read_expand(
         ),
         "failures": [dict(item) for item in job.get("failures") or []],
     }
+    if isinstance(job.get("summary"), dict) and job["summary"]:
+        result["summary"] = dict(job["summary"])
+    return result
 
 
 def download_expanded(
@@ -256,6 +259,7 @@ def run_expand(directory: Path, service: Any = None) -> int:
     results_path = directory / RESULTS_NAME
     results_path.unlink(missing_ok=True)
     failures: list[dict[str, Any]] = []
+    summary: dict[str, Any] = {}
     count = 0
 
     try:
@@ -263,6 +267,7 @@ def run_expand(directory: Path, service: Any = None) -> int:
             service,
             target,
             cancel_event=cancel,
+            summary=summary,
         )
         seen: set[tuple[str, str]] = set()
         with results_path.open("w", encoding="utf-8") as handle:
@@ -302,9 +307,9 @@ def run_expand(directory: Path, service: Any = None) -> int:
 
     if cancel.is_set():
         final = "cancelled"
-    elif failures and count:
-        final = "partial"
-    elif count:
+    elif failures:
+        final = "partial" if count else "failed"
+    elif count or summary:
         final = "succeeded"
     else:
         final = "failed"
@@ -330,6 +335,7 @@ def run_expand(directory: Path, service: Any = None) -> int:
             "completed": count,
             "files": files,
             "failures": failures,
+            "summary": summary,
         },
     )
     return 0
@@ -340,6 +346,7 @@ def iter_expand(
     target: Mapping[str, Any],
     *,
     cancel_event: Any = None,
+    summary: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Delegate structural enumeration to the adapter layer."""
 
@@ -347,6 +354,7 @@ def iter_expand(
         service.search_provider,
         target,
         cancel_event=cancel_event,
+        summary=summary,
     )
 
 
