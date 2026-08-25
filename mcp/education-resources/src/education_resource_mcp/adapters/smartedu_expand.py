@@ -12,6 +12,16 @@ from urllib.request import Request
 
 from ..errors import DomainError
 from .http_client import urlopen_with_fallback
+from .smartedu_detail import read_course_detail
+from .smartedu_resource import (
+    _ACTIVE_PRIMARY_FORMATS,
+    _find_files,
+    _primary_candidate,
+    _role_for_candidate,
+    _select_course_files,
+    _smartedu_file_key,
+)
+
 
 _SMARTEDU_MATERIAL_PARTS_URL = (
     "https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/national_lesson/"
@@ -25,6 +35,16 @@ def _kind(target: Mapping[str, Any]) -> str:
 
 def _url(target: Mapping[str, Any]) -> str:
     return str(target.get("source_url") or "").strip()
+
+
+def _smartedu_course_detail(
+    adapter: Any,
+    source_url: str,
+) -> tuple[str, str, dict[str, Any]]:
+    """Compatibility seam for focused tests; actual access lives in smartedu_detail."""
+
+    return read_course_detail(adapter, source_url)
+
 
 def expand(
     adapter: Any,
@@ -57,50 +77,6 @@ def expand(
     )
 
 
-def _smartedu_course_detail(
-    adapter: Any,
-    source_url: str,
-) -> tuple[str, str, dict[str, Any]]:
-    from .smartedu_download import (
-        _DETAIL_MAX_BYTES,
-        _SMARTEDU_DETAIL_HOSTS,
-        _SmartEduHttpClient,
-        _raise_for_http_status,
-        _read_json_object,
-        _smartedu_headers,
-    )
-    from .smartedu_resource import _COURSE_TYPES, _detail_api_url, _resolve_content
-
-    content_id, content_type = _resolve_content(source_url)
-    if content_type not in _COURSE_TYPES:
-        raise DomainError("FEATURE_NOT_SUPPORTED", "SmartEdu 当前资源不是可展开课程")
-    token = ""
-    session_store = getattr(adapter, "session_store", None)
-    if session_store is not None:
-        session_data = session_store.get_session_data("smartedu") or {}
-        tokens = session_data.get("tokens") or {}
-        raw_token = str(tokens.get("accessToken") or "")
-        token = raw_token[7:].strip() if raw_token.casefold().startswith("bearer ") else raw_token
-    client = _SmartEduHttpClient(allowed_hosts=_SMARTEDU_DETAIL_HOSTS)
-    request = Request(
-        _detail_api_url(content_id, content_type, source_url),
-        headers=_smartedu_headers(token),
-    )
-    try:
-        with client.open(request, timeout=float(getattr(adapter, "timeout", 30.0))) as response:
-            _raise_for_http_status(response)
-            detail = _read_json_object(response, _DETAIL_MAX_BYTES, label="课程详情")
-    except DomainError:
-        raise
-    except Exception as exc:
-        raise DomainError(
-            "PARTIAL_FAILURE",
-            "SmartEdu 课程文件详情读取失败",
-            retryable=True,
-        ) from exc
-    return content_id, content_type, detail
-
-
 def _iter_smartedu_course_files(
     adapter: Any,
     target: Mapping[str, Any],
@@ -108,15 +84,6 @@ def _iter_smartedu_course_files(
     cancel_event: Any = None,
     summary: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    from .smartedu_resource import (
-        _ACTIVE_PRIMARY_FORMATS,
-        _find_files,
-        _primary_candidate,
-        _role_for_candidate,
-        _select_course_files,
-        _smartedu_file_key,
-    )
-
     source_url = _url(target)
     content_id, content_type, detail = _smartedu_course_detail(adapter, source_url)
     active = [
@@ -305,9 +272,7 @@ def _iter_smartedu_textbook(
                 "title": title,
                 "source_url": child_url,
                 "resource_type": "course",
-                "metadata": {
-                    "platform_signals": child_signals
-                },
+                "metadata": {"platform_signals": child_signals},
             }
         part_no += 1
 
