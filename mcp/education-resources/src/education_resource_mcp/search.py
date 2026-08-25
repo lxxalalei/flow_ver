@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 from typing import Any, Protocol
@@ -9,14 +10,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from concurrent.futures import ThreadPoolExecutor
-
 from .adapters import generic_web
-from .adapters.base import (
-    AdapterDescriptor,
-    PlatformSearchAdapter,
-    descriptor_for_platform,
-)
+from .adapters.base import PlatformSearchAdapter
 from .config import Settings
 from .errors import DomainError
 
@@ -25,16 +20,8 @@ class SearchProvider(Protocol):
     def search(
         self, search_tasks: list[dict[str, Any]], limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Execute *search_tasks* and return ``(resources, platform_runs)``.
-
-        *search_tasks* is a list of ``{"platform": str, "queries": [str, ...]}``
-        dicts and may carry a semantic ``direction`` label. Providers ignore the
-        label; the service attaches it to durable query provenance.
-        Implementations run platforms in parallel and queries within a platform
-        serially.  Each *platform_run* in the return value has the shape::
-
-            {"platform": str, "status": str, "query_runs": [{query, candidate_count, failure_count, ...}]}
-        """
+        """Execute *search_tasks* and return ``(resources, platform_runs)``."""
+        ...
 
 
 def canonical_http_url(value: str) -> str:
@@ -51,7 +38,6 @@ def canonical_http_url(value: str) -> str:
 class GenericWebSearchProvider:
     """Search the public web through the MCP-owned generic adapter."""
 
-    descriptor = descriptor_for_platform("generic")
     _CJK_ENGINES = ("duckduckgo", "baidu", "bing")
     _DEFAULT_ENGINES = ("bing",)
 
@@ -60,15 +46,7 @@ class GenericWebSearchProvider:
         self.engines = tuple(engines) if engines is not None else None
 
     def _engines_for_query(self, query: str) -> list[str]:
-        """Choose a bounded public-search route without rewriting the query.
-
-        Bing remains the conservative default for non-CJK text.  In the live
-        0028 environment it preserved full Chinese queries but repeatedly
-        returned results for only the leading concept.  The existing
-        DuckDuckGo/Baidu routes produced relevant Chinese candidates, so CJK
-        queries try those routes first while retaining Bing as a final source.
-        Explicit test/operator engine choices continue to take precedence.
-        """
+        """Choose a public-search route without rewriting the query."""
 
         if self.engines is not None:
             return list(self.engines)
@@ -78,8 +56,7 @@ class GenericWebSearchProvider:
 
     @staticmethod
     def _tuned_query(query: str) -> str:
-        """Turn 书名号 into an exact phrase so long Chinese book titles stop
-        degrading to their leading concept (feedback #10)."""
+        """Turn 书名号 into an exact phrase for long Chinese book titles."""
 
         def _quote(match: re.Match[str]) -> str:
             return f'"{match.group(1)}"'
@@ -89,7 +66,6 @@ class GenericWebSearchProvider:
     def _search_single(
         self, query: str, limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Execute one *generic* query and return ``(resources, errors)``."""
         tuned = self._tuned_query(query)
         try:
             response = generic_web.search(
@@ -189,8 +165,7 @@ class GenericWebSearchProvider:
                     )
                     task_error_count += 1
                     continue
-                for err in errors:
-                    task_error_count += 1
+                task_error_count += len(errors)
                 query_runs.append(
                     {
                         "query": query_text,
@@ -218,14 +193,11 @@ class GenericWebSearchProvider:
 class SearXNGSearchProvider:
     """Search through a local SearXNG instance via its JSON API."""
 
-    descriptor = descriptor_for_platform("generic")
-
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.base_url = settings.searxng_base_url or "http://localhost:8888"
 
     def _fetch_page(self, query: str, page_no: int) -> dict[str, Any]:
-        """Fetch a single SearXNG result page."""
         params = urlencode(
             {
                 "q": query,
@@ -241,8 +213,9 @@ class SearXNGSearchProvider:
         ) as response:
             return json.loads(response.read().decode("utf-8", "replace"))
 
-    def _parse_page(self, data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Extract resources and engine errors from a SearXNG response page."""
+    def _parse_page(
+        self, data: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         errors: list[dict[str, Any]] = []
         for entry in data.get("unresponsive_engines", []):
             engine_name = entry[0] if isinstance(entry, list) else str(entry)
@@ -289,7 +262,6 @@ class SearXNGSearchProvider:
     def _search_single(
         self, query: str, limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Execute one SearXNG query, paginating up to 5 pages."""
         max_pages = max(1, min(5, (limit + 19) // 20))
         all_resources: list[dict[str, Any]] = []
         all_errors: list[dict[str, Any]] = []
@@ -325,17 +297,15 @@ class SearXNGSearchProvider:
             all_errors.extend(page_errors)
 
             new_count = 0
-            for r in page_resources:
-                url = r["source_url"]
+            for resource in page_resources:
+                url = resource["source_url"]
                 if url in seen_urls:
                     continue
                 seen_urls.add(url)
-                all_resources.append(r)
+                all_resources.append(resource)
                 new_count += 1
 
-            if new_count == 0:
-                break
-            if len(all_resources) >= limit:
+            if new_count == 0 or len(all_resources) >= limit:
                 break
 
         return all_resources, all_errors
@@ -405,11 +375,7 @@ class SearXNGSearchProvider:
 
 
 class MultiPlatformSearchProvider:
-    """SearchProvider that dispatches to per-platform adapters.
-
-    Runs each platform's queries **serially** (to avoid triggering rate
-    limits) and all platforms **in parallel** via a thread pool.
-    """
+    """Dispatch search to platform adapters and the generic provider."""
 
     def __init__(
         self,
@@ -425,7 +391,9 @@ class MultiPlatformSearchProvider:
 
     def _register_default_adapters(self) -> None:
         """Instantiate built-in platform adapters."""
+
         import importlib
+
         adapter_classes: list[tuple[str, type]] = []
         for module_name, class_name in (
             ("bilibili", "BilibiliSearchAdapter"),
@@ -453,55 +421,24 @@ class MultiPlatformSearchProvider:
                 adapter_classes.append((module_name.replace("_", "-"), cls))
             except ImportError:
                 pass
-        for pid, cls in adapter_classes:
-            self.register_adapter(
-                cls(self.session_store, self.settings),
-                require_descriptor=True,
-            )
+        for _platform_id, cls in adapter_classes:
+            self.register_adapter(cls(self.session_store, self.settings))
 
-        # Zjer is a runtime-experimental direct-course integration from real
-        # course-detail evidence (plan 0052). It is intentionally registered
-        # outside the strict broad Registry set until native keyword search is
-        # confirmed and the Registry is aligned with a separate minimal diff.
         try:
             module = importlib.import_module(".adapters.zjer", package=__package__)
             cls = getattr(module, "ZjerSearchAdapter")
-            self.register_adapter(
-                cls(self.session_store, self.settings),
-                require_descriptor=False,
-            )
+            self.register_adapter(cls(self.session_store, self.settings))
         except ImportError:
             pass
 
-    def register_adapter(
-        self,
-        adapter: PlatformSearchAdapter,
-        *,
-        require_descriptor: bool = False,
-    ) -> None:
-        """Register or replace an adapter.
+    def register_adapter(self, adapter: PlatformSearchAdapter) -> None:
+        """Register or replace an adapter by its actual runtime platform id."""
 
-        Built-ins must expose the exact active Registry descriptor.  The
-        default remains compatible with legacy and third-party test stubs
-        that only expose ``platform_id``.
-        """
+        platform_id = str(getattr(adapter, "platform_id", "") or "").strip()
+        if not platform_id or not callable(getattr(adapter, "search", None)):
+            raise ValueError("adapter must declare platform_id and search()")
+        self._adapters[platform_id] = adapter
 
-        if require_descriptor:
-            descriptor = getattr(adapter, "descriptor", None)
-            if not isinstance(descriptor, AdapterDescriptor):
-                raise TypeError(
-                    f"built-in adapter {adapter.platform_id!r} has no AdapterDescriptor"
-                )
-            expected = descriptor_for_platform(adapter.platform_id)
-            if descriptor != expected:
-                raise ValueError(
-                    f"built-in adapter {adapter.platform_id!r} descriptor does not match Registry"
-                )
-        self._adapters[adapter.platform_id] = adapter
-
-    # ------------------------------------------------------------------
-    # Per-platform worker: runs queries serially, returns one platform_run.
-    # ------------------------------------------------------------------
     def _run_platform_adapter(
         self,
         platform: str,
@@ -515,7 +452,7 @@ class MultiPlatformSearchProvider:
         for query in queries:
             try:
                 resources, error = adapter.search(query, limit)
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover - adapter boundary
                 query_runs.append(
                     {
                         "query": query,
@@ -561,24 +498,22 @@ class MultiPlatformSearchProvider:
             status = "partial"
         else:
             status = "failed"
-        platform_run = {
+        return all_resources, {
             "platform": platform,
             "status": status,
             "query_runs": query_runs,
         }
-        return all_resources, platform_run
 
     def search(
         self, search_tasks: list[dict[str, Any]], limit: int
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        # Merge tasks that share the same platform (preserve order).
         merged: dict[str, dict[str, Any]] = {}
         for task in search_tasks:
             platform = str(task.get("platform") or "")
             queries = [
-                str(q.get("query") or "").strip()
-                for q in (task.get("queries") or [])
-                if str(q.get("query") or "").strip()
+                str(query.get("query") or "").strip()
+                for query in (task.get("queries") or [])
+                if str(query.get("query") or "").strip()
             ]
             if not queries:
                 continue
@@ -590,56 +525,77 @@ class MultiPlatformSearchProvider:
         if not merged:
             return [], []
 
-        # Partition into adapter-backed, generic, and unknown platforms.
-        adapter_platforms = {p: qs for p, qs in merged.items() if p in self._adapters}
-        generic_queries = merged.get("generic", {}).get("queries", [])
+        adapter_platforms = {
+            platform: entry
+            for platform, entry in merged.items()
+            if platform in self._adapters
+        }
+        generic_queries = list(merged.get("generic", {}).get("queries", []))
         unknown_platforms = {
-            p: qs for p, qs in merged.items()
-            if p != "generic" and p not in self._adapters
+            platform: entry
+            for platform, entry in merged.items()
+            if platform != "generic" and platform not in self._adapters
         }
 
-        # Build the full platform list for parallel execution.
-        work_items: list[tuple[str, Any]] = []
-        for pid, entry in adapter_platforms.items():
-            work_items.append((pid, ("adapter", entry)))
+        work_items: list[tuple[str, str, list[str]]] = []
+        for platform, entry in adapter_platforms.items():
+            work_items.append(
+                (platform, "adapter", list(entry.get("queries") or []))
+            )
         if generic_queries:
-            work_items.append(("generic", ("generic", generic_queries)))
+            work_items.append(("generic", "generic", generic_queries))
 
-        worker_count = max(1, min(len(work_items), self.settings.max_workers))
-
-        results_by_platform: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
+        results_by_platform: dict[
+            str, tuple[list[dict[str, Any]], dict[str, Any]]
+        ] = {}
         if work_items:
+            worker_count = max(
+                1, min(len(work_items), self.settings.max_workers)
+            )
             with ThreadPoolExecutor(max_workers=worker_count) as pool:
-                futures: dict[Any, str] = {}
-                for platform, (kind, entry) in work_items:
+                futures: dict[Any, tuple[str, list[str]]] = {}
+                for platform, kind, submitted_queries in work_items:
                     if kind == "adapter":
-                        adapter = self._adapters[platform]
-                        futures[
-                            pool.submit(
-                                self._run_platform_adapter,
-                                platform,
-                                adapter,
-                                entry.get("queries") or [],
-                                limit,
-                            )
-                        ] = platform
+                        future = pool.submit(
+                            self._run_platform_adapter,
+                            platform,
+                            self._adapters[platform],
+                            submitted_queries,
+                            limit,
+                        )
                     else:
-                        futures[
-                            pool.submit(self.generic_provider.search, [{"platform": "generic", "queries": [{"query": q} for q in queries]}], limit)
-                        ] = "generic"
+                        future = pool.submit(
+                            self.generic_provider.search,
+                            [
+                                {
+                                    "platform": "generic",
+                                    "queries": [
+                                        {"query": query}
+                                        for query in submitted_queries
+                                    ],
+                                }
+                            ],
+                            limit,
+                        )
+                    futures[future] = (platform, submitted_queries)
 
-                for future, platform in futures.items():
+                for future, (platform, submitted_queries) in futures.items():
                     try:
                         if platform == "generic":
                             generic_resources, generic_runs = future.result()
-                            # generic provider returns its own platform_run
                             results_by_platform[platform] = (
                                 generic_resources,
-                                generic_runs[0] if generic_runs else {"platform": "generic", "status": "failed", "query_runs": []},
+                                generic_runs[0]
+                                if generic_runs
+                                else {
+                                    "platform": "generic",
+                                    "status": "failed",
+                                    "query_runs": [],
+                                },
                             )
                         else:
                             results_by_platform[platform] = future.result()
-                    except Exception as exc:  # pragma: no cover - defensive
+                    except Exception as exc:  # pragma: no cover - provider boundary
                         results_by_platform[platform] = (
                             [],
                             {
@@ -647,7 +603,7 @@ class MultiPlatformSearchProvider:
                                 "status": "failed",
                                 "query_runs": [
                                     {
-                                        "query": "; ".join(queries) if kind == "adapter" else "; ".join(generic_queries),
+                                        "query": "; ".join(submitted_queries),
                                         "candidate_count": 0,
                                         "failure_count": 1,
                                         "error": {
@@ -660,7 +616,6 @@ class MultiPlatformSearchProvider:
                             },
                         )
 
-        # Build platform_runs in the order tasks were submitted.
         platform_runs: list[dict[str, Any]] = []
         all_resources: list[dict[str, Any]] = []
         available = sorted(self._adapters) + ["generic"]
@@ -672,7 +627,7 @@ class MultiPlatformSearchProvider:
                         "status": "skipped",
                         "query_runs": [
                             {
-                                "query": q,
+                                "query": query,
                                 "candidate_count": 0,
                                 "failure_count": 1,
                                 "error": {
@@ -684,7 +639,7 @@ class MultiPlatformSearchProvider:
                                     "retryable": False,
                                 },
                             }
-                            for q in unknown_platforms[platform].get("queries", [])
+                            for query in unknown_platforms[platform].get("queries", [])
                         ],
                     }
                 )
@@ -708,18 +663,8 @@ class MultiPlatformSearchProvider:
 def default_search_provider(
     settings: Settings, session_store: Any = None
 ) -> SearchProvider:
-    """Build the default search provider.
+    """Build the default search provider."""
 
-    Uses the bounded direct-search adapter by default.  CJK queries prefer the
-    existing DuckDuckGo/Baidu routes before Bing because live E2E evidence
-    showed materially better Chinese recall; non-CJK queries keep Bing as the
-    default.  Set ``settings.searxng_base_url`` *and*
-    ``settings.prefer_searxng`` to opt back into SearXNG.
-
-    When *session_store* is provided, wrap the generic provider in a
-    :class:`MultiPlatformSearchProvider` so platform-specific adapters
-    (bilibili, zhihu, smartedu, …) become available.
-    """
     if settings.searxng_base_url and getattr(settings, "prefer_searxng", False):
         generic: SearchProvider = SearXNGSearchProvider(settings)
     else:
@@ -750,11 +695,11 @@ class StaticSearchProvider:
             for item in queries:
                 query_text = str(item.get("query") or "").lower()
                 selected = [
-                    dict(r)
-                    for r in self.resources
+                    dict(resource)
+                    for resource in self.resources
                     if not query_text
-                    or query_text in str(r.get("title", "")).lower()
-                    or query_text in str(r.get("summary", "")).lower()
+                    or query_text in str(resource.get("title", "")).lower()
+                    or query_text in str(resource.get("summary", "")).lower()
                 ]
                 query_runs.append(
                     {
