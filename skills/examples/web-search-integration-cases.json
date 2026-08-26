@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "purpose": "验证 OpenClaw web_search 与 education-resources MCP 的语义衔接，不把开放 Web 搜索重新包装进 MCP，也不把 Web 命中机械导入资源系统。",
+  "version": "1.1.0",
+  "purpose": "验证 OpenClaw web_search 与 education-resources MCP 的语义衔接，以及所有可访问候选在面向用户展示时保留真实资源链接；不把开放 Web 搜索重新包装进 MCP，也不把 Web 命中机械导入资源系统。",
   "cases": [
     {
       "name": "开放式学习任务同时使用 Web 与专门平台召回",
@@ -12,13 +12,52 @@
         "OpenClaw web_search 作为开放互联网发现路线参与首轮",
         "Bilibili、Douyin 等专门平台只在对当前 Coverage 有直接价值时通过 resource_search 参与",
         "Web 与专门平台候选共同进入 Evidence 判断",
+        "最终展示的可访问 Web 与 MCP 候选都附带真实搜索结果提供的资源 URL",
         "用户未要求获取时不下载"
       ],
       "forbidden": [
         "把 web_search 当成 resource_search 失败后的 fallback",
         "为了来源齐全扫描所有平台",
         "把所有 Web 命中都 resource_import_url",
-        "因为 Web 已参与就排除同样有直接价值的视频平台"
+        "因为 Web 已参与就排除同样有直接价值的视频平台",
+        "只展示标题和平台而隐藏已有真实资源链接"
+      ]
+    },
+    {
+      "name": "MCP 平台候选展示真实资源链接",
+      "messages": [
+        {"role": "assistant", "content": "resource_search 返回两个高潜候选：Bilibili《火山喷发原理动画》url=https://www.bilibili.com/video/BV1demo；CCTV《火山喷发纪录片》url=https://tv.cctv.com/demo 。"},
+        {"role": "user", "content": "把这两个推荐给我看看"}
+      ],
+      "expected": [
+        "分别展示两个候选的标题、来源、真实 URL 和推荐差异",
+        "Bilibili 候选使用 resource_search 实际返回的 https://www.bilibili.com/video/BV1demo",
+        "CCTV 候选使用 resource_search 实际返回的 https://tv.cctv.com/demo",
+        "真实链接与候选身份保持一一对应"
+      ],
+      "forbidden": [
+        "只展示 resource_id 而不展示已有 URL",
+        "只写平台名或平台首页",
+        "根据标题自行拼接资源 URL",
+        "把搜索 query 当成链接",
+        "交换两个候选的 URL"
+      ]
+    },
+    {
+      "name": "没有直接 URL 时不伪造链接",
+      "messages": [
+        {"role": "assistant", "content": "某个候选当前真实工具结果提供了标题、平台和 resource_id，但没有可访问 URL。"},
+        {"role": "user", "content": "把候选发我"}
+      ],
+      "expected": [
+        "正常展示候选已有真实信息",
+        "明确说明当前无直接链接",
+        "如果后续确有必要，可以基于真实工具能力进一步定位"
+      ],
+      "forbidden": [
+        "用 resource_id 冒充 URL",
+        "根据平台和标题猜地址",
+        "给平台首页假装是该资源的直接链接"
       ]
     },
     {
@@ -81,6 +120,7 @@
       "expected": [
         "识别两条证据指向同一个实际资源",
         "只向用户展示一个语义候选",
+        "展示该实际资源的真实可访问 URL",
         "综合 Web 与平台搜索中更完整的可用证据"
       ],
       "forbidden": [
