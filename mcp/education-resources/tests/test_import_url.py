@@ -102,6 +102,92 @@ class ImportUrlTests(unittest.TestCase):
             "article", self.service._get_resource(smart["resource_id"])["resource_type"]
         )
 
+    def test_unresolved_inspection_does_not_downgrade_container_type(self) -> None:
+        """A Zjer courseAfter URL must stay 'course' when the video-identity
+        inspection cannot resolve it (platform now gates tracks behind webtk)."""
+
+        class _UnresolvedInspector:
+            platform_id = "zjer"
+
+            def inspect(self, resource: dict) -> InspectionResult:
+                return InspectionResult(
+                    resolution_status="unresolved",
+                    resolved_resource={
+                        "title": "之江汇课程视频",
+                        "resource_type": "video",
+                        "availability": {"status": "unknown"},
+                        "representations": [],
+                        "metadata": {},
+                    },
+                    inspection={},
+                    failures=[],
+                )
+
+        router = InspectionRouter(
+            tuple(_UnresolvedInspector() for _ in ("zjer",))
+        )
+        service = ResourceService(
+            settings=Settings(
+                data_dir=Path(self.temp.name),
+                jobs_dir=Path(self.temp.name) / "jobs",
+                library_dir=Path(self.temp.name) / "library",
+                max_workers=1,
+            ),
+            inspection_router=router,
+            job_runner=_NoopSpawner(),
+        )
+        try:
+            result = import_resource_url(
+                service,
+                "https://k.zjer.cn/api/s/c/courseAfter/34941",
+            )
+            resource = service._get_resource(result["resource_id"])
+            self.assertEqual("course", resource["resource_type"])
+            self.assertNotEqual("video", resource["resource_type"])
+        finally:
+            service.shutdown()
+
+    def test_container_types_survive_registration(self) -> None:
+        """Column/creator/album types must not fold into 'other'."""
+
+        class _ResolvingInspector:
+            platform_id = "cctv"
+
+            def inspect(self, resource: dict) -> InspectionResult:
+                return InspectionResult(
+                    resolution_status="resolved",
+                    resolved_resource={
+                        "title": "已解析栏目",
+                        "resource_type": "column",
+                        "availability": {"status": "available"},
+                        "representations": [],
+                        "metadata": {},
+                    },
+                    inspection={},
+                    failures=[],
+                )
+
+        router = InspectionRouter(tuple(_ResolvingInspector() for _ in ("cctv",)))
+        service = ResourceService(
+            settings=Settings(
+                data_dir=Path(self.temp.name),
+                jobs_dir=Path(self.temp.name) / "jobs",
+                library_dir=Path(self.temp.name) / "library",
+                max_workers=1,
+            ),
+            inspection_router=router,
+            job_runner=_NoopSpawner(),
+        )
+        try:
+            result = import_resource_url(
+                service,
+                "https://tv.cctv.com/lm/djldzg/index.shtml",
+            )
+            resource = service._get_resource(result["resource_id"])
+            self.assertEqual("column", resource["resource_type"])
+        finally:
+            service.shutdown()
+
     def test_invalid_url_rejected_loudly(self) -> None:
         for bad in ("", "not-a-url", "ftp://example.org/x", "javascript:alert(1)"):
             with self.assertRaises(DomainError) as ctx:

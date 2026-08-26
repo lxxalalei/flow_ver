@@ -54,7 +54,11 @@ _RESOURCE_TYPE_MAP = {
     "课程": "course",
 }
 _ALLOWED_RESOURCE_TYPES = {
-    "article", "book", "document", "video", "audio", "course", "dataset", "other"
+    "article", "book", "document", "video", "audio", "course", "dataset",
+    # Container types produced by the URL classifier and platform adapters;
+    # silently folding them into "other" would hide container semantics.
+    "creator", "collection", "album", "textbook", "column", "series", "track",
+    "other",
 }
 
 

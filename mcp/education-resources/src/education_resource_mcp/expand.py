@@ -45,7 +45,11 @@ def import_resource_url(service: Any, source_url: str) -> dict[str, Any]:
     inspected = service.inspect(resource_id)
     resolved = inspected.get("resource")
     updates: dict[str, Any] = {}
-    if isinstance(resolved, Mapping):
+    # Inspector facts only apply when the inspection actually resolved. An
+    # unresolved/failed inspection must not overwrite the URL classifier's
+    # container type (e.g. a Zjer courseAfter URL must stay "course" even when
+    # the video-identity inspection cannot resolve it).
+    if inspected.get("status") == "resolved" and isinstance(resolved, Mapping):
         title = str(resolved.get("title") or "").strip()
         if title:
             updates["title"] = title
@@ -375,6 +379,7 @@ def iter_expand(
         target,
         cancel_event=cancel_event,
         summary=summary,
+        session_store=service.session_store,
     )
 
 

@@ -124,11 +124,32 @@ _PLATFORM_LIST = [
     PlatformConfig("yixi", "一席", "", "none", "none"),
     PlatformConfig("runoob", "菜鸟教程", "", "none", "none"),
     PlatformConfig("shuge", "书格", "", "none", "none"),
-    PlatformConfig("zjer", "之江汇", "", "none", "none"),
+    PlatformConfig(
+        "zjer", "之江汇", "https://k.zjer.cn/",
+        "cookie", "browser_cookies", cookie_domains=("zjer.cn",),
+    ),
 ]
 PLATFORM_REGISTRY: dict[str, PlatformConfig] = {
     item.platform_id: item for item in _PLATFORM_LIST
 }
+
+
+def session_cookie(session_store: Any, platform: str) -> str:
+    """Best-effort cookie header from an optional SessionStore-like object.
+
+    Adapters and expand workers receive the real SessionStore; unit tests often
+    pass None or a stub without session support, which must not crash.
+    """
+    if session_store is None:
+        return ""
+    getter = getattr(session_store, "get_session_data", None)
+    if getter is None:
+        return ""
+    session_data = getter(platform)
+    if not session_data:
+        return ""
+    header = getattr(session_store, "_cookie_header", None)
+    return header(session_data) if header else ""
 
 
 def _utc_now() -> str:

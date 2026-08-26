@@ -22,13 +22,14 @@ from urllib.request import Request
 
 from ..config import Settings
 from ..errors import DomainError
-from ..sessions import SessionStore
+from ..sessions import SessionStore, session_cookie
 from .base import adapter_error, make_resource
 from .http_client import urlopen_with_fallback
 
 
 BASE_URL = "https://k.zjer.cn"
 DETAIL_API = BASE_URL + "/api/s/c/courseAfter/{course_cate_id}"
+
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
@@ -87,17 +88,21 @@ def fetch_course_detail(
     *,
     timeout: float,
     transport: DetailTransport | None = None,
+    cookie: str = "",
 ) -> dict[str, Any]:
     course_cate_id = _positive_int(course_cate_id) or 0
     if not course_cate_id:
         raise DomainError("INVALID_ARGUMENT", "之江汇 courseCateId 无效")
+    headers = {
+        "User-Agent": UA,
+        "Accept": "application/json, text/plain, */*",
+        "Referer": BASE_URL + "/",
+    }
+    if cookie:
+        headers["Cookie"] = cookie
     request = Request(
         _detail_url(course_cate_id),
-        headers={
-            "User-Agent": UA,
-            "Accept": "application/json, text/plain, */*",
-            "Referer": BASE_URL + "/",
-        },
+        headers=headers,
     )
     opener = transport or _default_transport
     try:
@@ -124,7 +129,18 @@ def fetch_course_detail(
         raise DomainError("CONTENT_VALIDATION_FAILED", "之江汇课程详情格式无效")
     code = payload.get("code")
     if str(code) not in {"0", "200"}:
-        raise DomainError("PLATFORM_UNAVAILABLE", "之江汇课程详情返回失败", retryable=True)
+        msg = str(payload.get("msg") or "").strip()
+        if str(code) in {"401", "402", "403"} or "登录" in msg:
+            raise DomainError(
+                "AUTH_REQUIRED",
+                "之江汇课程详情需要登录",
+                retryable=False,
+            )
+        raise DomainError(
+            "PLATFORM_UNAVAILABLE",
+            f"之江汇课程详情返回失败（code={code}）：{msg or '无说明'}",
+            retryable=True,
+        )
     data = payload.get("data")
     if not isinstance(data, dict):
         raise DomainError("CONTENT_VALIDATION_FAILED", "之江汇课程详情缺少 data")
@@ -255,8 +271,12 @@ class ZjerSearchAdapter:
         *,
         detail_transport: DetailTransport | None = None,
     ) -> None:
+        self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
         self.detail_transport = detail_transport
+
+    def _cookie(self) -> str:
+        return session_cookie(self.session_store, "zjer")
 
     def search(self, query: str, limit: int) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         course_cate_id = _course_id_from_query(query)
@@ -271,6 +291,7 @@ class ZjerSearchAdapter:
                 course_cate_id,
                 timeout=self.timeout,
                 transport=self.detail_transport,
+                cookie=self._cookie(),
             )
         except DomainError as exc:
             return [], adapter_error(exc.code, exc.message, exc.retryable)

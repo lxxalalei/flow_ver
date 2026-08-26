@@ -43,7 +43,7 @@ def default_inspection_router(
             SmartEduInspector(session_store=session_store, **options),
             ShugeInspector(**options),
             YixiInspector(**options),
-            ZjerInspector(**options),
+            ZjerInspector(session_store=session_store, **options),
             CctvInspector(**options),
         )
     )

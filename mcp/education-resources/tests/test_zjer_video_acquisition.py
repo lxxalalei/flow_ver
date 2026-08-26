@@ -4,11 +4,14 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from education_resource_mcp.acquisition.planner import DEFAULT_PROVIDER_SPECS
 from education_resource_mcp.adapters.inspect_zjer import ZjerInspector
-from education_resource_mcp.adapters.zjer import ZjerSearchAdapter
+from education_resource_mcp.adapters.zjer import ZjerSearchAdapter, fetch_course_detail
 from education_resource_mcp.adapters.zjer_download import ZjerVideoDownloader
 from education_resource_mcp.downloader import DownloadResult
+from education_resource_mcp.errors import DomainError
 
 
 def _settings(tmp_path: Path | None = None):
@@ -113,6 +116,55 @@ def test_zjer_direct_course_lookup_expands_lessons_without_signed_url(monkeypatc
     assert signals["video_size_bytes"] == 72781124
     assert signals["height"] == 540
     assert signals["width"] == 960
+
+
+def test_zjer_login_gate_402_maps_to_auth_required(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "education_resource_mcp.adapters.zjer._default_transport",
+        lambda request, timeout: _JsonResponse({"code": "402", "msg": "登录不存在，请重新登录"}),
+    )
+    with pytest.raises(DomainError) as exc:
+        fetch_course_detail(34941, timeout=5)
+    assert exc.value.code == "AUTH_REQUIRED"
+    assert exc.value.retryable is False
+
+
+def test_zjer_search_sends_saved_session_cookie(monkeypatch) -> None:
+    seen = {}
+
+    class _Store:
+        def get_session_data(self, platform):
+            return {"platform": platform, "cookies": {"SESSDATA": "abc"}}
+
+        def _cookie_header(self, data):
+            return "SESSDATA=abc"
+
+    monkeypatch.setattr(
+        "education_resource_mcp.adapters.zjer.fetch_course_detail",
+        lambda course_cate_id, **kwargs: _capture(seen, kwargs),
+    )
+    adapter = ZjerSearchAdapter(_Store(), _settings())
+    adapter.search("34941", 10)
+    assert seen.get("cookie") == "SESSDATA=abc"
+
+
+def _capture(seen, kwargs) -> dict:
+    seen["cookie"] = kwargs.get("cookie", "")
+    return {"cateName": "x", "lessons": [], "uuid": "u"}
+
+
+class _JsonResponse:
+    def __init__(self, payload: dict) -> None:
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
 
 
 def test_zjer_keyword_search_is_not_claimed_before_native_api_is_known() -> None:

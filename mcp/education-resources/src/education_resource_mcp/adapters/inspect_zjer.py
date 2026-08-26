@@ -17,6 +17,7 @@ from ..inspection import (
     InspectionResult,
     build_default_inspection,
 )
+from ..sessions import session_cookie
 from .zjer import best_mp4, fetch_course_detail, find_lesson, resource_video_identity
 
 
@@ -30,9 +31,14 @@ class ZjerInspector:
         *,
         timeout_seconds: float = 20,
         detail_fetcher: Callable[..., dict[str, Any]] = fetch_course_detail,
+        session_store: Any = None,
     ) -> None:
         self.timeout = float(timeout_seconds)
         self.detail_fetcher = detail_fetcher
+        self.session_store = session_store
+
+    def _cookie(self) -> str:
+        return session_cookie(self.session_store, "zjer")
 
     @staticmethod
     def _metadata(
@@ -136,7 +142,11 @@ class ZjerInspector:
             )
         course_cate_id, course_info_id, video_id = identity
         try:
-            data = self.detail_fetcher(course_cate_id, timeout=self.timeout)
+            data = self.detail_fetcher(
+                course_cate_id,
+                timeout=self.timeout,
+                cookie=self._cookie(),
+            )
         except DomainError as exc:
             availability = (
                 "auth_required"

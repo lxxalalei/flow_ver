@@ -38,6 +38,8 @@ def _list_tools() -> list[dict]:
             cwd=SERVICE_ROOT,
             env=env,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

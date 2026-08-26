@@ -155,11 +155,98 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
                 list(expand_resource(_Provider(), target))
         self.assertEqual("PARTIAL_FAILURE", ctx.exception.code)
 
+    def test_album_webtk_gate_surfaces_auth_required(self) -> None:
+        target = {
+            "platform": "ximalaya",
+            "resource_type": "album",
+            "source_url": "https://www.ximalaya.com/album/20665610",
+        }
+        with mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
+            return_value=_Response({"ret": 407, "msg": "webtk缺失", "code": 5}),
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                list(expand_resource(_Provider(), target))
+        self.assertEqual("AUTH_REQUIRED", ctx.exception.code)
+        self.assertIn("webtk", ctx.exception.message)
+
+    def test_album_expands_tracks_anonymously_when_available(self) -> None:
+        payloads = [
+            {
+                "ret": 200,
+                "data": {
+                    "trackTotalCount": 2,
+                    "tracks": [
+                        {"trackId": 101, "title": "第一集", "duration": 300},
+                        {"trackId": 102, "title": "第二集", "duration": 301},
+                    ],
+                },
+            },
+            {"ret": 200, "data": {"trackTotalCount": 2, "tracks": []}},
+        ]
+        target = {
+            "platform": "ximalaya",
+            "resource_type": "album",
+            "source_url": "https://www.ximalaya.com/album/20665610",
+        }
+        with mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
+            side_effect=lambda request, *, timeout: _Response(payloads.pop(0)),
+        ):
+            results = list(expand_resource(_Provider(), target))
+        self.assertEqual(2, len(results))
+        self.assertEqual("https://www.ximalaya.com/sound/101", results[0]["source_url"])
+
+    def test_album_sends_saved_session_cookie(self) -> None:
+        class _Store:
+            def get_session_data(self, platform):
+                return {"platform": platform, "cookies": {"webtk": "abc123"}}
+
+            def _cookie_header(self, data):
+                return "webtk=abc123"
+
+        seen = {}
+        with mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
+            side_effect=lambda request, *, timeout: _capture_cookie(seen, request),
+        ):
+            with self.assertRaises(DomainError):
+                list(
+                    expand_resource(
+                        _Provider(),
+                        {
+                            "platform": "ximalaya",
+                            "resource_type": "album",
+                            "source_url": "https://www.ximalaya.com/album/20665610",
+                        },
+                        session_store=_Store(),
+                    )
+                )
+        self.assertEqual("webtk=abc123", seen.get("cookie"))
+
+
     def test_creator_url_requires_numeric_uid(self) -> None:
         target = {
             "platform": "ximalaya",
             "resource_type": "creator",
             "source_url": "https://www.ximalaya.com/zhubo/not-a-uid",
+        }
+        with self.assertRaises(DomainError) as ctx:
+            list(expand_resource(_Provider(), target))
+        self.assertEqual("INVALID_ARGUMENT", ctx.exception.code)
+
+
+def _capture_cookie(seen, request) -> _Response:
+    seen["cookie"] = request.get_header("Cookie")
+    return _Response({"ret": 407, "msg": "webtk缺失"})
+
+
+class XimalayaAlbumExpandTests(unittest.TestCase):
+    def test_album_requires_numeric_album_id(self) -> None:
+        target = {
+            "platform": "ximalaya",
+            "resource_type": "album",
+            "source_url": "https://www.ximalaya.com/album/not-a-number",
         }
         with self.assertRaises(DomainError) as ctx:
             list(expand_resource(_Provider(), target))

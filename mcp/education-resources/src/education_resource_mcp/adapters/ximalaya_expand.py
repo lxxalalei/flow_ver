@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 from ..errors import DomainError
+from ..sessions import session_cookie
 from .http_client import urlopen_with_fallback
 
 _XIMALAYA_TRACKS_URL = "https://www.ximalaya.com/revision/album/v1/getTracksList"
@@ -32,6 +33,7 @@ def expand(
     target: Mapping[str, Any],
     *,
     cancel_event: Any = None,
+    session_store: Any = None,
 ) -> Iterator[dict[str, Any]]:
     url = _url(target)
     kind = _kind(target)
@@ -40,6 +42,7 @@ def expand(
             url,
             timeout=float(getattr(adapter, "timeout", 30.0)),
             cancel_event=cancel_event,
+            session_store=session_store,
         )
         return
     if kind == "creator" or re.search(r"/zhubo/\d+", url):
@@ -185,11 +188,13 @@ def _iter_ximalaya_album(
     *,
     timeout: float,
     cancel_event: Any = None,
+    session_store: Any = None,
 ) -> Iterator[dict[str, Any]]:
     match = re.search(r"/album/(\d+)", source_url)
     if not match:
         raise DomainError("INVALID_ARGUMENT", "Ximalaya 专辑 URL 缺少 album id")
     album_id = match.group(1)
+    cookie = session_cookie(session_store, "ximalaya")
     page_num, page_size, seen = 1, 100, 0
     total: int | None = None
 
@@ -199,17 +204,41 @@ def _iter_ximalaya_album(
         params = urlencode(
             {"albumId": album_id, "pageNum": page_num, "pageSize": page_size}
         )
+        headers = {
+            "User-Agent": _XIMALAYA_UA,
+            "Referer": source_url,
+            "Accept": "application/json, text/plain, */*",
+        }
+        if cookie:
+            headers["Cookie"] = cookie
         request = Request(
             f"{_XIMALAYA_TRACKS_URL}?{params}",
-            headers={
-                "User-Agent": _XIMALAYA_UA,
-                "Referer": source_url,
-                "Accept": "application/json, text/plain, */*",
-            },
+            headers=headers,
         )
         with urlopen_with_fallback(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8", "replace"))
-        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            raise DomainError(
+                "PARTIAL_FAILURE",
+                "Ximalaya 专辑曲目响应结构异常",
+                retryable=True,
+            )
+        ret = payload.get("ret")
+        msg = str(payload.get("msg") or "").strip()
+        data = payload.get("data")
+        if ret is not None and ret != 200:
+            if not cookie and ("webtk" in msg or ret in (401, 407)):
+                raise DomainError(
+                    "AUTH_REQUIRED",
+                    "喜马拉雅专辑曲目接口需要浏览器会话 Cookie（webtk 缺失）；"
+                    "请先用 resource_session_status 查看登录步骤并捕获喜马拉雅会话后重试",
+                    retryable=False,
+                )
+            raise DomainError(
+                "PARTIAL_FAILURE",
+                f"喜马拉雅专辑曲目接口异常（ret={ret}）：{msg or '无说明'}",
+                retryable=True,
+            )
         if not isinstance(data, dict):
             raise DomainError(
                 "PARTIAL_FAILURE",

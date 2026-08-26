@@ -234,9 +234,6 @@ class SmartEduInspector(_PlatformWebInspector):
         self, resource: Mapping[str, Any], payload: dict[str, Any]
     ) -> dict[str, Any]:
         payload = super()._enrich_payload(resource, payload)
-        if not self._can_add_representation(payload):
-            return payload
-
         detail, content_type, failure = self._detail_result(resource)
         resolved = dict(payload["resolved_resource"])
         representations = [
@@ -248,17 +245,13 @@ class SmartEduInspector(_PlatformWebInspector):
                 item["scope"] = "landing_page"
                 item["role"] = "landing"
 
-        if failure is not None:
-            payload["resolution_status"] = "partial"
-            resolved["availability"] = {
-                "status": "auth_required"
-                if failure["code"] == "AUTH_REQUIRED"
-                else "unavailable"
-                if failure["code"] == "RESOURCE_NOT_FOUND"
-                else "unknown"
-            }
-            payload["failures"] = [*payload.get("failures", []), failure]
-        else:
+        if failure is None and isinstance(detail, dict):
+            # The detail record is the token-backed authoritative current
+            # fact; a login-gated landing page must not downgrade a working
+            # resource into AUTH_REQUIRED.
+            payload["resolution_status"] = "resolved"
+            resolved["availability"] = {"status": "available"}
+            payload["failures"] = []
             assert detail is not None and content_type is not None
             file_key = _smartedu_file_key_from_resource(resource)
             active_files = [
@@ -386,6 +379,20 @@ class SmartEduInspector(_PlatformWebInspector):
                             "audio": "audio",
                         }[primary_representation["kind"]]
 
+        elif failure is not None:
+            if not self._can_add_representation(payload):
+                # Landing page itself was gated/unavailable and the detail
+                # also failed: keep the original result (e.g. AUTH_REQUIRED).
+                return payload
+            payload["resolution_status"] = "partial"
+            resolved["availability"] = {
+                "status": "auth_required"
+                if failure["code"] == "AUTH_REQUIRED"
+                else "unavailable"
+                if failure["code"] == "RESOURCE_NOT_FOUND"
+                else "unknown"
+            }
+            payload["failures"] = [*payload.get("failures", []), failure]
         resolved["representations"] = representations
         payload["resolved_resource"] = resolved
         payload["inspection"]["method"] = "platform_detail_api"

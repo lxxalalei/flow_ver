@@ -16,7 +16,7 @@ from typing import Any, Callable
 from ..config import Settings
 from ..downloader import DownloadProvider, DownloadResult, PublicHttpDownloader
 from ..errors import DomainError
-from ..sessions import SessionStore
+from ..sessions import SessionStore, session_cookie
 from .zjer import best_mp4, fetch_course_detail, find_lesson, resource_video_identity
 
 
@@ -33,6 +33,10 @@ class ZjerVideoDownloader:
         self.timeout = float(settings.download_timeout_seconds)
         self.detail_fetcher = detail_fetcher
         self.direct_downloader = direct_downloader or PublicHttpDownloader(settings)
+        self.session_store = session_store
+
+    def _cookie(self) -> str:
+        return session_cookie(self.session_store, "zjer")
 
     def download(
         self,
@@ -54,7 +58,11 @@ class ZjerVideoDownloader:
             )
         course_cate_id, course_info_id, video_id = identity
         try:
-            data = self.detail_fetcher(course_cate_id, timeout=self.timeout)
+            data = self.detail_fetcher(
+                course_cate_id,
+                timeout=self.timeout,
+                cookie=self._cookie(),
+            )
         except DomainError:
             raise
         except Exception as exc:

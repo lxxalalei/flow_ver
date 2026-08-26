@@ -34,6 +34,7 @@ def expand_resource(
     *,
     cancel_event: Any = None,
     summary: dict[str, Any] | None = None,
+    session_store: Any = None,
 ) -> Iterator[dict[str, Any]]:
     """Dispatch one container Resource without owning platform mechanics."""
 
@@ -56,6 +57,14 @@ def expand_resource(
             target,
             cancel_event=cancel_event,
             summary=summary,
+        )
+        return
+    if platform in {"ximalaya", "zjer"}:
+        yield from expander(
+            adapter,
+            target,
+            cancel_event=cancel_event,
+            session_store=session_store,
         )
         return
     yield from expander(adapter, target, cancel_event=cancel_event)

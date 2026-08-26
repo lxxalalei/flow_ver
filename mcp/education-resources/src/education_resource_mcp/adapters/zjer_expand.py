@@ -20,6 +20,7 @@ def expand(
     target: Mapping[str, Any],
     *,
     cancel_event: Any = None,
+    session_store: Any = None,
 ) -> Iterator[dict[str, Any]]:
     if _kind(target) not in {"course", "课程"}:
         raise DomainError(
@@ -36,6 +37,11 @@ def expand(
         lessons,
     )
 
+    cookie = ""
+    if session_store is not None:
+        session_data = session_store.get_session_data("zjer")
+        cookie = session_store._cookie_header(session_data) if session_data else ""
+
     course_id = _course_id_from_query(_url(target))
     if course_id is None:
         raise DomainError("INVALID_ARGUMENT", "Zjer 课程 URL 缺少 courseCateId")
@@ -43,6 +49,7 @@ def expand(
         course_id,
         timeout=float(getattr(adapter, "timeout", 30.0)),
         transport=getattr(adapter, "detail_transport", None),
+        cookie=cookie,
     )
     course_name = str(data.get("cateName") or "").strip()
     org_name = str(data.get("teacherOrgName") or data.get("orgName") or "").strip()
