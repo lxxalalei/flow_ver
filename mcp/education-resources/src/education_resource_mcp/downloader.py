@@ -435,24 +435,87 @@ class PublicHttpDownloader:
             },
         )
         opener = build_opener(_SafeRedirectHandler())
+        media_type = "application/octet-stream"
+        # Throttled mirrors (e.g. Anna's Archive slow links) cut connections
+        # mid-transfer; read-to-EOF alone then reports a truncated file as
+        # success. Resume with Range requests and verify Content-Length.
+        max_attempts = 6
         byte_size = 0
+        expected_total: int | None = None
         try:
-            with opener.open(request, timeout=self.settings.download_timeout_seconds) as response:
-                final_url = response.geturl()
+            for attempt in range(max_attempts):
+                headers = {
+                    "User-Agent": "EducationResourceMCP/0.1 (+local OpenClaw development)",
+                    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                }
+                if byte_size > 0:
+                    headers["Range"] = f"bytes={byte_size}-"
+                request = Request(url, headers=headers)
+                resumed = False
                 try:
-                    validate_public_http_url(final_url)
-                except PolicyError as exc:
-                    raise DomainError("REDIRECT_BLOCKED", str(exc)) from exc
-                media_type = response.headers.get_content_type() or "application/octet-stream"
-                with temporary.open("wb") as handle:
-                    while True:
-                        if cancel_event.is_set():
-                            raise DomainError("JOB_CANCELLED", "下载已取消")
-                        chunk = response.read(64 * 1024)
-                        if not chunk:
-                            break
-                        byte_size += len(chunk)
-                        handle.write(chunk)
+                    with opener.open(
+                        request, timeout=self.settings.download_timeout_seconds
+                    ) as response:
+                        final_url = response.geturl()
+                        try:
+                            validate_public_http_url(final_url)
+                        except PolicyError as exc:
+                            raise DomainError("REDIRECT_BLOCKED", str(exc)) from exc
+                        media_type = (
+                            response.headers.get_content_type()
+                            or "application/octet-stream"
+                        )
+                        content_range = response.headers.get("Content-Range")
+                        if response.status == 206 or content_range:
+                            resumed = True
+                        elif byte_size > 0:
+                            # server ignored Range; restart from scratch
+                            byte_size = 0
+                        try:
+                            declared = int(response.headers.get("Content-Length") or "")
+                        except ValueError:
+                            declared = None
+                        if declared is not None:
+                            expected_total = (
+                                byte_size + declared if resumed else declared
+                            )
+                        mode = "ab" if resumed else "wb"
+                        with temporary.open(mode) as handle:
+                            while True:
+                                if cancel_event.is_set():
+                                    raise DomainError("JOB_CANCELLED", "下载已取消")
+                                chunk = response.read(64 * 1024)
+                                if not chunk:
+                                    break
+                                byte_size += len(chunk)
+                                handle.write(chunk)
+                except DomainError:
+                    raise
+                except Exception as exc:
+                    # stalled/reset connection with partial payload: retry
+                    # with Range if attempts remain, else fail honestly
+                    if attempt < max_attempts - 1 and byte_size > 0:
+                        continue
+                    raise DomainError(
+                        "DOWNLOAD_FAILED",
+                        f"下载失败：{type(exc).__name__}: {exc}",
+                        retryable=True,
+                    ) from exc
+                if expected_total is None or byte_size >= expected_total:
+                    break
+            else:
+                raise DomainError(
+                    "DOWNLOAD_FAILED",
+                    f"下载多次被中断且未能续传完整（{byte_size}/{expected_total} 字节）",
+                    retryable=True,
+                )
+            if expected_total is not None and byte_size != expected_total:
+                temporary.unlink(missing_ok=True)
+                raise DomainError(
+                    "CONTENT_VALIDATION_FAILED",
+                    f"下载不完整：{byte_size}/{expected_total} 字节（连接提前结束）",
+                    retryable=True,
+                )
         except DomainError:
             temporary.unlink(missing_ok=True)
             raise
