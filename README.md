@@ -19,7 +19,7 @@ docs/                                # 当前架构与开发路线
 legacy/                               # 只读历史
 ```
 
-`education-resources` 当前暴露 9 个资源 Tool 和 2 个 Session Tool，共 11 个。Session 只是辅助登录态能力，不是搜索/下载的固定前置流程；只有真实资源能力返回 `AUTH_REQUIRED` 或用户主动管理登录态时才使用。
+`education-resources` 当前暴露 10 个资源 Tool 和 2 个 Session Tool，共 12 个。Session 只是辅助登录态能力，不是搜索/下载的固定前置流程；只有真实资源能力返回 `AUTH_REQUIRED` 或用户主动管理登录态时才使用。
 
 MCP 不承担 Flow、ResultSet、Presentation、Selection、Plan、Asset、authority/digest 等工作流状态。用户选择和获取意图属于正常对话；后端只保存执行真正需要的临时资源句柄、Expand/Download Job 和平台 SessionStore。
 
@@ -54,6 +54,41 @@ openclaw chat --local
 ```
 
 如果用户随后明确说“把第 2 个下载下来”，Agent 直接调用 `resource_download`，不再经过 Selection/Prepare/Token/Start 状态链。
+
+## Skill 语义 baseline
+
+当前语义优化由 `.agent/plans/0074-skill-semantic-decision-kernel.md` 跟踪。为了让 old/new A/B 只改变 Skill 工作区，不改变 runner，本轮先固定旧 Skill 基线：
+
+```text
+3a20c1e14358631201e99fb54e007ccfcf118d94
+```
+
+在 Windows 上可以先建立只读实验 worktree：
+
+```powershell
+git worktree add ..\flow_ver-baseline 3a20c1e14358631201e99fb54e007ccfcf118d94
+Copy-Item skills\examples\semantic-baseline-fixtures.example.json .openclaw-test\semantic-fixtures.json
+```
+
+然后把 `.openclaw-test\semantic-fixtures.json` 中的占位 URL 换成当前真实可访问的测试资源，再运行：
+
+```powershell
+python skills\examples\run_semantic_baseline.py `
+  --workspace ..\flow_ver-baseline `
+  --expect-head 3a20c1e14358631201e99fb54e007ccfcf118d94 `
+  --label baseline-3a20c1e `
+  --fixtures .openclaw-test\semantic-fixtures.json
+```
+
+runner 使用 `openclaw agent exec` 逐 case 执行独立 Agent turn，只记录原始 JSON、stdout/stderr、测试 worktree commit、模型与 Tool 摘要，不在脚本里给语义质量打分。需要真实多轮上下文或故障注入的 case 会明确跳过，单独人工/会话验收。
+
+结果写入已被 git 忽略的：
+
+```text
+.openclaw-test/semantic-baseline/<label>/
+```
+
+fixture 只放公开测试 URL，不要写入凭据、Cookie、Token、浏览器档案或下载产物。
 
 ## 边界
 
