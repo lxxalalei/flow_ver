@@ -88,6 +88,24 @@ def _matched_queries(value: Any) -> list[str]:
     return result
 
 
+def _public_job_file(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only file facts useful to the Agent; full metadata stays in the Job."""
+
+    return {
+        key: item[key]
+        for key in (
+            "resource_id",
+            "filename",
+            "path",
+            "media_type",
+            "size_bytes",
+            "role",
+            "primary",
+        )
+        if item.get(key) is not None
+    }
+
+
 _SEARCH_TASK_EXAMPLE = (
     'search_tasks 结构示例：[{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}]'
     '；queries 项也可以是 {"query": "..."}。顶层不支持 query 字段。'
@@ -568,16 +586,23 @@ class ResourceService:
     def job_status(self, job_id: str) -> dict[str, Any]:
         directory, job = self._load_job(job_id)
         job = self._reconcile(directory, job)
+        status = str(job.get("status") or "")
+        files = [dict(item) for item in job.get("files") or []]
+        failures = [dict(item) for item in job.get("failures") or []]
         result = {
             "job_id": job_id,
-            "status": job.get("status"),
+            "status": status,
             "progress": {
                 "completed": _safe_int(job.get("completed")),
                 "total": _safe_int(job.get("total")),
             },
-            "files": [dict(item) for item in job.get("files") or []],
-            "failures": [dict(item) for item in job.get("failures") or []],
+            "file_count": len(files),
+            "failure_count": len(failures),
         }
+        if status in TERMINAL_STATUSES:
+            result["files"] = [_public_job_file(item) for item in files]
+            if failures:
+                result["failures"] = failures
         if isinstance(job.get("summary"), dict) and job["summary"]:
             result["summary"] = dict(job["summary"])
         return result
@@ -657,7 +682,9 @@ class ResourceService:
             "job_id": job_id,
             "status": "succeeded" if archived and not failures else "partial",
             "library_root": str(self.settings.library_root),
-            "files": archived,
+            "file_count": len(archived),
+            "failure_count": len(failures),
+            "files": [_public_job_file(item) for item in archived],
             "failures": failures,
         }
 
