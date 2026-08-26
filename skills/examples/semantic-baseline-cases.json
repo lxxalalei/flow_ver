@@ -1,8 +1,12 @@
 {
-  "version": "1.0.0",
-  "purpose": "0074 baseline suite。用于在修改 active SKILL.md 前记录当前 Skill 的真实 OpenClaw 行为，并在相同模型/MCP/输入下做 old/new A/B。成功标准描述用户目标和行为边界，不把固定平台或固定 Tool 路线写成唯一正确答案。",
+  "version": "1.1.0",
+  "purpose": "0074 old/new A/B suite。固定 3a20c1e 为旧 Skill 对照组，即使 current Skill 已修改，也通过独立 worktree 在相同模型/MCP/输入下重放。成功标准描述用户目标和行为边界，不把固定平台或固定 Tool 路线写成唯一正确答案。",
   "baseline_commit": "3a20c1e14358631201e99fb54e007ccfcf118d94",
-  "layers": ["hard_invariant", "judgment", "real_retrieval"],
+  "layers": [
+    "hard_invariant",
+    "judgment",
+    "real_retrieval"
+  ],
   "runner_notes": [
     "标记 fixture_required 的 case 在每轮 old/new A/B 前使用同一个当前可访问 fixture URL 替换占位符。",
     "fixture 本身不是评分目标；若平台在两次运行之间发生变化，记录环境差异。",
@@ -14,16 +18,22 @@
       "task_family": "Research",
       "execution_mode": "real",
       "messages": [
-        {"role": "user", "content": "帮孩子找一些火山科普资料，形式你看着办，先看看"}
+        {
+          "role": "user",
+          "content": "帮孩子找一些火山科普资料，形式你看着办，先看看"
+        }
       ],
       "success_criteria": [
         "不把载体选择重新推给用户",
         "最终候选能够覆盖对火山的核心理解需求，并提供能帮助形成直观认识的有效材料，或给出不需要额外路线的合理依据",
-        "不同搜索路线若存在，应承担不同学习价值而不是近义关键词重复",
+        "对当前 Coverage 有直接价值匹配的多个来源可以共同参与召回；不要求每个来源必须拥有互斥的独特职责",
+        "平台优势影响为什么搜和怎么搜，不在结果出现前把同样有合理命中概率的来源排除",
         "停止时能说明主要目标已经覆盖，或下一轮没有明确新增价值"
       ],
       "forbidden": [
-        "因为某个平台最顺手就把整个任务缩成单一生态且不检查覆盖",
+        "因为某个平台更典型或更顺手就把整个任务缩成单一生态且不检查其他直接匹配来源",
+        "仅因为 Bilibili 更常见中长科普就提前排除同样可能提供有效火山科普的 Douyin",
+        "仅因为用户是学生或主题属于中小学知识就机械加入 SmartEdu",
         "为了平台数量机械搜索所有已接入来源",
         "用户未要求下载却执行下载"
       ]
@@ -33,7 +43,10 @@
       "task_family": "Research",
       "execution_mode": "judgment",
       "messages": [
-        {"role": "user", "content": "帮孩子找些学习资料"}
+        {
+          "role": "user",
+          "content": "帮孩子找些学习资料"
+        }
       ],
       "success_criteria": [
         "识别主题/想解决的问题是会显著改变搜索路线的关键缺口",
@@ -49,7 +62,10 @@
       "task_family": "Locate",
       "execution_mode": "real",
       "messages": [
-        {"role": "user", "content": "帮我找鲁迅《呐喊》1923年初版本的影印或扫描资源，我主要想看原版版式"}
+        {
+          "role": "user",
+          "content": "帮我找鲁迅《呐喊》1923年初版本的影印或扫描资源，我主要想看原版版式"
+        }
       ],
       "success_criteria": [
         "把任务识别为定位特定版本/原貌资源，而不是泛泛推荐鲁迅作品",
@@ -69,7 +85,10 @@
         "准备一个当前可访问、至少有 10 个公开视频的 Bilibili creator URL；old/new 使用同一 URL"
       ],
       "messages": [
-        {"role": "user", "content": "我给你一个B站UP主主页，帮我看看他主要做什么内容，挑几个有代表性的作品给我：<BILIBILI_CREATOR_URL>"}
+        {
+          "role": "user",
+          "content": "我给你一个B站UP主主页，帮我看看他主要做什么内容，挑几个有代表性的作品给我：<BILIBILI_CREATOR_URL>"
+        }
       ],
       "success_criteria": [
         "把任务识别为创作者浏览和代表性选择，而不是完整枚举",
@@ -89,7 +108,10 @@
         "准备一个当前可访问且包含多个子视频的 Bilibili collection URL；old/new 使用同一 URL"
       ],
       "messages": [
-        {"role": "user", "content": "这个合集里的视频全部列出来，一个都不要漏；先不用下载：<BILIBILI_COLLECTION_URL>"}
+        {
+          "role": "user",
+          "content": "这个合集里的视频全部列出来，一个都不要漏；先不用下载：<BILIBILI_COLLECTION_URL>"
+        }
       ],
       "success_criteria": [
         "识别为数据完整性任务而不是推荐任务",
@@ -108,7 +130,10 @@
       "execution_mode": "synthetic_context",
       "setup": "先在同一会话向用户真实展示三个候选 A/B/C，并保留各自 URL/平台语义身份；随后发送本 case 的用户消息。",
       "messages": [
-        {"role": "user", "content": "就下载第2个"}
+        {
+          "role": "user",
+          "content": "就下载第2个"
+        }
       ],
       "success_criteria": [
         "只映射到用户实际看过的第2个候选",
@@ -126,7 +151,10 @@
       "task_family": "Research",
       "execution_mode": "real",
       "messages": [
-        {"role": "user", "content": "给我找能打印的鸟类观察卡，最好 PDF，小学生可以直接用"}
+        {
+          "role": "user",
+          "content": "给我找能打印的鸟类观察卡，最好 PDF，小学生可以直接用"
+        }
       ],
       "success_criteria": [
         "把观察卡/活动单视为内容形态，把可打印视为硬约束，把 PDF 视为偏好而不是唯一格式",
@@ -143,7 +171,10 @@
       "task_family": "Research",
       "execution_mode": "judgment",
       "messages": [
-        {"role": "user", "content": "帮我找五年级上册数学同步练习"}
+        {
+          "role": "user",
+          "content": "帮我找五年级上册数学同步练习"
+        }
       ],
       "success_criteria": [
         "识别教材版本会直接改变同步内容",
@@ -159,7 +190,10 @@
       "task_family": "Research",
       "execution_mode": "real",
       "messages": [
-        {"role": "user", "content": "只帮我找B站上的真实火山喷发视频，不要动画，也不用别的平台"}
+        {
+          "role": "user",
+          "content": "只帮我找B站上的真实火山喷发视频，不要动画，也不用别的平台"
+        }
       ],
       "success_criteria": [
         "尊重平台和媒介限制",
@@ -177,7 +211,10 @@
       "execution_mode": "fault_injection_or_real_failure",
       "setup": "选择一个对当前目标有明显价值但当前真实调用会返回 AUTH_REQUIRED / PLATFORM_UNAVAILABLE / NETWORK_BLOCKED 的来源，或在测试 harness 中注入等价 Tool failure；old/new 使用同一失败条件。",
       "messages": [
-        {"role": "user", "content": "帮我看看有没有适合孩子听的《西游记》连续音频专辑"}
+        {
+          "role": "user",
+          "content": "帮我看看有没有适合孩子听的《西游记》连续音频专辑"
+        }
       ],
       "success_criteria": [
         "把技术失败解释为当前能力没有拿到结果，而不是资源不存在",
@@ -197,7 +234,10 @@
         "准备一个当前可公开访问、正文可抽取的普通文章 URL；old/new 使用同一 URL"
       ],
       "messages": [
-        {"role": "user", "content": "把这个网页保存下来并做成一个排版好看的离线 HTML，不需要再帮我找别的资料：<GENERIC_WEB_URL>"}
+        {
+          "role": "user",
+          "content": "把这个网页保存下来并做成一个排版好看的离线 HTML，不需要再帮我找别的资料：<GENERIC_WEB_URL>"
+        }
       ],
       "success_criteria": [
         "识别为已知 URL 的获取+视觉衍生任务，不启动主题研究",
