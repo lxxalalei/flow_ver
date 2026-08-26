@@ -73,6 +73,21 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _matched_queries(value: Any) -> list[str]:
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        values = []
+    result: list[str] = []
+    for item in values:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
 _SEARCH_TASK_EXAMPLE = (
     'search_tasks 结构示例：[{"platform": "bilibili", "queries": ["火山喷发 原理 动画"]}]'
     '；queries 项也可以是 {"query": "..."}。顶层不支持 query 字段。'
@@ -242,10 +257,49 @@ class ResourceService:
             raise DomainError("INVALID_ARGUMENT", "limit 必须大于 0")
         normalized = _normalize_search_tasks(search_tasks)
         raw_resources, platform_runs = self.search_provider.search(normalized, limit)
+        raw_resources = self._attach_search_provenance(raw_resources, platform_runs)
         return {
             "candidates": self._remember_resources(raw_resources),
+            "runs": self._search_runs(platform_runs),
             "failures": self._search_failures(platform_runs),
         }
+
+    @staticmethod
+    def _attach_search_provenance(
+        raw_resources: list[dict[str, Any]],
+        platform_runs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        resources: list[Any] = [
+            dict(raw) if isinstance(raw, dict) else raw for raw in raw_resources
+        ]
+        resources_by_platform: dict[str, list[dict[str, Any]]] = {}
+        for raw in resources:
+            if not isinstance(raw, dict):
+                continue
+            platform = str(raw.get("platform") or "generic").strip() or "generic"
+            resources_by_platform.setdefault(platform, []).append(raw)
+
+        offsets: dict[str, int] = {}
+        for run in platform_runs:
+            if not isinstance(run, dict):
+                continue
+            platform = str(run.get("platform") or "generic").strip() or "generic"
+            platform_resources = resources_by_platform.get(platform, [])
+            offset = offsets.get(platform, 0)
+            for query_run in run.get("query_runs") or []:
+                if not isinstance(query_run, dict):
+                    continue
+                query = str(query_run.get("query") or "").strip()
+                candidate_count = max(0, _safe_int(query_run.get("candidate_count")))
+                if query:
+                    for resource in platform_resources[offset : offset + candidate_count]:
+                        matched = _matched_queries(resource.get("matched_queries"))
+                        if query not in matched:
+                            matched.append(query)
+                        resource["matched_queries"] = matched
+                offset += candidate_count
+            offsets[platform] = offset
+        return resources
 
     def _remember_resources(
         self,
@@ -253,8 +307,8 @@ class ResourceService:
         *,
         include_summary: bool = True,
     ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
-        seen: set[tuple[str, str, str]] = set()
+        remembered: list[dict[str, Any]] = []
+        resources_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
         for raw in raw_resources:
             if not isinstance(raw, dict):
                 continue
@@ -275,9 +329,15 @@ class ResourceService:
             )
             child_key = str(signals.get("file_key") or "").strip()
             dedup_key = (platform, source_url, child_key)
-            if dedup_key in seen:
+            matched_queries = _matched_queries(raw.get("matched_queries"))
+            existing = resources_by_key.get(dedup_key)
+            if existing is not None:
+                merged_queries = _matched_queries(existing.get("matched_queries"))
+                for query in matched_queries:
+                    if query not in merged_queries:
+                        merged_queries.append(query)
+                existing["matched_queries"] = merged_queries
                 continue
-            seen.add(dedup_key)
 
             resource_id = new_id("res")
             resource = dict(raw)
@@ -291,15 +351,20 @@ class ResourceService:
                     "resource_type": _resource_type(
                         raw.get("resource_type") or raw.get("type")
                     ),
+                    "matched_queries": matched_queries,
                 }
             )
             resource["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
-            with self._lock:
-                self._resources[resource_id] = resource
-            candidates.append(
-                self._public_resource(resource, include_summary=include_summary)
-            )
-        return candidates
+            resources_by_key[dedup_key] = resource
+            remembered.append(resource)
+
+        with self._lock:
+            for resource in remembered:
+                self._resources[resource["resource_id"]] = resource
+        return [
+            self._public_resource(resource, include_summary=include_summary)
+            for resource in remembered
+        ]
 
     @staticmethod
     def _public_resource(
@@ -316,6 +381,9 @@ class ResourceService:
         }
         if include_summary and resource.get("summary"):
             result["summary"] = str(resource["summary"])
+        matched_queries = _matched_queries(resource.get("matched_queries"))
+        if matched_queries:
+            result["matched_queries"] = matched_queries
         metadata = resource.get("metadata") or {}
         for field in ("author", "language", "published_at", "duration_seconds"):
             if metadata.get(field) not in (None, ""):
@@ -328,6 +396,35 @@ class ResourceService:
         if creator_id not in (None, ""):
             result["creator_id"] = str(creator_id)
         return result
+
+    @staticmethod
+    def _search_runs(platform_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        runs: list[dict[str, Any]] = []
+        for run in platform_runs:
+            if not isinstance(run, dict):
+                continue
+            platform = str(run.get("platform") or "generic")
+            for query_run in run.get("query_runs") or []:
+                if not isinstance(query_run, dict):
+                    continue
+                query = str(query_run.get("query") or "").strip()
+                if not query:
+                    continue
+                candidate_count = max(0, _safe_int(query_run.get("candidate_count")))
+                failure_count = max(0, _safe_int(query_run.get("failure_count")))
+                if failure_count:
+                    status = "partial" if candidate_count else "failed"
+                else:
+                    status = "succeeded"
+                runs.append(
+                    {
+                        "platform": platform,
+                        "query": query,
+                        "status": status,
+                        "candidate_count": candidate_count,
+                    }
+                )
+        return runs
 
     @staticmethod
     def _search_failures(platform_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
