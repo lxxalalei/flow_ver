@@ -1,0 +1,126 @@
+{
+  "version": "1.0.0",
+  "purpose": "验证 OpenClaw web_search 与 education-resources MCP 的语义衔接，不把开放 Web 搜索重新包装进 MCP，也不把 Web 命中机械导入资源系统。",
+  "cases": [
+    {
+      "name": "开放式学习任务同时使用 Web 与专门平台召回",
+      "messages": [
+        {"role": "user", "content": "帮初中生找一些能看懂火山形成过程的资料，形式不限，先看看"}
+      ],
+      "expected": [
+        "识别机制理解和过程观察等 Coverage",
+        "OpenClaw web_search 作为开放互联网发现路线参与首轮",
+        "Bilibili、Douyin 等专门平台只在对当前 Coverage 有直接价值时通过 resource_search 参与",
+        "Web 与专门平台候选共同进入 Evidence 判断",
+        "用户未要求获取时不下载"
+      ],
+      "forbidden": [
+        "把 web_search 当成 resource_search 失败后的 fallback",
+        "为了来源齐全扫描所有平台",
+        "把所有 Web 命中都 resource_import_url",
+        "因为 Web 已参与就排除同样有直接价值的视频平台"
+      ]
+    },
+    {
+      "name": "纯开放网页发现不强行调用专门平台",
+      "messages": [
+        {"role": "user", "content": "帮我在网上找几篇关于城市热岛效应的专业科普文章，先给我推荐"}
+      ],
+      "expected": [
+        "优先使用 OpenClaw web_search 发现专业或官方网页",
+        "根据标题、URL、来源和摘要等真实搜索证据筛选",
+        "如果当前 Coverage 已被 Web 高质量覆盖，可以直接停止并推荐 URL"
+      ],
+      "forbidden": [
+        "因为 MCP 接入了多个平台就机械 resource_search",
+        "先把每条 Web 结果导入 MCP 再决定是否推荐",
+        "把 snippet 没有支持的页面全文事实补出来"
+      ]
+    },
+    {
+      "name": "推荐 Web 候选不要求先变成 MCP Resource",
+      "messages": [
+        {"role": "user", "content": "找三篇适合家长看的儿童网络安全指南，给链接和差异就行"}
+      ],
+      "expected": [
+        "使用 web_search 发现候选",
+        "搜索证据足够时直接推荐可访问 URL 和差异",
+        "Web URL 本身可以成为用户可选择的候选身份"
+      ],
+      "forbidden": [
+        "为了得到 resource_id 批量 resource_import_url",
+        "自动下载或归档",
+        "因为没有 MCP resource_id 就认为 Web 候选不能展示"
+      ]
+    },
+    {
+      "name": "用户选中 Web 结果后再进入 Import 和下载",
+      "messages": [
+        {"role": "assistant", "content": "刚才已经向用户展示了 3 个 Web 候选，第 2 个稳定 URL 为 https://example.org/guide 。"},
+        {"role": "user", "content": "把第二篇保存下来并归档"}
+      ],
+      "expected": [
+        "把第二篇映射到已经展示的 https://example.org/guide",
+        "直接对选中的 URL 调用 resource_import_url",
+        "必要时 Inspect，然后 Download，并根据真实结果 Archive",
+        "不重新执行主题搜索"
+      ],
+      "forbidden": [
+        "重新 web_search 猜第二篇",
+        "要求该候选先前必须已经有 resource_id",
+        "把三篇候选全部 Import 或下载",
+        "用户已经明确保存时再次要求形式确认"
+      ]
+    },
+    {
+      "name": "Web 与平台搜索命中同一资源时语义去重",
+      "messages": [
+        {"role": "assistant", "content": "web_search 命中 Bilibili 视频 https://www.bilibili.com/video/BV1demo ，resource_search 也返回同一 BV1demo。"},
+        {"role": "user", "content": "把结果整理一下给我看"}
+      ],
+      "expected": [
+        "识别两条证据指向同一个实际资源",
+        "只向用户展示一个语义候选",
+        "综合 Web 与平台搜索中更完整的可用证据"
+      ],
+      "forbidden": [
+        "因为来自两个工具就展示成两个资源",
+        "为去重创建持久 canonical/projection 状态",
+        "无理由再次搜索同一资源"
+      ]
+    },
+    {
+      "name": "用户已给 URL 的获取任务跳过 Web Search",
+      "messages": [
+        {"role": "user", "content": "把 https://example.org/lesson 这个网页保存下来"}
+      ],
+      "expected": [
+        "识别为 Acquire 而不是 Research",
+        "直接使用已知 URL 进入 resource_import_url 和后续获取",
+        "不因为 URL 来自 Web 就先做 web_search"
+      ],
+      "forbidden": [
+        "重新搜索网页标题或主题",
+        "先做开放式候选研究",
+        "把已知 URL 当成需要重新发现的资源"
+      ]
+    },
+    {
+      "name": "Web snippet 不足时只检查高潜候选",
+      "messages": [
+        {"role": "assistant", "content": "web_search 找到 8 条候选，其中 1 条看起来高度相关，但 snippet 无法确认是否包含用户要求的可打印活动单。"},
+        {"role": "user", "content": "我要能直接打印给学生用的"}
+      ],
+      "expected": [
+        "把可打印性视为会改变决策的关键未知事实",
+        "只对高潜候选读取页面本体或 resource_import_url/Inspect",
+        "确认后再决定 Recommendable 或 Reject"
+      ],
+      "forbidden": [
+        "因为 snippet 出现 worksheet 就直接断言可打印",
+        "把 8 条全部 Import/Inspect",
+        "为了流程完整检查所有 Web 命中"
+      ]
+    }
+  ]
+}
