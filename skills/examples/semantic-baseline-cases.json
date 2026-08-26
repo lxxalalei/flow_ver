@@ -1,0 +1,213 @@
+{
+  "version": "1.0.0",
+  "purpose": "0074 baseline suite。用于在修改 active SKILL.md 前记录当前 Skill 的真实 OpenClaw 行为，并在相同模型/MCP/输入下做 old/new A/B。成功标准描述用户目标和行为边界，不把固定平台或固定 Tool 路线写成唯一正确答案。",
+  "baseline_commit": "3a20c1e14358631201e99fb54e007ccfcf118d94",
+  "layers": ["hard_invariant", "judgment", "real_retrieval"],
+  "runner_notes": [
+    "标记 fixture_required 的 case 在每轮 old/new A/B 前使用同一个当前可访问 fixture URL 替换占位符。",
+    "fixture 本身不是评分目标；若平台在两次运行之间发生变化，记录环境差异。",
+    "不要把 Agent 私有思考要求成输出字段；只保存可观察的澄清、Tool trace、候选、Gap/stop 理由和用户可见回复。"
+  ],
+  "cases": [
+    {
+      "id": "research-open-volcano",
+      "task_family": "Research",
+      "execution_mode": "real",
+      "messages": [
+        {"role": "user", "content": "帮孩子找一些火山科普资料，形式你看着办，先看看"}
+      ],
+      "success_criteria": [
+        "不把载体选择重新推给用户",
+        "最终候选能够覆盖对火山的核心理解需求，并提供能帮助形成直观认识的有效材料，或给出不需要额外路线的合理依据",
+        "不同搜索路线若存在，应承担不同学习价值而不是近义关键词重复",
+        "停止时能说明主要目标已经覆盖，或下一轮没有明确新增价值"
+      ],
+      "forbidden": [
+        "因为某个平台最顺手就把整个任务缩成单一生态且不检查覆盖",
+        "为了平台数量机械搜索所有已接入来源",
+        "用户未要求下载却执行下载"
+      ]
+    },
+    {
+      "id": "research-ambiguous-topic",
+      "task_family": "Research",
+      "execution_mode": "judgment",
+      "messages": [
+        {"role": "user", "content": "帮孩子找些学习资料"}
+      ],
+      "success_criteria": [
+        "识别主题/想解决的问题是会显著改变搜索路线的关键缺口",
+        "优先提出一个最有信息价值的自然澄清问题"
+      ],
+      "forbidden": [
+        "不知道主题就直接泛搜索",
+        "先询问平台、文件格式、数量等次要字段清单"
+      ]
+    },
+    {
+      "id": "locate-exact-edition",
+      "task_family": "Locate",
+      "execution_mode": "real",
+      "messages": [
+        {"role": "user", "content": "帮我找鲁迅《呐喊》1923年初版本的影印或扫描资源，我主要想看原版版式"}
+      ],
+      "success_criteria": [
+        "把任务识别为定位特定版本/原貌资源，而不是泛泛推荐鲁迅作品",
+        "候选判断围绕版本、年代、影印/扫描和原版版式证据",
+        "若关键版本事实未知，优先补事实而不是扩大主题搜索"
+      ],
+      "forbidden": [
+        "返回现代排印本后宣称已经满足初版影印需求",
+        "把任务扩展成鲁迅学习资料综述"
+      ]
+    },
+    {
+      "id": "browse-creator-preview",
+      "task_family": "Browse",
+      "execution_mode": "fixture_required",
+      "fixture_requirements": [
+        "准备一个当前可访问、至少有 10 个公开视频的 Bilibili creator URL；old/new 使用同一 URL"
+      ],
+      "messages": [
+        {"role": "user", "content": "我给你一个B站UP主主页，帮我看看他主要做什么内容，挑几个有代表性的作品给我：<BILIBILI_CREATOR_URL>"}
+      ],
+      "success_criteria": [
+        "把任务识别为创作者浏览和代表性选择，而不是完整枚举",
+        "允许只读取足够判断内容结构的部分结果",
+        "代表作品的选择应能说明差异或代表性"
+      ],
+      "forbidden": [
+        "无用户要求就把创作者全部作品完整采集或全部下载",
+        "把主页本身当成可下载视频"
+      ]
+    },
+    {
+      "id": "enumerate-container-all",
+      "task_family": "Enumerate",
+      "execution_mode": "fixture_required",
+      "fixture_requirements": [
+        "准备一个当前可访问且包含多个子视频的 Bilibili collection URL；old/new 使用同一 URL"
+      ],
+      "messages": [
+        {"role": "user", "content": "这个合集里的视频全部列出来，一个都不要漏；先不用下载：<BILIBILI_COLLECTION_URL>"}
+      ],
+      "success_criteria": [
+        "识别为数据完整性任务而不是推荐任务",
+        "使用容器展开直到来源真实结束",
+        "聊天分页只控制展示/上下文，不变成底层枚举上限",
+        "遵守先不用下载"
+      ],
+      "forbidden": [
+        "只展示前几条就宣称全部完成",
+        "因为结果很多自动下载全部资源"
+      ]
+    },
+    {
+      "id": "acquire-selected-candidate",
+      "task_family": "Acquire",
+      "execution_mode": "synthetic_context",
+      "setup": "先在同一会话向用户真实展示三个候选 A/B/C，并保留各自 URL/平台语义身份；随后发送本 case 的用户消息。",
+      "messages": [
+        {"role": "user", "content": "就下载第2个"}
+      ],
+      "success_criteria": [
+        "只映射到用户实际看过的第2个候选",
+        "对象明确且已有下载意图时直接进入获取，不重新做主题研究",
+        "以真实 Job/文件结果判断是否成功"
+      ],
+      "forbidden": [
+        "重新搜索一轮然后把新的第2个当成用户选择",
+        "要求用户进行无意义的形式化二次确认",
+        "Job 仅启动就宣称下载成功"
+      ]
+    },
+    {
+      "id": "constraint-printable-card",
+      "task_family": "Research",
+      "execution_mode": "real",
+      "messages": [
+        {"role": "user", "content": "给我找能打印的鸟类观察卡，最好 PDF，小学生可以直接用"}
+      ],
+      "success_criteria": [
+        "把观察卡/活动单视为内容形态，把可打印视为硬约束，把 PDF 视为偏好而不是唯一格式",
+        "候选必须适合小学生直接使用",
+        "若非 PDF 但真实可打印且内容更合适，可以保留并明确差异"
+      ],
+      "forbidden": [
+        "因为主题是鸟类就大量返回纪录片或泛科普视频",
+        "把 PDF 偏好擅自升级为排他条件"
+      ]
+    },
+    {
+      "id": "clarify-textbook-version",
+      "task_family": "Research",
+      "execution_mode": "judgment",
+      "messages": [
+        {"role": "user", "content": "帮我找五年级上册数学同步练习"}
+      ],
+      "success_criteria": [
+        "识别教材版本会直接改变同步内容",
+        "上下文没有版本事实时先确认版本，不猜"
+      ],
+      "forbidden": [
+        "默认人教版",
+        "先找通用练习后把它描述成同步资料"
+      ]
+    },
+    {
+      "id": "research-platform-constrained",
+      "task_family": "Research",
+      "execution_mode": "real",
+      "messages": [
+        {"role": "user", "content": "只帮我找B站上的真实火山喷发视频，不要动画，也不用别的平台"}
+      ],
+      "success_criteria": [
+        "尊重平台和媒介限制",
+        "候选判断重点区分真实喷发 footage 与动画/纯讲解",
+        "来源集中于 Bilibili 不应被误判为 Coverage Gap"
+      ],
+      "forbidden": [
+        "为了多样性额外搜索 Host Web、CCTV、SmartEdu 或其他平台",
+        "把动画讲解当作真实喷发视频"
+      ]
+    },
+    {
+      "id": "failure-not-content-absence",
+      "task_family": "Research",
+      "execution_mode": "fault_injection_or_real_failure",
+      "setup": "选择一个对当前目标有明显价值但当前真实调用会返回 AUTH_REQUIRED / PLATFORM_UNAVAILABLE / NETWORK_BLOCKED 的来源，或在测试 harness 中注入等价 Tool failure；old/new 使用同一失败条件。",
+      "messages": [
+        {"role": "user", "content": "帮我看看有没有适合孩子听的《西游记》连续音频专辑"}
+      ],
+      "success_criteria": [
+        "把技术失败解释为当前能力没有拿到结果，而不是资源不存在",
+        "根据该来源对目标的重要性决定登录、重试、换同职责来源或在已有证据足够时停止",
+        "若替代来源承担不同职责，应明确它不是等价证明"
+      ],
+      "forbidden": [
+        "直接告诉用户网上没有这类资源",
+        "为了隐藏失败静默切换到完全不同资源形态并宣称等价"
+      ]
+    },
+    {
+      "id": "transform-known-webpage",
+      "task_family": "Transform",
+      "execution_mode": "fixture_required",
+      "fixture_requirements": [
+        "准备一个当前可公开访问、正文可抽取的普通文章 URL；old/new 使用同一 URL"
+      ],
+      "messages": [
+        {"role": "user", "content": "把这个网页保存下来并做成一个排版好看的离线 HTML，不需要再帮我找别的资料：<GENERIC_WEB_URL>"}
+      ],
+      "success_criteria": [
+        "识别为已知 URL 的获取+视觉衍生任务，不启动主题研究",
+        "先物化真实网页资源，再按用户明确要求进入 HTML Design",
+        "最终成功基于真实文件和设计结果"
+      ],
+      "forbidden": [
+        "重新搜索相似文章",
+        "在网页还没有真实物化前凭空生成一个内容替代品"
+      ]
+    }
+  ]
+}

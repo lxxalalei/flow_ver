@@ -2,12 +2,11 @@
 
 ## 当前执行路线
 
-- 当前唯一 active 实施计划：[`0073-correctness-hardening-openclaw-e2e.md`](0073-correctness-hardening-openclaw-e2e.md)。
-- 本轮停止新增平台，先修复已确认 correctness 问题、清理无业务依据的残余复杂度，并恢复真实 OpenClaw 用户链路为 release gate。
+- 当前唯一 active 实施计划：[`0074-skill-semantic-decision-kernel.md`](0074-skill-semantic-decision-kernel.md)。
+- 0073 已完成真实 OpenClaw/MCP release gate，MCP 公共能力面进入冻结维护阶段；当前主线转向 Skill 语义决策质量与真实 A/B。
+- 0074 baseline 完成前不得修改 active `skills/SKILL.md`，避免先改方案再用新规则证明自己正确。
 
-既有实现、CCTV 专项、HTML Design、SmartEdu 文件资源等已完成计划只作为归档证据。旧 `0028-real-openclaw-platform-e2e.md` 的真实验收责任由 0073 接替；在 0073 完成真实验收前，不得把后端测试、stdio probe 或历史 smoke 视为当前完整用户链路已通过。
-
-发生冲突时以运行时 Tool schema 为机器事实、以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。不要从旧计划恢复另一条公共能力面。
+当前机器事实仍以运行时 Tool schema 为准，当前实现边界以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。Skill 语义实验不得恢复另一套 MCP 公共能力面或持久语义状态。
 
 影响多个文件、包含多个阶段或可能跨会话的任务，应在本目录创建一个计划文件。
 范围局部但非平凡的任务优先使用 [`../TASK_TEMPLATE.md`](../TASK_TEMPLATE.md)；不要为了形式给每个小改动都新建长期计划。

@@ -25,6 +25,7 @@ resource_download
 resource_job_status
 resource_job_cancel
 resource_job_read
+resource_html_design
 resource_archive
 ```
 
@@ -191,6 +192,7 @@ Search / Inspect / Download 统一走 LibGen mirror 路径；Provider、Inspecto
 - Ximalaya track / album / creator；
 - SmartEdu textbook / course；
 - Zjer course；
+- CCTV column / video；
 - LibGen book URL；
 - Zhihu；
 - 其他 URL → generic。
