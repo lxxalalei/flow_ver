@@ -79,6 +79,20 @@ Get-ChildItem -Path $ReleaseRoot -File -Recurse -Force |
     Where-Object { $_.Extension -in @('.pyc', '.pyo') } |
     Remove-Item -Force
 
+# The vendored CCTV fallback currently executes src/cli + src/worker through tsx.
+# Keep that runtime source, the adapted worker, lockfile and license; strip upstream
+# development/reverse-engineering artifacts that are not used at runtime.
+$CctvVendor = Join-Path $ReleaseMcp 'src\education_resource_mcp\vendor\cctv-h5e'
+foreach ($relative in @(
+    'README.md',
+    'src\external\cctv.worker.orig.js',
+    'src\external\cctv.worker.diff',
+    'src\web'
+)) {
+    $target = Join-Path $CctvVendor $relative
+    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+}
+
 # Release is built from an allowlist. This assertion prevents accidental leakage if the builder changes later.
 $ForbiddenNames = @(
     'legacy',
@@ -86,6 +100,8 @@ $ForbiddenNames = @(
     '.openclaw-test',
     'semantic-regression-cases.json',
     'run_semantic_baseline.py',
+    'cctv.worker.orig.js',
+    'cctv.worker.diff',
     'AGENTS.md',
     'CONTEXT.md',
     'IDENTITY.md',
