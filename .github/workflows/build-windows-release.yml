@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-install-smoke:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -49,6 +49,36 @@ jobs:
           Get-ChildItem $root.FullName -Recurse | ForEach-Object {
             $_.FullName.Substring($root.FullName.Length).TrimStart('\')
           }
+
+      - name: Install OpenClaw baseline for smoke test
+        shell: pwsh
+        run: |
+          $installer = (Invoke-WebRequest -UseBasicParsing 'https://openclaw.ai/install.ps1').Content
+          & ([scriptblock]::Create($installer)) -NoOnboard
+          $env:Path = @(
+            [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+            [Environment]::GetEnvironmentVariable('Path', 'User')
+          ) -join ';'
+          openclaw setup --baseline
+          openclaw --version
+
+      - name: Install from packaged release
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist/*.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath install-smoke
+          $root = Get-ChildItem install-smoke -Directory | Select-Object -First 1
+          if (-not $root) { throw 'release root directory not found' }
+          & (Join-Path $root.FullName 'install.ps1')
+
+      - name: Verify installed runtime
+        shell: pwsh
+        run: |
+          $mcpExe = Join-Path $env:LOCALAPPDATA 'LearningResourceFlow\venv\Scripts\education-resource-mcp.exe'
+          $skill = Join-Path $HOME '.openclaw\skills\learning-resource-flow\SKILL.md'
+          if (-not (Test-Path $mcpExe)) { throw "MCP executable not installed: $mcpExe" }
+          if (-not (Test-Path $skill)) { throw "Skill not installed: $skill" }
+          openclaw mcp doctor education-resources --probe
 
       - name: Upload Windows release
         uses: actions/upload-artifact@v4
