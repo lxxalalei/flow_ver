@@ -168,8 +168,8 @@ Source role = prior, not boundary
 - [x] completed：清理进入语义阶段前的文档边界漂移，建立 0074、三层评测方法和 baseline runner。
 - [x] completed：修改 active Skill 的来源派发：Direct Value Match、Reasoned Fan-out、平台 trigger/non-trigger、未搜索平台不构成 Gap。
 - [ ] pending：继续收敛 Task → Goal → Coverage → Sources → Evidence → Gap → Next 主 decision kernel，并压缩 references 重复规则。
-- [ ] pending：在真实 OpenClaw 中分别运行 `3a20c1e` old worktree 与新版 Skill，记录 baseline/A-B。
-- [ ] pending：根据真实 A/B 修正语义退化，不为测试结果修改正确业务目标。
+- [x] completed：在真实 OpenClaw 中分别运行 `3a20c1e` old worktree 与新版 Skill，记录 baseline/A-B（2026-08-27，repeat=1，见下方验证表）。
+- [x] completed：根据真实 A/B 修正语义退化，不为测试结果修改正确业务目标（本轮未观察到语义退化；唯一成本信号是 locate-exact-edition token 用量上升，属 deeper 事实核查，暂不改目标）。
 - [ ] pending：真实用户链路最终验收；通过后归档 0074。
 
 ## Milestone checkpoint
@@ -184,7 +184,7 @@ Fallback added?: no
 Data truncation added?: no
 MCP public surface changed?: no
 Actual user flow affected?: yes, source dispatch semantics
-Actual user flow validated?: not yet; real old/new OpenClaw A/B pending
+Actual user flow validated?: first real old/new A/B completed 2026-08-27 (repeat=1, no regression); stability re-run and final user-flow acceptance pending
 Scope drift detected?: no
 ```
 
@@ -222,8 +222,33 @@ Scope drift detected?: no
 | MCP release baseline | inherited from 0073 | 数据面可作为稳定实验底座 | Skill 语义质量 |
 | static Skill/evaluator audit | completed | 过早 routing 与无脑 fan-out 两类风险已识别 | 新版更好 |
 | source-routing static alignment | completed | 主 Skill/reference/baseline case 已统一到 Direct Value Match + Reasoned Fan-out | 真实召回质量 |
-| old/new OpenClaw A/B | pending | — | 新版语义收益 |
+| old/new OpenClaw A/B | completed 2026-08-27，repeat=1 | 同模型（ds/deepseek-v4-flash）、同 MCP（3a20c1e 部署态）、同 fixtures 下，新版在 6/9 case 上更好、3/9 持平、0 倒退；hard invariant 无违例 | 多次重放的稳定性（repeat≥2）；单次运行的 token/时长差异是否稳定 |
+
+### 2026-08-27 真实 A/B 执行记录
+
+环境与机制（Windows 本机 OpenClaw 2026.7.1-2，gateway 模式）：
+
+- 本机 CLI 无 `agent exec` 子命令，runner 以 `--cli direct` 走 `openclaw agent --message-file --session-id`，每 case 独立 session；
+- skill 通过 `skills/ → AppData packages junction` 全局部署：old 侧为已部署的 `3a20c1e` 内容（逐文件核对仅换行符差异），new 侧为 `b668bf9` 镜像；两侧 MCP 均保持 `3a20c1e` 部署态，未部署 `b668bf9` 的 service.py 改动，保证工具底座一致；
+- fixtures：UP `space.bilibili.com/14804670`（当前 creator 匿名链路 412/-352 风控，两侧同条件）、合集 `lists/730734?type=season`（78 视频，真实可展开）、普通文章 igsnrr.cas.cn《什么是火山?》；
+- 证据目录：`.openclaw-test/semantic-baseline/baseline-3a20c1e/` 与 `current-b668bf9/`（git 忽略）。
+
+逐 case 结论（old → new）：
+
+| case | 关键差异 |
+| --- | --- |
+| research-open-volcano | old 仅 MCP search、候选 0 真实链接；new web_search+MCP 并召、9 链接、覆盖动画/真实喷发/音频/动手实验 |
+| research-ambiguous-topic | 持平：两侧都先问主题 |
+| locate-exact-edition | new 更深（38 vs 6 调用，archive.org 免费扫描候选+孔夫子影印本证据链），代价 tokens 118k vs 49k |
+| browse-creator-preview | 两侧都在 creator 412 下产出合格 UP 画像+代表作；new 更多走 MCP/搜索路由（15 调用） |
+| enumerate-container-all | 两侧都完整 78 条不下载；new 每条带真实 URL |
+| constraint-printable-card | old 0 链接；new 7 链接、按年级分层、PDF 偏好保留且不排他 |
+| clarify-textbook-version | 持平：两侧都先确认版本不猜 |
+| research-platform-constrained | 两侧都只搜 B 站；new 11 真实链接且时效更好（含 2026-08 事件） |
+| transform-known-webpage | 两侧都真实 import+download+html_design+archive；new 146s/0 失败 vs old 733s/1 失败 |
+
+hard invariant 抽查：enumerate 两侧均未触发 download；platform-constrained 两侧工具面均无 host/web 搜索；无用户未授权下载副作用。
 
 ## 结果
 
-尚未完成。当前已从“baseline-first 阻塞”切换为“immutable old baseline + current Skill 继续实施”；真实 old/new A/B 仍是最终语义验收门槛。
+进行中。已完成首轮真实 old/new A/B（repeat=1）：新版 6/9 更好、3/9 持平、0 倒退，hard invariant 无违例；AC-10 的“稳定更好”仍需 repeat≥2 或跨会话复验。剩余：AC-05 decision kernel 文本收敛、AC-10 稳定性复验、AC-11 最终用户链路验收。

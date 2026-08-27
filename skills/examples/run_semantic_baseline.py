@@ -99,6 +99,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--openclaw", default="openclaw")
     parser.add_argument("--expect-head")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--cli",
+        choices=("exec", "direct"),
+        default="exec",
+        help=(
+            "exec: 'openclaw agent exec' with --cwd/--state-dir (newer CLI). "
+            "direct: 'openclaw agent' with --session-id isolation "
+            "(OpenClaw 2026.7.x has no exec subcommand and rejects unknown options)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -112,25 +122,39 @@ def run_case(
 ) -> dict[str, Any]:
     run_dir = output_root / str(case["id"]) / f"run-{run_index:02d}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    state_dir = run_dir / "state"
-    state_dir.mkdir(exist_ok=True)
     request = run_dir / "request.txt"
     request.write_text(prompt + "\n", encoding="utf-8")
 
-    command = [
-        args.openclaw,
-        "agent",
-        "exec",
-        "--message-file",
-        str(request),
-        "--cwd",
-        str(workspace),
-        "--state-dir",
-        str(state_dir),
-        "--timeout",
-        str(args.timeout),
-        "--json",
-    ]
+    session_id = f"semantic-{args.label}-{case['id']}-r{run_index:02d}"
+    if args.cli == "exec":
+        state_dir = run_dir / "state"
+        state_dir.mkdir(exist_ok=True)
+        command = [
+            args.openclaw,
+            "agent",
+            "exec",
+            "--message-file",
+            str(request),
+            "--cwd",
+            str(workspace),
+            "--state-dir",
+            str(state_dir),
+            "--timeout",
+            str(args.timeout),
+            "--json",
+        ]
+    else:
+        command = [
+            args.openclaw,
+            "agent",
+            "--message-file",
+            str(request),
+            "--session-id",
+            session_id,
+            "--timeout",
+            str(args.timeout),
+            "--json",
+        ]
     if args.model:
         command += ["--model", args.model]
     if args.thinking:
@@ -139,6 +163,8 @@ def run_case(
     record: dict[str, Any] = {
         "case_id": case["id"],
         "run_index": run_index,
+        "cli": args.cli,
+        "session_id": session_id,
         "command": command,
         "started_at": now(),
     }
@@ -182,11 +208,23 @@ def run_case(
     except json.JSONDecodeError:
         payload = None
     if isinstance(payload, dict):
-        record["openclaw"] = {
+        summary = {
             key: payload[key]
             for key in ("ok", "status", "model", "provider", "usage", "costUsd", "toolSummary", "sessionId")
             if key in payload
         }
+        # OpenClaw 2026.7.x `agent --json` nests run metadata under result.meta.agentMeta;
+        # gateway-fallback envelopes put payloads/meta at the top level instead.
+        result = payload.get("result")
+        meta = result.get("meta") if isinstance(result, dict) else payload.get("meta")
+        agent_meta = meta.get("agentMeta") if isinstance(meta, dict) else None
+        if isinstance(agent_meta, dict):
+            for key in ("model", "provider", "usage", "costUsd", "sessionId"):
+                if key not in summary and key in agent_meta:
+                    summary[key] = agent_meta[key]
+        if isinstance(meta, dict) and "toolSummary" not in summary and "toolSummary" in meta:
+            summary["toolSummary"] = meta["toolSummary"]
+        record["openclaw"] = summary
     write_json(run_dir / "meta.json", record)
     return record
 
@@ -218,6 +256,7 @@ def main() -> int:
         "workspace": str(workspace),
         "workspace_head": head,
         "label": args.label,
+        "cli": args.cli,
         "started_at": now(),
         "runs": [],
         "skipped": [],
