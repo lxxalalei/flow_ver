@@ -1,6 +1,6 @@
 {
-  "version": "5.2.0",
-  "purpose": "验证 learning-resource-flow 的语义决策质量：需求还原、澄清判断、搜索价值分解、Dispatch 设计、Direct Value Match 来源派发、query、结果判断、Coverage/Gap、停止条件、用户选择、获取意图和完整枚举。工具流程和调用数量不是评分目标。",
+  "version": "6.0.0",
+  "purpose": "验证 learning-resource-flow 的语义决策质量：需求还原、澄清判断、搜索价值分解、Dispatch 设计、Direct Value Match 来源派发、query、结果判断、Coverage/Gap、停止条件、用户选择、获取意图和完整枚举。工具流程和调用数量不是评分目标。 v6.0.0 起接入真实执行：runner 按 execution_mode（real/judgment/fixture_required）驱动；assistant 前情消息作为 [前情上下文] 嵌入单轮 prompt。未标 execution_mode 的 case 保持人工评审。",
   "evaluation_dimensions": [
     "need_reconstruction",
     "clarification_judgment",
@@ -17,10 +17,18 @@
   ],
   "cases": [
     {
+      "id": "reg-sufficient-info-direct-search",
+      "execution_mode": "real",
       "name": "信息充分时直接搜索",
-      "focus": ["need_reconstruction", "clarification_judgment"],
+      "focus": [
+        "need_reconstruction",
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "帮我找适合小学三年级自己看的中文太阳系图文，先不要下载"}
+        {
+          "role": "user",
+          "content": "帮我找适合小学三年级自己看的中文太阳系图文，先不要下载"
+        }
       ],
       "expected": [
         "理解为让三年级学生通过中文图文建立太阳系结构和行星基本特征的直观认识",
@@ -35,10 +43,17 @@
       ]
     },
     {
+      "id": "reg-topic-missing-clarify",
+      "execution_mode": "judgment",
       "name": "真正缺主题时才澄清",
-      "focus": ["clarification_judgment"],
+      "focus": [
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "帮孩子找些学习资料"}
+        {
+          "role": "user",
+          "content": "帮孩子找些学习资料"
+        }
       ],
       "expected": [
         "识别最关键缺口是学习主题或想解决的问题",
@@ -52,10 +67,18 @@
       ]
     },
     {
+      "id": "reg-grade1-math-route-fork",
+      "execution_mode": "judgment",
       "name": "一年级数学存在真实路线分叉",
-      "focus": ["need_reconstruction", "clarification_judgment"],
+      "focus": [
+        "need_reconstruction",
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "找一年级数学资料"}
+        {
+          "role": "user",
+          "content": "找一年级数学资料"
+        }
       ],
       "expected": [
         "识别同步讲解、基础练习、趣味拓展会导向不同材料",
@@ -68,10 +91,18 @@
       ]
     },
     {
+      "id": "reg-physics-intro-stage",
+      "execution_mode": "judgment",
       "name": "物理启蒙的学段会改变搜索",
-      "focus": ["clarification_judgment", "need_reconstruction"],
+      "focus": [
+        "clarification_judgment",
+        "need_reconstruction"
+      ],
       "messages": [
-        {"role": "user", "content": "帮我找一些物理启蒙"}
+        {
+          "role": "user",
+          "content": "帮我找一些物理启蒙"
+        }
       ],
       "expected": [
         "识别学龄前、小学和初中对应的内容尺度明显不同",
@@ -83,10 +114,19 @@
       ]
     },
     {
+      "id": "reg-user-delegates-format",
+      "execution_mode": "real",
       "name": "用户授权模型决定载体",
-      "focus": ["need_reconstruction", "search_angle_quality", "dispatch_design"],
+      "focus": [
+        "need_reconstruction",
+        "search_angle_quality",
+        "dispatch_design"
+      ],
       "messages": [
-        {"role": "user", "content": "想让孩子了解古埃及，形式你看着办，先看看"}
+        {
+          "role": "user",
+          "content": "想让孩子了解古埃及，形式你看着办，先看看"
+        }
       ],
       "expected": [
         "不把视频/图文选择权重新推给用户",
@@ -102,10 +142,20 @@
       ]
     },
     {
+      "id": "reg-volcano-multi-source-recall",
+      "execution_mode": "real",
       "name": "火山科普允许多个直接匹配来源共同召回",
-      "focus": ["search_angle_quality", "dispatch_design", "source_routing", "query_quality"],
+      "focus": [
+        "search_angle_quality",
+        "dispatch_design",
+        "source_routing",
+        "query_quality"
+      ],
       "messages": [
-        {"role": "user", "content": "帮孩子找一些火山科普资料，形式你看着办"}
+        {
+          "role": "user",
+          "content": "帮孩子找一些火山科普资料，形式你看着办"
+        }
       ],
       "expected": [
         "识别原理理解和喷发过程观察这类不同学习价值",
@@ -123,10 +173,18 @@
       ]
     },
     {
+      "id": "reg-typhoon-two-facets",
+      "execution_mode": "real",
       "name": "来源需要直接价值匹配，不要求独占职责",
-      "focus": ["dispatch_design", "source_routing"],
+      "focus": [
+        "dispatch_design",
+        "source_routing"
+      ],
       "messages": [
-        {"role": "user", "content": "想看懂台风是怎么形成的，最好也能直观看到过程"}
+        {
+          "role": "user",
+          "content": "想看懂台风是怎么形成的，最好也能直观看到过程"
+        }
       ],
       "expected": [
         "把形成机制解释和过程可视化视为两个价值切面",
@@ -140,10 +198,19 @@
       ]
     },
     {
+      "id": "reg-commute-ancient-poems-audio",
+      "execution_mode": "real",
       "name": "使用场景自然推导音频方向",
-      "focus": ["need_reconstruction", "source_routing", "query_quality"],
+      "focus": [
+        "need_reconstruction",
+        "source_routing",
+        "query_quality"
+      ],
       "messages": [
-        {"role": "user", "content": "找一些孩子路上听的古诗资源"}
+        {
+          "role": "user",
+          "content": "找一些孩子路上听的古诗资源"
+        }
       ],
       "expected": [
         "从‘路上听’自然推断音频是高价值方向",
@@ -157,10 +224,18 @@
       ]
     },
     {
+      "id": "reg-printable-bird-card",
+      "execution_mode": "real",
       "name": "内容形态格式和约束分离",
-      "focus": ["need_reconstruction", "query_quality"],
+      "focus": [
+        "need_reconstruction",
+        "query_quality"
+      ],
       "messages": [
-        {"role": "user", "content": "要能打印的鸟类观察卡，最好 PDF"}
+        {
+          "role": "user",
+          "content": "要能打印的鸟类观察卡，最好 PDF"
+        }
       ],
       "expected": [
         "把鸟类观察卡理解为内容形态",
@@ -175,10 +250,17 @@
       ]
     },
     {
+      "id": "reg-textbook-version-confirm",
+      "execution_mode": "judgment",
       "name": "教材同步缺版本时必须确认版本",
-      "focus": ["clarification_judgment"],
+      "focus": [
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "帮我找五年级上册数学同步练习"}
+        {
+          "role": "user",
+          "content": "帮我找五年级上册数学同步练习"
+        }
       ],
       "expected": [
         "识别教材版本会直接改变同步练习内容",
@@ -191,10 +273,17 @@
       ]
     },
     {
+      "id": "reg-parent-speaker-child-audience",
+      "execution_mode": "real",
       "name": "家长是对话者但孩子是资源对象",
-      "focus": ["need_reconstruction"],
+      "focus": [
+        "need_reconstruction"
+      ],
       "messages": [
-        {"role": "user", "content": "我想给孩子找一些恐龙资料"}
+        {
+          "role": "user",
+          "content": "我想给孩子找一些恐龙资料"
+        }
       ],
       "expected": [
         "理解对话者可以是家长而资源对象是孩子",
@@ -207,10 +296,18 @@
       ]
     },
     {
+      "id": "reg-parent-audience-parent",
+      "execution_mode": "real",
       "name": "给家长参考时对象就是家长",
-      "focus": ["need_reconstruction", "source_routing"],
+      "focus": [
+        "need_reconstruction",
+        "source_routing"
+      ],
       "messages": [
-        {"role": "user", "content": "我是家长，想了解怎么判断儿童科普资料是否可靠"}
+        {
+          "role": "user",
+          "content": "我是家长，想了解怎么判断儿童科普资料是否可靠"
+        }
       ],
       "expected": [
         "理解资源对象就是家长",
@@ -223,11 +320,22 @@
       ]
     },
     {
+      "id": "reg-reuse-known-child-context",
+      "execution_mode": "real",
       "name": "复用已知对象背景",
-      "focus": ["need_reconstruction", "clarification_judgment"],
+      "focus": [
+        "need_reconstruction",
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "assistant", "content": "当前上下文已可靠提供：小宝约8岁。"},
-        {"role": "user", "content": "给小宝找一些火山纪录片，先看看"}
+        {
+          "role": "assistant",
+          "content": "当前上下文已可靠提供：小宝约8岁。"
+        },
+        {
+          "role": "user",
+          "content": "给小宝找一些火山纪录片，先看看"
+        }
       ],
       "expected": [
         "识别当前对象为小宝，并在内容尺度有帮助时使用8岁背景",
@@ -241,11 +349,21 @@
       ]
     },
     {
+      "id": "reg-multi-child-no-bleed",
+      "execution_mode": "real",
       "name": "多对象背景不能串用",
-      "focus": ["need_reconstruction"],
+      "focus": [
+        "need_reconstruction"
+      ],
       "messages": [
-        {"role": "assistant", "content": "当前上下文已可靠提供：大宝12岁，小宝7岁。"},
-        {"role": "user", "content": "给小宝找一些适合自己读的古诗启蒙材料"}
+        {
+          "role": "assistant",
+          "content": "当前上下文已可靠提供：大宝12岁，小宝7岁。"
+        },
+        {
+          "role": "user",
+          "content": "给小宝找一些适合自己读的古诗启蒙材料"
+        }
       ],
       "expected": [
         "只使用与小宝对应的背景",
@@ -258,11 +376,21 @@
       ]
     },
     {
+      "id": "reg-multi-child-which-one",
+      "execution_mode": "judgment",
       "name": "多个对象且对象不明时只确认对象",
-      "focus": ["clarification_judgment"],
+      "focus": [
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "assistant", "content": "当前上下文已可靠提供：大宝12岁，小宝7岁。"},
-        {"role": "user", "content": "找一些给孩子自己看的青春期身体变化科普"}
+        {
+          "role": "assistant",
+          "content": "当前上下文已可靠提供：大宝12岁，小宝7岁。"
+        },
+        {
+          "role": "user",
+          "content": "找一些给孩子自己看的青春期身体变化科普"
+        }
       ],
       "expected": [
         "判断不同孩子会显著改变内容尺度",
@@ -276,10 +404,17 @@
       ]
     },
     {
+      "id": "reg-conflict-video-vs-animation",
+      "execution_mode": "judgment",
       "name": "硬约束冲突才需要澄清",
-      "focus": ["clarification_judgment"],
+      "focus": [
+        "clarification_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "不要视频，最好用动画讲清楚太阳系"}
+        {
+          "role": "user",
+          "content": "不要视频，最好用动画讲清楚太阳系"
+        }
       ],
       "expected": [
         "识别‘不要视频’与‘动画’可能存在实际冲突",
@@ -292,11 +427,23 @@
       ]
     },
     {
+      "id": "reg-many-results-not-goal",
+      "execution_mode": "judgment",
       "name": "搜索结果多不等于已经满足目标",
-      "focus": ["result_judgment", "coverage_judgment", "gap_judgment"],
+      "focus": [
+        "result_judgment",
+        "coverage_judgment",
+        "gap_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "想找能帮助初中生真正看懂光合作用过程的资料"},
-        {"role": "assistant", "content": "首轮搜到很多结果，但大部分只是背诵知识点和题目解析，几乎没有过程图解或动态演示。"}
+        {
+          "role": "user",
+          "content": "想找能帮助初中生真正看懂光合作用过程的资料"
+        },
+        {
+          "role": "assistant",
+          "content": "首轮搜到很多结果，但大部分只是背诵知识点和题目解析，几乎没有过程图解或动态演示。"
+        }
       ],
       "expected": [
         "识别首轮虽然有很多结果，但没有满足‘看懂过程’这个核心目标",
@@ -310,11 +457,24 @@
       ]
     },
     {
+      "id": "reg-open-task-4-videos-not-done",
+      "execution_mode": "judgment",
       "name": "开放式任务不能几个视频就停",
-      "focus": ["dispatch_design", "coverage_judgment", "gap_judgment", "stop_judgment"],
+      "focus": [
+        "dispatch_design",
+        "coverage_judgment",
+        "gap_judgment",
+        "stop_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "给10岁孩子找一些关于火山的学习资料，形式不限，先看看"},
-        {"role": "assistant", "content": "首轮在 Bilibili 找到4个质量不错、适龄的火山视频，其中有动画和真实喷发画面。"}
+        {
+          "role": "user",
+          "content": "给10岁孩子找一些关于火山的学习资料，形式不限，先看看"
+        },
+        {
+          "role": "assistant",
+          "content": "首轮在 Bilibili 找到4个质量不错、适龄的火山视频，其中有动画和真实喷发画面。"
+        }
       ],
       "expected": [
         "承认现有视频已经覆盖视觉观察的一部分价值",
@@ -330,11 +490,22 @@
       ]
     },
     {
+      "id": "reg-video-only-single-medium",
+      "execution_mode": "judgment",
       "name": "用户明确只要视频时单一媒介不是 Gap",
-      "focus": ["coverage_judgment", "stop_judgment"],
+      "focus": [
+        "coverage_judgment",
+        "stop_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "就想看几个真实火山喷发的视频，不要文章和练习"},
-        {"role": "assistant", "content": "已经找到几段画面清楚、来源和内容都合适的真实喷发视频。"}
+        {
+          "role": "user",
+          "content": "就想看几个真实火山喷发的视频，不要文章和练习"
+        },
+        {
+          "role": "assistant",
+          "content": "已经找到几段画面清楚、来源和内容都合适的真实喷发视频。"
+        }
       ],
       "expected": [
         "把用户明确的视频限定视为正常约束",
@@ -347,11 +518,23 @@
       ]
     },
     {
+      "id": "reg-python-not-videos-only",
+      "execution_mode": "judgment",
       "name": "开放式 Python 学习不能只给视频",
-      "focus": ["dispatch_design", "source_routing", "coverage_judgment"],
+      "focus": [
+        "dispatch_design",
+        "source_routing",
+        "coverage_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "帮初中生找一些学习 Python 的资源，形式不限，希望能真的学起来"},
-        {"role": "assistant", "content": "目前只在视频平台找到几套从零入门课程。"}
+        {
+          "role": "user",
+          "content": "帮初中生找一些学习 Python 的资源，形式不限，希望能真的学起来"
+        },
+        {
+          "role": "assistant",
+          "content": "目前只在视频平台找到几套从零入门课程。"
+        }
       ],
       "expected": [
         "识别‘真的学起来’不仅需要讲解，还可能需要可查阅教程、代码示例和练习实践",
@@ -365,10 +548,19 @@
       ]
     },
     {
+      "id": "reg-silk-road-web-discovery",
+      "execution_mode": "real",
       "name": "开放式历史研究应考虑通用 Web 发现",
-      "focus": ["dispatch_design", "source_routing", "coverage_judgment"],
+      "focus": [
+        "dispatch_design",
+        "source_routing",
+        "coverage_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "我想系统了解丝绸之路，资料形式不限"}
+        {
+          "role": "user",
+          "content": "我想系统了解丝绸之路，资料形式不限"
+        }
       ],
       "expected": [
         "把整体历史脉络、空间路线/遗址观察等视为可分工的价值路线",
@@ -382,11 +574,23 @@
       ]
     },
     {
+      "id": "reg-smartedu-covered-no-web",
+      "execution_mode": "judgment",
       "name": "专门生态天然覆盖时不强制 Web",
-      "focus": ["source_routing", "coverage_judgment", "stop_judgment"],
+      "focus": [
+        "source_routing",
+        "coverage_judgment",
+        "stop_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "帮我找人教版五年级上册小数乘法的同步课堂讲解，只要课程视频"},
-        {"role": "assistant", "content": "结构化教育来源已经找到匹配版本、年级、单元的课程视频。"}
+        {
+          "role": "user",
+          "content": "帮我找人教版五年级上册小数乘法的同步课堂讲解，只要课程视频"
+        },
+        {
+          "role": "assistant",
+          "content": "结构化教育来源已经找到匹配版本、年级、单元的课程视频。"
+        }
       ],
       "expected": [
         "识别用户已经明确同步课堂和视频形态，结构化教育来源天然匹配",
@@ -399,11 +603,23 @@
       ]
     },
     {
+      "id": "reg-no-gap-then-stop",
+      "execution_mode": "judgment",
       "name": "没有具体 Gap 就应该停止",
-      "focus": ["coverage_judgment", "gap_judgment", "stop_judgment"],
+      "focus": [
+        "coverage_judgment",
+        "gap_judgment",
+        "stop_judgment"
+      ],
       "messages": [
-        {"role": "assistant", "content": "目前已有一份适合目标年龄的原理图文、一段清楚的过程动画和一份简单活动单，三者都满足用户约束。"},
-        {"role": "user", "content": "先这些吧"}
+        {
+          "role": "assistant",
+          "content": "目前已有一份适合目标年龄的原理图文、一段清楚的过程动画和一份简单活动单，三者都满足用户约束。"
+        },
+        {
+          "role": "user",
+          "content": "先这些吧"
+        }
       ],
       "expected": [
         "停止继续搜索",
@@ -415,11 +631,22 @@
       ]
     },
     {
+      "id": "reg-inspect-login-check",
+      "execution_mode": "judgment",
       "name": "Inspect 只在未知事实影响决定时使用",
-      "focus": ["result_judgment", "action_boundary"],
+      "focus": [
+        "result_judgment",
+        "action_boundary"
+      ],
       "messages": [
-        {"role": "user", "content": "我只要无需登录就能直接看的那一个"},
-        {"role": "assistant", "content": "当前两个高潜候选内容都合适，但搜索摘要无法确认是否需要登录。"}
+        {
+          "role": "user",
+          "content": "我只要无需登录就能直接看的那一个"
+        },
+        {
+          "role": "assistant",
+          "content": "当前两个高潜候选内容都合适，但搜索摘要无法确认是否需要登录。"
+        }
       ],
       "expected": [
         "对高潜候选进一步确认访问条件",
@@ -432,11 +659,22 @@
       ]
     },
     {
+      "id": "reg-download-no-ritual-confirm",
+      "execution_mode": "judgment",
       "name": "用户明确下载时不追加形式化确认",
-      "focus": ["selection_semantics", "action_boundary"],
+      "focus": [
+        "selection_semantics",
+        "action_boundary"
+      ],
       "messages": [
-        {"role": "assistant", "content": "刚才向用户展示了三本书：1《A》、2《B》、3《C》。"},
-        {"role": "user", "content": "第2本能下的话帮我保存下来"}
+        {
+          "role": "assistant",
+          "content": "刚才向用户展示了三本书：1《A》、2《B》、3《C》。"
+        },
+        {
+          "role": "user",
+          "content": "第2本能下的话帮我保存下来"
+        }
       ],
       "expected": [
         "明确映射到用户实际看到的第2本《B》",
@@ -451,11 +689,21 @@
       ]
     },
     {
+      "id": "reg-no-guess-hidden-index",
+      "execution_mode": "judgment",
       "name": "不能从隐藏结果猜用户编号",
-      "focus": ["selection_semantics"],
+      "focus": [
+        "selection_semantics"
+      ],
       "messages": [
-        {"role": "assistant", "content": "实际只向用户展示了编号1到5的候选，内部还有更多未展示结果。"},
-        {"role": "user", "content": "我要第3个和第8个"}
+        {
+          "role": "assistant",
+          "content": "实际只向用户展示了编号1到5的候选，内部还有更多未展示结果。"
+        },
+        {
+          "role": "user",
+          "content": "我要第3个和第8个"
+        }
       ],
       "expected": [
         "第3个可以映射到实际展示候选",
@@ -467,11 +715,22 @@
       ]
     },
     {
+      "id": "reg-handle-invalidation-recover",
+      "execution_mode": "judgment",
       "name": "临时句柄失效时恢复同一个资源",
-      "focus": ["selection_semantics", "action_boundary"],
+      "focus": [
+        "selection_semantics",
+        "action_boundary"
+      ],
       "messages": [
-        {"role": "assistant", "content": "用户已经选中一个具体视频；当前对话仍保留该视频 URL、标题和作者，但资源 MCP 重启后旧临时句柄失效。"},
-        {"role": "user", "content": "就把刚才那个下下来"}
+        {
+          "role": "assistant",
+          "content": "用户已经选中一个具体视频；当前对话仍保留该视频 URL、标题和作者，但资源 MCP 重启后旧临时句柄失效。"
+        },
+        {
+          "role": "user",
+          "content": "就把刚才那个下下来"
+        }
       ],
       "expected": [
         "保持用户选择不变",
@@ -485,10 +744,18 @@
       ]
     },
     {
+      "id": "reg-creator-full-enumeration",
+      "execution_mode": "fixture_required",
       "name": "创作者全部作品属于完整枚举",
-      "focus": ["need_reconstruction", "action_boundary"],
+      "focus": [
+        "need_reconstruction",
+        "action_boundary"
+      ],
       "messages": [
-        {"role": "user", "content": "把这个UP主所有公开视频列出来，我后面自己挑"}
+        {
+          "role": "user",
+          "content": "把这个UP主的所有公开视频列出来，一个都不要漏，我后面自己挑：<BILIBILI_CREATOR_URL>"
+        }
       ],
       "expected": [
         "识别这是数据完整性任务而不是推荐几个代表作",
@@ -502,10 +769,18 @@
       ]
     },
     {
+      "id": "reg-creator-browse-preview-only",
+      "execution_mode": "fixture_required",
       "name": "普通创作者浏览不自动升级全量",
-      "focus": ["need_reconstruction", "stop_judgment"],
+      "focus": [
+        "need_reconstruction",
+        "stop_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "看看这个老师最近都讲些什么，有代表性的给我几个"}
+        {
+          "role": "user",
+          "content": "看看这个老师（<BILIBILI_CREATOR_URL>）最近都讲些什么，有代表性的给我几个"
+        }
       ],
       "expected": [
         "理解为代表性预览和判断，不要求完整作品清单",
@@ -517,10 +792,17 @@
       ]
     },
     {
+      "id": "reg-partial-failure-not-absence",
       "name": "平台 partial failure 不等于资源不存在",
-      "focus": ["result_judgment", "gap_judgment"],
+      "focus": [
+        "result_judgment",
+        "gap_judgment"
+      ],
       "messages": [
-        {"role": "assistant", "content": "用户要找某套公开课。当前一个视频来源请求失败，但专业网页和教育来源已经找到这套课的正式页面与部分内容。"}
+        {
+          "role": "assistant",
+          "content": "用户要找某套公开课。当前一个视频来源请求失败，但专业网页和教育来源已经找到这套课的正式页面与部分内容。"
+        }
       ],
       "expected": [
         "把视频来源失败理解为当前能力失败，而不是课程不存在",
@@ -533,11 +815,22 @@
       ]
     },
     {
+      "id": "reg-source-fail-no-reask",
+      "execution_mode": "judgment",
       "name": "搜索失败不应反问已明确信息",
-      "focus": ["clarification_judgment", "gap_judgment"],
+      "focus": [
+        "clarification_judgment",
+        "gap_judgment"
+      ],
       "messages": [
-        {"role": "user", "content": "找人教版五年级上册小数乘法的可打印练习"},
-        {"role": "assistant", "content": "首个文档来源本次请求失败。"}
+        {
+          "role": "user",
+          "content": "找人教版五年级上册小数乘法的可打印练习"
+        },
+        {
+          "role": "assistant",
+          "content": "首个文档来源本次请求失败。"
+        }
       ],
       "expected": [
         "保留已明确的人教版、五年级上册、小数乘法、可打印约束",
@@ -550,10 +843,18 @@
       ]
     },
     {
+      "id": "reg-history-figures-not-diagnosis",
+      "execution_mode": "real",
       "name": "学习困难先还原结果不做诊断",
-      "focus": ["need_reconstruction", "search_angle_quality"],
+      "focus": [
+        "need_reconstruction",
+        "search_angle_quality"
+      ],
       "messages": [
-        {"role": "user", "content": "孩子看历史故事老是记不住人物关系，有没有什么资料能帮他理清"}
+        {
+          "role": "user",
+          "content": "孩子看历史故事老是记不住人物关系，有没有什么资料能帮他理清"
+        }
       ],
       "expected": [
         "把目标还原为建立人物关系、时间线或叙事结构",

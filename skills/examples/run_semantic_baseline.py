@@ -52,12 +52,26 @@ def git_head(workspace: Path) -> str:
 
 
 def case_prompt(case: dict[str, Any], fixtures: dict[str, str]) -> str:
-    messages = [
-        str(item.get("content") or "").strip()
-        for item in case.get("messages") or []
-        if isinstance(item, dict) and item.get("role") == "user"
-    ]
-    if len(messages) != 1 or not messages[0]:
+    """Build the single-turn prompt.
+
+    Synthetic-context suites carry an assistant prelude describing prior state
+    (earlier turns, tool results). OpenClaw `agent` accepts one message, so the
+    prelude is embedded as an explicit context block ahead of the user turn.
+    """
+
+    user_parts: list[str] = []
+    context_parts: list[str] = []
+    for item in case.get("messages") or []:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        if item.get("role") == "user":
+            user_parts.append(content)
+        elif item.get("role") == "assistant":
+            context_parts.append(content)
+    if len(user_parts) != 1 or not user_parts[0]:
         raise ValueError("automated case must contain exactly one non-empty user message")
 
     missing: set[str] = set()
@@ -70,10 +84,13 @@ def case_prompt(case: dict[str, Any], fixtures: dict[str, str]) -> str:
             return match.group(0)
         return value
 
-    prompt = PLACEHOLDER.sub(replace, messages[0])
+    parts = []
+    if context_parts:
+        parts.append("[前情上下文]\n" + "\n".join(context_parts))
+    parts.append(PLACEHOLDER.sub(replace, user_parts[0]))
     if missing:
         raise ValueError("missing fixtures: " + ", ".join(sorted(missing)))
-    return prompt
+    return "\n\n".join(parts)
 
 
 def parse_args() -> argparse.Namespace:
