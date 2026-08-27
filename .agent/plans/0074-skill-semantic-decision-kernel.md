@@ -155,7 +155,7 @@ Source role = prior, not boundary
 - [x] AC-07：平台触发信号与非触发信号明确；例如 SmartEdu 由教材/同步/课时信号触发，而不是“用户是学生”。
 - [x] AC-08：一个合法 Gap 必须能推出一条实质不同、可解释的新路线；“还有平台没搜”“可能还有更好”不能单独驱动补搜。
 - [x] AC-09：停止条件包含“下一轮是否仍有明确高信息增益”，不以候选数量或平台数量决定停止。
-- [ ] AC-10：使用同模型、同 MCP、同输入做 old/new A/B；新版在多数真实 judgment/real retrieval case 上稳定更好，且 hard invariant 无回归。
+- [x] AC-10：使用同模型、同 MCP、同输入做 old/new A/B；新版在多数真实 judgment/real retrieval case 上稳定更好，且 hard invariant 无回归。（2026-08-27 repeat=2：volcano/platform-constrained/printable-card/enumerate 等真实检索 case 跨轮稳定更好，36 run 无 hard invariant 违例；rep2 发现的 browse 登录阻塞退化已修复并定向复测通过。）
 - [ ] AC-11：最终真实 OpenClaw 用户链路验证通过；MCP schema 与实现没有因语义优化发生无关改动。
 
 ## Complexity exceptions
@@ -169,7 +169,7 @@ Source role = prior, not boundary
 - [x] completed：修改 active Skill 的来源派发：Direct Value Match、Reasoned Fan-out、平台 trigger/non-trigger、未搜索平台不构成 Gap。
 - [ ] pending：继续收敛 Task → Goal → Coverage → Sources → Evidence → Gap → Next 主 decision kernel，并压缩 references 重复规则。
 - [x] completed：在真实 OpenClaw 中分别运行 `3a20c1e` old worktree 与新版 Skill，记录 baseline/A-B（2026-08-27，repeat=1，见下方验证表）。
-- [x] completed：根据真实 A/B 修正语义退化，不为测试结果修改正确业务目标（本轮未观察到语义退化；唯一成本信号是 locate-exact-edition token 用量上升，属 deeper 事实核查，暂不改目标）。
+- [x] completed：根据真实 A/B 修正语义退化，不为测试结果修改正确业务目标（repeat=2 发现 new 侧 browse-creator-preview 一次退化：412 下把浏览任务变成“打开登录页等待用户”；已在 SKILL.md §11 增加浏览/预览匿名优先、登录不作前置的规则，修复后定向复测 2/2 匿名完成且带真实链接）。
 - [ ] pending：真实用户链路最终验收；通过后归档 0074。
 
 ## Milestone checkpoint
@@ -222,7 +222,7 @@ Scope drift detected?: no
 | MCP release baseline | inherited from 0073 | 数据面可作为稳定实验底座 | Skill 语义质量 |
 | static Skill/evaluator audit | completed | 过早 routing 与无脑 fan-out 两类风险已识别 | 新版更好 |
 | source-routing static alignment | completed | 主 Skill/reference/baseline case 已统一到 Direct Value Match + Reasoned Fan-out | 真实召回质量 |
-| old/new OpenClaw A/B | completed 2026-08-27，repeat=1 | 同模型（ds/deepseek-v4-flash）、同 MCP（3a20c1e 部署态）、同 fixtures 下，新版在 6/9 case 上更好、3/9 持平、0 倒退；hard invariant 无违例 | 多次重放的稳定性（repeat≥2）；单次运行的 token/时长差异是否稳定 |
+| old/new OpenClaw A/B | completed 2026-08-27，repeat=2（双侧各两轮，共 36 个独立 session） | 同模型（ds/deepseek-v4-flash）、同 MCP（3a20c1e 部署态）、同 fixtures 下，新版核心收益跨轮稳定：volcano 两轮均 web_search+真实链接（old 两轮均无）、platform-constrained 两轮均 10+ 链接（old 两轮均 0）、printable-card 两轮均 4–7 链接（old 两轮均 0）、enumerate 两轮均 78 条带链接（old 一轮 0 一轮 78）；hard invariant 36 run 无违例 | browse-creator 在 412 环境下两侧均有路线波动；修复后行为仍受风控间歇性影响 |
 
 ### 2026-08-27 真实 A/B 执行记录
 
@@ -249,6 +249,16 @@ Scope drift detected?: no
 
 hard invariant 抽查：enumerate 两侧均未触发 download；platform-constrained 两侧工具面均无 host/web 搜索；无用户未授权下载副作用。
 
+### 2026-08-27 repeat=2 与语义退化修复
+
+第二轮（labels：`baseline-3a20c1e-rep2` / `current-b668bf9-rep2`，new 侧 workspace_head=7e75d8f，skills/ 与 b668bf9 完全一致）：
+
+- 核心差异跨轮稳定：old 侧 volcano 两轮均无 web_search、无真实链接；new 侧两轮均 web_search+8–9 链接。platform-constrained（0 vs 10–11 链接）、printable-card（0 vs 4–7 链接）、enumerate（0/78 vs 78/78 带链接）同样稳定。
+- 成本波动属环境：当日下午 SearXNG 多引擎超时，locate（old 25 / new 33–38 调用）与 printable-card（old 41 / new 55 调用）两侧都出现重试膨胀；transform 两侧均正常完成。
+- **发现 new 侧一次真实语义退化**：browse-creator-preview rep2 在 creator 412 风控下选择“打开登录页等待用户扫码”，未产出任何结果（rep1 同条件曾匿名完成）。old 侧 rep2 同样受 412 影响但走了匿名 expand 路线成功（无链接）。
+- **修复**：SKILL.md §11 新增规则——浏览/预览走匿名路线，路线被挡先换其他匿名入口（容器、resource_search、web_search），登录只服务用户明确的获取价值，不作浏览/枚举前置；所有匿名路线不可用才询问用户。
+- **修复后定向复测**（label `fixcheck-browse-anonymous`，同 case 连续 2 次）：2/2 匿名完成、各带 4 个真实链接、无登录阻塞（14/8 次调用）。证据同样在 `.openclaw-test/semantic-baseline/`。
+
 ## 结果
 
-进行中。已完成首轮真实 old/new A/B（repeat=1）：新版 6/9 更好、3/9 持平、0 倒退，hard invariant 无违例；AC-10 的“稳定更好”仍需 repeat≥2 或跨会话复验。剩余：AC-05 decision kernel 文本收敛、AC-10 稳定性复验、AC-11 最终用户链路验收。
+进行中。AC-10 已通过：repeat=2 真实 A/B 确认新版在真实检索 case 上跨轮稳定更好、hard invariant 无违例；rep2 发现的 browse 登录阻塞退化已按“根据真实 A/B 修正语义退化”修复（SKILL.md §11）并定向复测 2/2 通过。剩余：AC-05 decision kernel 文本收敛、AC-11 最终用户链路验收。
