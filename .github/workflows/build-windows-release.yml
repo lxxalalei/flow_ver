@@ -1,0 +1,58 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/growth-resource-taxonomy-rework
+    tags:
+      - 'v*'
+    paths:
+      - '.github/workflows/build-windows-release.yml'
+      - 'packaging/windows/**'
+      - 'scripts/build-release.ps1'
+      - 'mcp/education-resources/pyproject.toml'
+      - 'mcp/education-resources/src/**'
+      - 'mcp/education-resources/scripts/verify_runtime_environment.py'
+      - 'skills/SKILL.md'
+      - 'skills/references/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse installer
+        shell: pwsh
+        run: |
+          [void][scriptblock]::Create((Get-Content packaging/windows/install.ps1 -Raw))
+          Write-Host 'install.ps1 syntax OK'
+
+      - name: Build clean release ZIP
+        shell: pwsh
+        run: ./scripts/build-release.ps1
+
+      - name: Inspect release contents
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist/*.zip | Select-Object -First 1
+          if (-not $zip) { throw 'release ZIP not found' }
+          Expand-Archive $zip.FullName -DestinationPath release-check
+          $root = Get-ChildItem release-check -Directory | Select-Object -First 1
+          if (-not $root) { throw 'release root directory not found' }
+          Write-Host 'Release root:' $root.FullName
+          Get-ChildItem $root.FullName -Recurse | ForEach-Object {
+            $_.FullName.Substring($root.FullName.Length).TrimStart('\')
+          }
+
+      - name: Upload Windows release
+        uses: actions/upload-artifact@v4
+        with:
+          name: learning-resource-flow-windows
+          path: dist/*.zip
+          if-no-files-found: error
