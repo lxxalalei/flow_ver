@@ -184,7 +184,7 @@ Fallback added?: no
 Data truncation added?: no
 MCP public surface changed?: no
 Actual user flow affected?: yes, source dispatch semantics
-Actual user flow validated?: first real old/new A/B completed 2026-08-27 (repeat=1, no regression); stability re-run and final user-flow acceptance pending
+Actual user flow validated?: real old/new A/B repeat=2 completed 2026-08-27; one rep2 regression fixed and re-checked; final user-flow acceptance (AC-11) pending
 Scope drift detected?: no
 ```
 
