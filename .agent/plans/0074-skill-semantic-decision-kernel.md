@@ -269,6 +269,26 @@ hard invariant 抽查：enumerate 两侧均未触发 download；platform-constra
 
 原始证据：`.openclaw-test/semantic-baseline/demo-volcano-fresh/`、`demo-current-suite/`、汇总 `demo-full-output.txt`（git 忽略，仅本地）。
 
+### 2026-08-27 回归套件接入真实执行 + judgment 批次 A/B
+
+把 `semantic-regression-cases.json` 从静态评审材料升级为可执行套件（v6.0.0，commit 9502a3b）：32 case 补 `id`/`execution_mode`（31 自动、assistant-only 的 partial-failure 保留人工），runner 支持 assistant 前情消息以 `[前情上下文]` 嵌入单轮 prompt，两个创作者 case 加 `BILIBILI_CREATOR_URL` fixture。两侧跑同一 v6.0.0 suite：new=当前修复版，old=`3a20c1e` worktree；labels `regression-judgment-new` / `regression-judgment-old`，各 17/17 completed。
+
+| 维度 | old | new |
+| --- | --- | --- |
+| 真实链接 | 17/17 case 全部 0 链接 | 9/17 case 带真实链接（合计 65 个） |
+| 澄清类（topic/physics/textbook/no-gap/no-guess） | 全部正确 | 全部正确 |
+| 语义质量 | 3 case 更好 | 3 case 更好，其余持平 |
+
+new 侧更好的 3 个：`reg-smartedu-covered-no-web`（2 次调用+10 链接 vs old 13 次调用 0 链接）、`reg-download-no-ritual-confirm`（真实发起下载并被拒后如实报告，符合“依据真实结果”预期；old 只描述了计划）、`reg-python-not-videos-only`（同等组合质量 + 6 链接 + 更低成本 7 vs 20 调用）。
+
+old 侧更好的 3 个（均为 AC-05 输入）：
+
+1. `reg-grade1-math-route-fork`：old 先问最关键路线分叉（同步/练习/趣味），符合 case 预期；new 为省提问直接搜全三类再问版本，命中 forbidden“为了省提问直接搜索一圈”。暴露新 skill 在“路线分叉会显著改变搜索”时倾向广搜而非一问的取舍问题。
+2. `reg-inspect-login-check`：old 表述“对两个候选实际检查访问条件、不猜”，符合预期姿态；new 反向要求用户提供两个候选的 URL（合成上下文确实没带 URL——case 设计缺陷，但处理姿态不如 old）。
+3. `reg-handle-invalidation-recover`：old 如实说明会话未保留视频身份、请求链接且不重搜；new 声称“用对话里保留的视频链接”但上下文实际没有链接，结尾“我这就去下载”属无事实支撑的断言。
+
+hard invariant：两侧无未授权下载（new 的下载尝试发生在用户明确授权 case 中）；无平台越界。双侧共同缺陷：合成上下文用例不带真实 URL，Inspect/句柄恢复类只能验证姿态不能验证执行——后续 fixture 化时补真实 URL 版本。
+
 ## 结果
 
 进行中。AC-10 已通过：repeat=2 真实 A/B 确认新版在真实检索 case 上跨轮稳定更好、hard invariant 无违例；rep2 发现的 browse 登录阻塞退化已按“根据真实 A/B 修正语义退化”修复（SKILL.md §11）并定向复测 2/2 通过。剩余：AC-05 decision kernel 文本收敛、AC-11 最终用户链路验收。
