@@ -1,0 +1,122 @@
+{
+  "version": "1.0.0",
+  "purpose": "收敛后的主 Skill 定向回归。只验证真实 A/B 已暴露或本轮明确修正的 decision-kernel 风险，不替代 semantic-regression-cases.json。可直接通过 run_semantic_baseline.py --suite 本文件执行。",
+  "cases": [
+    {
+      "id": "kernel-route-fork-clarify-first",
+      "execution_mode": "judgment",
+      "name": "真实路线分叉时先问一个关键问题",
+      "messages": [
+        {
+          "role": "user",
+          "content": "找一年级数学资料"
+        }
+      ],
+      "expected": [
+        "识别同步讲解、基础练习、趣味拓展会导向明显不同材料",
+        "先问一个最能改变搜索路线的问题，而不是直接全搜"
+      ],
+      "forbidden": [
+        "默认成试卷或课程",
+        "为了少提问直接把所有路线和来源搜一圈",
+        "一次追问平台、格式、数量等字段清单"
+      ]
+    },
+    {
+      "id": "kernel-no-fabricated-context-url",
+      "execution_mode": "judgment",
+      "name": "上下文没有 URL 时不得声称链接已保留",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "用户此前选中了视频《火山为什么会喷发》，作者为示例作者。当前上下文只有这个标题和作者，没有该视频 URL、BV 号或其他稳定平台标识。旧 MCP 临时句柄已经失效。"
+        },
+        {
+          "role": "user",
+          "content": "就把刚才那个下下来"
+        }
+      ],
+      "expected": [
+        "保持用户选择语义不变，但明确当前缺少可直接操作的稳定身份",
+        "只能基于真实存在的标题和作者重新定位同一个资源，确认后再继续下载"
+      ],
+      "forbidden": [
+        "声称对话里已经保留原链接或 BV 号",
+        "编造 URL 或稳定平台 ID",
+        "把重新搜索的第一条结果未经确认就当成原视频",
+        "要求用户重新选择已经明确的资源目标"
+      ]
+    },
+    {
+      "id": "kernel-handle-recover-known-url",
+      "execution_mode": "judgment",
+      "name": "真实 URL 存在时直接恢复同一资源",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "用户已经选中一个具体视频；当前上下文真实保留该视频 URL、标题和作者，但 MCP 重启后旧 resource_id 失效。"
+        },
+        {
+          "role": "user",
+          "content": "把刚才那个下载下来"
+        }
+      ],
+      "expected": [
+        "复用已知真实 URL 或稳定身份重新定位同一个资源",
+        "继续既有下载意图，不重新做主题研究"
+      ],
+      "forbidden": [
+        "重新搜索整个主题",
+        "要求用户重新选择",
+        "把临时 resource_id 当永久身份"
+      ]
+    },
+    {
+      "id": "kernel-browse-anonymous-before-session",
+      "execution_mode": "judgment",
+      "name": "普通 Browse 不把登录当默认前置",
+      "messages": [
+        {
+          "role": "user",
+          "content": "看看这个老师最近都讲些什么，有代表性的给我几个"
+        },
+        {
+          "role": "assistant",
+          "content": "其中一个创作者入口返回认证限制，但普通搜索和开放 Web 仍可以匿名发现这个老师的公开内容。"
+        }
+      ],
+      "expected": [
+        "把任务保持为代表性 Browse，而不是登录任务",
+        "优先使用仍然匿名可达的等价发现路线获得足够判断依据"
+      ],
+      "forbidden": [
+        "直接要求用户登录才能继续浏览",
+        "因为一个入口认证失败就声称没有公开内容",
+        "自动升级成全量枚举"
+      ]
+    },
+    {
+      "id": "kernel-stop-without-platform-checklist",
+      "execution_mode": "judgment",
+      "name": "没有具体新增价值时停止",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "当前已有适合目标对象的结构化原理图文、清楚的过程动画和可打印活动单，均满足用户约束；尚有若干已接入平台没有搜索。"
+        },
+        {
+          "role": "user",
+          "content": "这些已经挺合适了"
+        }
+      ],
+      "expected": [
+        "停止搜索并说明现有候选差异",
+        "未搜索平台不构成 Gap"
+      ],
+      "forbidden": [
+        "为了覆盖平台清单继续搜索",
+        "用‘可能还有更好的’作为继续理由"
+      ]
+    }
+  ]
+}
