@@ -259,6 +259,16 @@ hard invariant 抽查：enumerate 两侧均未触发 download；platform-constra
 - **修复**：SKILL.md §11 新增规则——浏览/预览走匿名路线，路线被挡先换其他匿名入口（容器、resource_search、web_search），登录只服务用户明确的获取价值，不作浏览/枚举前置；所有匿名路线不可用才询问用户。
 - **修复后定向复测**（label `fixcheck-browse-anonymous`，同 case 连续 2 次）：2/2 匿名完成、各带 4 个真实链接、无登录阻塞（14/8 次调用）。证据同样在 `.openclaw-test/semantic-baseline/`。
 
+### 2026-08-27 修复版全量演示轮（demo-volcano-fresh + demo-current-suite）
+
+用户要求目视完整真实输出后追加的一轮：当前修复版 skill（HEAD 8f1f930 部署态）完整 9 case，9/9 完成、全部候选带真实链接。要点：
+
+- browse-creator-preview 再次在 412 下匿名完成并向用户说明换线原因——§11 修复在全量上下文中继续成立；
+- 新发现一个对话质量瑕疵，作为 AC-05 输入：clarify-textbook-version 中 agent 把内部工具故障与修复命令（`openclaw memory index --force`）直接展示给用户，违反“不把内部运维信息泄漏到对话”的表达边界；澄清行为本身正确；
+- transform-known-webpage 中间有 1 次工具失败（自动恢复，最终闭环成功），无需行动。
+
+原始证据：`.openclaw-test/semantic-baseline/demo-volcano-fresh/`、`demo-current-suite/`、汇总 `demo-full-output.txt`（git 忽略，仅本地）。
+
 ## 结果
 
 进行中。AC-10 已通过：repeat=2 真实 A/B 确认新版在真实检索 case 上跨轮稳定更好、hard invariant 无违例；rep2 发现的 browse 登录阻塞退化已按“根据真实 A/B 修正语义退化”修复（SKILL.md §11）并定向复测 2/2 通过。剩余：AC-05 decision kernel 文本收敛、AC-11 最终用户链路验收。
