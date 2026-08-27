@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$SkipOpenClawOnboarding
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -12,6 +14,14 @@ function Refresh-Path {
     $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:Path = @($machine, $user) -join ';'
+}
+
+function Get-WebText([string]$Url) {
+    $response = Invoke-WebRequest -UseBasicParsing $Url
+    if ($response.Content -is [byte[]]) {
+        return [Text.Encoding]::UTF8.GetString([byte[]]$response.Content)
+    }
+    return [string]$response.Content
 }
 
 function Invoke-Native([scriptblock]$Block, [string]$What) {
@@ -83,17 +93,21 @@ $InstalledMcp = Join-Path $AppRoot 'mcp'
 $VenvRoot = Join-Path $InstallRoot 'venv'
 $DataRoot = Join-Path $InstallRoot 'data'
 $LibraryRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) '学习资料库'
+$OpenClawWasMissing = $false
 
 Section 'Checking OpenClaw'
 if (-not (Get-Command openclaw -ErrorAction SilentlyContinue)) {
-    Write-Host '  OpenClaw is not installed. Running the official OpenClaw Windows installer.'
-    Write-Host '  First-time OpenClaw setup may ask you to choose/configure a model provider.'
-    $installer = (Invoke-WebRequest -UseBasicParsing 'https://openclaw.ai/install.ps1').Content
-    & ([scriptblock]::Create($installer))
+    $OpenClawWasMissing = $true
+    Write-Host '  OpenClaw is not installed. Installing it first without launching onboarding.'
+    $installer = Get-WebText 'https://openclaw.ai/install.ps1'
+    & ([scriptblock]::Create($installer)) -NoOnboard
     Refresh-Path
 }
 if (-not (Get-Command openclaw -ErrorAction SilentlyContinue)) {
     Fail 'OpenClaw installation finished but the openclaw command is still unavailable. Reopen PowerShell and run install.cmd again.'
+}
+if ($OpenClawWasMissing) {
+    Invoke-Native { openclaw setup --baseline } 'Initialize OpenClaw baseline'
 }
 Ok 'OpenClaw available'
 
@@ -177,6 +191,12 @@ Invoke-Native {
 } 'Probe education-resources MCP'
 Ok 'OpenClaw can start and inspect education-resources'
 
+if ($OpenClawWasMissing -and -not $SkipOpenClawOnboarding) {
+    Section 'OpenClaw first-time setup'
+    Write-Host '  The learning-resource package is installed. Complete OpenClaw model/provider setup now.'
+    Invoke-Native { openclaw setup --wizard } 'OpenClaw first-time setup'
+}
+
 Section 'Applying OpenClaw changes'
 $prev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -199,4 +219,9 @@ Write-Host "  Program: $InstallRoot"
 Write-Host "  Runtime data: $DataRoot"
 Write-Host "  Learning library: $LibraryRoot"
 Write-Host ''
-Write-Host 'OpenClaw is ready to use learning-resource-flow in a new chat.' -ForegroundColor Green
+if ($SkipOpenClawOnboarding -and $OpenClawWasMissing) {
+    Warn 'OpenClaw onboarding was skipped. Run `openclaw setup --wizard` before using the assistant.'
+}
+else {
+    Write-Host 'OpenClaw is ready to use learning-resource-flow in a new chat.' -ForegroundColor Green
+}
