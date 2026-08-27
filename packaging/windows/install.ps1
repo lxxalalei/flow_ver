@@ -61,7 +61,7 @@ function Ensure-WingetPackage([string]$Id, [string]$DisplayName) {
     }
     Section "Installing $DisplayName"
     Invoke-Native {
-        winget.exe install --id $Id -e --scope user --silent --accept-package-agreements --accept-source-agreements
+        winget.exe install --id $Id -e --silent --accept-package-agreements --accept-source-agreements
     } "Install $DisplayName"
     Refresh-Path
 }
@@ -123,6 +123,7 @@ if (Test-Path $AppRoot) { Remove-Item -Recurse -Force $AppRoot }
 New-Item -ItemType Directory -Force -Path $AppRoot | Out-Null
 Copy-Item -Recurse -Force $McpSource $InstalledMcp
 
+# Reinstall the runtime itself on upgrades; keep data/jobs/sessions outside the venv.
 if (Test-Path $VenvRoot) { Remove-Item -Recurse -Force $VenvRoot }
 Invoke-Native { & $Python -m venv $VenvRoot } 'Create Python virtual environment'
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
@@ -162,6 +163,7 @@ Ok 'Skill installed globally'
 Section 'Registering MCP in OpenClaw'
 $mcpConfig = @{
     command = $McpExe
+    args = @()
     env = @{
         EDUCATION_RESOURCE_MCP_DATA_DIR = $DataRoot
         EDUCATION_RESOURCE_MCP_LIBRARY_DIR = $LibraryRoot
