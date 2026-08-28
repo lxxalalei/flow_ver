@@ -121,6 +121,12 @@ def decrypt_type5_new(nal: bytearray) -> int:
     if stride < 8:
         return length
 
+    # The RBSP grid is defined from the encoded NAL. Preserve the original
+    # emulation-prevention positions before any decrypted bytes are written;
+    # after the transform, only those original 00 00 03 sequences that still
+    # exist are removed. Re-scanning the mutated NAL can invent/drop the wrong
+    # EPB when a decrypted cell itself contains 00 00 03.
+    epbs = collect_epb_positions(nal)
     mapping = _rbsp_to_ebsp_map(nal)
     rbsp_len = len(mapping)
     block = bytearray(8)
@@ -133,7 +139,6 @@ def decrypt_type5_new(nal: bytearray) -> int:
             nal[mapping[offset + index]] = block[index]
         offset += stride
 
-    epbs = collect_epb_positions(nal)
     return drop_epb_03(nal, epbs) if epbs else length
 
 
@@ -269,6 +274,7 @@ def decrypt_type1_new(
         return length
     header = bytes(nal[:3])
     flip_mask = type1_flip_mask_from_header(header)
+    epbs = collect_epb_positions(nal)
     mapping = _rbsp_to_ebsp_map(nal)
     rbsp_len = len(mapping)
 
@@ -283,7 +289,6 @@ def decrypt_type1_new(
         nal[mapping[offset + 3]] = (x >> 8) & 0xFF
         offset += stride
 
-    epbs = collect_epb_positions(nal)
     return drop_epb_03(nal, epbs) if epbs else length
 
 
