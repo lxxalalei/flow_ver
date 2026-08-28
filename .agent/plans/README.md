@@ -2,9 +2,9 @@
 
 ## 当前执行路线
 
-- 当前唯一 active 实施计划：[`0076-cctv-runtime-bundle.md`](0076-cctv-runtime-bundle.md)。
-- 0075 的 Tool 契约工程范围已经完成并归档；真实 OpenClaw User Journey 仍按用户要求 deferred。
-- 当前只把 CCTV 官方 WASM fallback 改为构建期静态 bundle，移除用户安装阶段的 npm/tsx/TypeScript/node_modules；保留 Node、ffmpeg 和现有能力行为。
+- 当前唯一 active 实施计划：[`0077-real-user-journey-release-gate.md`](0077-real-user-journey-release-gate.md)。
+- 0074 的 Skill decision kernel、0075 的 Tool 契约工程范围、0076 的 CCTV static runtime / Windows packaged install release gate 均已收口或归档。
+- 当前不再扩平台或能力面；只执行真实多轮 OpenClaw User Journey、Capability Elicitation 和相关 Tier 1 平台 smoke，让真实失败决定是否需要最小 Skill / Tool contract 修正。
 
 当前机器事实仍以运行时 Tool schema 为准，当前实现边界以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。Skill 语义实验不得恢复另一套 MCP 公共能力面或持久语义状态。
 
