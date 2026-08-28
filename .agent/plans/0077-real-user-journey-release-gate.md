@@ -37,6 +37,7 @@
 - 0076：CCTV static compatibility runtime 与 clean Windows packaged install release gate；
 - `skills/examples/run_semantic_baseline.py`：单轮/synthetic-context 语义回归；
 - `skills/examples/run_real_user_journeys.py`：真实同 session 多轮原始证据 runner；
+- `skills/examples/generate_real_user_journey_report.py`：从原始证据生成确定性 Markdown 汇总，不自行裁决语义 PASS/FAIL；
 - `skills/examples/real-user-journeys.json`：6 条真实 User Journey；
 - `docs/REAL_PLATFORM_SMOKE_MATRIX.md`：6 条 Tier 1 真实平台 release smoke。
 
@@ -49,6 +50,7 @@
 允许：
 
 - `skills/examples/run_real_user_journeys.py`：只修真实 harness 缺陷；
+- `skills/examples/generate_real_user_journey_report.py`：只修证据汇总缺陷，不演变为自动语义裁判；
 - `skills/examples/real-user-journeys.json`：只修真实 Journey 表达/fixture 缺陷；
 - `skills/SKILL.md` 或 `server.py` Tool description：仅当真实失败证据明确指向语义/affordance 问题时最小修改；
 - 本计划与语义评测记录。
@@ -66,21 +68,23 @@
 - [x] AC-02：每次 harness invocation 使用唯一 session identity，重复执行不会污染上下文；
 - [x] AC-03：Journey suite 覆盖搜索→选择→下载→归档、Browse→Enumerate、已知网页→保存→HTML Design、容器 Expand→子项选择、AUTH_REQUIRED→Session→恢复、路线分叉澄清；
 - [x] AC-04：真实平台 smoke matrix 已定义，小规模 Tier 1 不随平台数量机械膨胀；
-- [ ] AC-05：在配置完成的真实 OpenClaw 环境运行核心无 fixture Journey，保存原始逐轮证据；
-- [ ] AC-06：提供真实 fixture 后运行 creator/course/generic-web/auth Journey，保存逐轮证据；
-- [ ] AC-07：逐 Journey 人工核对实际 tool calls、真实 URL、selection、Job 终态和副作用，不使用 runner 自动裁判；
-- [ ] AC-08：若发现退化，只按真实证据做最小 Skill/Tool contract 修正，并重跑对应 Journey；
-- [ ] AC-09：最终至少一条完整真实链达到 Search/发现 → 用户选择 → Download → Job 终态 → Archive，且没有 unsupported claim 或未授权副作用；
-- [ ] AC-10：0074 AC-11 / 0075 AC-07 的 deferred 真实 User Journey 验收由本计划明确收口。
+- [x] AC-05：runner 结束时自动生成 `real-user-journey-report.md`；报告只汇总确定性执行事实、Tool/URL 证据和人工 checklist，不把自身 heuristics 当语义 PASS/FAIL；
+- [ ] AC-06：在配置完成的真实 OpenClaw 环境运行核心无 fixture Journey，保存原始逐轮证据；
+- [ ] AC-07：提供真实 fixture 后运行 creator/course/generic-web/auth Journey，保存逐轮证据；
+- [ ] AC-08：逐 Journey 人工核对实际 tool calls、真实 URL、selection、Job 终态和副作用，不使用 runner 自动裁判；
+- [ ] AC-09：若发现退化，只按真实证据做最小 Skill/Tool contract 修正，并重跑对应 Journey；
+- [ ] AC-10：最终至少一条完整真实链达到 Search/发现 → 用户选择 → Download → Job 终态 → Archive，且没有 unsupported claim 或未授权副作用；
+- [ ] AC-11：0074 AC-11 / 0075 AC-07 的 deferred 真实 User Journey 验收由本计划明确收口。
 
 ## Complexity exceptions
 
-无。当前 runner 和 suite 只是测试证据采集，不参与 runtime 决策，也不引入新的 source of truth。
+无。当前 runner、report generator 和 suite 只是测试证据采集/汇总，不参与 runtime 决策，也不引入新的 source of truth。
 
 ## Steps
 
 - [x] completed：修复 Windows packaged install 非致命 Gateway restart 退出码并完成 0076 release gate；
 - [x] completed：新增真实多轮 Journey runner、6 条 Journey 和真实平台 smoke matrix；
+- [x] completed：新增确定性 Markdown 报告生成器，并让 Journey runner 在每次执行结束自动产出报告；
 - [ ] in_progress：准备真实 fixture / 配置完成的 OpenClaw 环境并执行第一批 Journey；
 - [ ] pending：根据真实失败证据决定是否需要最小 Skill/Tool contract 修正；
 - [ ] pending：完成全部关键 Journey 复测并收口 0074/0075 deferred acceptance。
@@ -93,7 +97,17 @@
 - dry-run fixture substitution；
 - 同一次 Journey 内 session id 必须一致；
 - 不同 harness invocation session id 必须不同；
-- 一个 turn native failure 后停止该 Journey，不伪造后续结果。
+- 一个 turn native failure 后停止该 Journey，不伪造后续结果；
+- `manifest.json` 写完后生成 Markdown report，report failure 不得覆盖或删除原始证据。
+
+### Report interpretation
+
+报告分两层：
+
+- 确定性事实：turn 是否执行成功、session 是否连续、Tool 名/URL 是否出现在原始 JSON、耗时、错误和证据目录；
+- 语义审阅：用户目标是否满足、Tool 是否用对、selection 是否正确、是否过早停止/多余调用、forbidden behavior 是否发生。
+
+`EXECUTED` 只表示技术执行完整；语义状态保持 `REVIEW`，直到人工检查真实逐轮证据。Tool mention 数量只作诊断，不等于 Tool 使用正确。
 
 ### Real Agent validation
 
@@ -115,10 +129,11 @@ Non-goals respected?: yes
 Runtime capability surface changed?: no
 New runtime state/source of truth?: no
 Real multi-turn harness exists?: yes
+Deterministic Markdown report exists?: yes
 Real OpenClaw journey executed?: not yet
 Current blocker?: needs configured real OpenClaw model/provider + live fixtures for fixture-required journeys
 ```
 
 ## Result
 
-进行中。当前工程侧已经把真实多轮验收所需 harness、Journey 与平台 smoke 边界准备好；下一步不再继续写新能力，而是执行真实 Agent/user flow，并让实际失败决定是否还有必要修改 Skill 或 MCP contract。
+进行中。当前工程侧已经把真实多轮验收所需 harness、Journey、自动 Markdown 报告和平台 smoke 边界准备好；下一步不再继续写新能力，而是执行真实 Agent/user flow，并让实际失败决定是否还有必要修改 Skill 或 MCP contract。
