@@ -1,11 +1,13 @@
-"""CCTV video downloader: fully native Python (0069), WASM kept as fallback.
+"""CCTV video downloader: native Python first, static WASM fallback.
 
-Native route (M2): plain streams are fetched directly (direct MP4 or HLS
-segments + ffmpeg mux); h5e streams are fetched as segments and decrypted
-in parallel worker processes by the ported ``cctv_h5e`` module. The official
-WASM worker remains only as a fallback until real-world comparison proves the
-native decryptor end to end. The m3u8 prefers the per-video ``h5e_url`` from
-``getHttpVideoInfo``; the fixed ``H5E_BASE`` template is only a fallback.
+Plain streams are fetched directly (direct MP4 or HLS segments + ffmpeg mux).
+H5E streams are fetched as ordered TS segments, concatenated while still
+encrypted, then decrypted once with one stream-wide ``cctv_h5e.Session`` before
+ffmpeg remux. The static WASM worker remains a last-resort fallback until the
+native path has enough real-stream coverage to remove it safely.
+
+The m3u8 prefers the per-video ``h5e_url`` from ``getHttpVideoInfo``; the fixed
+``H5E_BASE`` template is only a fallback.
 """
 
 from __future__ import annotations
@@ -264,20 +266,6 @@ def download_stream_native(
     return mp4
 
 
-def _decrypt_segment(work: tuple[str, str]) -> int:
-    """Multiprocessing target: decrypt one h5e TS segment in place."""
-
-    from .cctv_h5e import decrypt_ts
-
-    source_path, target_path = work
-    with open(source_path, "rb") as handle:
-        encrypted = handle.read()
-    plain, nal_count = decrypt_ts(encrypted)
-    with open(target_path, "wb") as handle:
-        handle.write(plain)
-    return nal_count
-
-
 def _fetch_media_m3u8(
     m3u8_url: str,
     *,
@@ -354,12 +342,13 @@ def download_h5e_native(
     cancel_event: Any = None,
     h5e_url: str | None = None,
 ) -> Path:
-    """Download + decrypt an h5e stream natively (no external runtime).
+    """Download and decrypt one H5E stream with one stream-wide Session.
 
-    Segments are fetched concurrently, decrypted in parallel worker processes
-    (each segment is an independent equal-length TEA/type transform), joined
-    in order and remuxed with ffmpeg. ``h5e_url`` (from getHttpVideoInfo)
-    takes precedence over the resource signals / template.
+    HLS segments are downloaded concurrently but remain encrypted. They are
+    concatenated in playlist order first, then the complete TS is passed once
+    through ``cctv_h5e.decrypt_ts``. This preserves the protocol mode selected
+    by type-25 NAL markers across segment boundaries; decrypting every segment
+    with a fresh Session loses that stream state.
     """
 
     t0 = time.monotonic()
@@ -372,11 +361,10 @@ def download_h5e_native(
     work_dir.mkdir(parents=True, exist_ok=True)
     try:
         encrypted_dir = work_dir / "enc"
-        decrypted_dir = work_dir / "dec"
         encrypted_dir.mkdir(parents=True, exist_ok=True)
-        decrypted_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1) concurrent segment download
+        # 1) Download segment bytes concurrently. Files are named by playlist
+        # index so download completion order cannot change media order.
         def download_segment(index: int) -> bool:
             target = encrypted_dir / f"seg_{index:05d}.ts"
             if target.exists() and target.stat().st_size > 0:
@@ -405,40 +393,74 @@ def download_h5e_native(
                 f"h5e 分片下载 {ok_count}/{len(segment_names)} 失败",
                 retryable=True,
             )
-        LOGGER.info("cctv native: %d segments downloaded in %.1fs", len(segment_names), time.monotonic() - t0)
+        LOGGER.info(
+            "cctv native: %d encrypted segments downloaded in %.1fs",
+            len(segment_names),
+            time.monotonic() - t0,
+        )
 
-        # 2) parallel native decryption (each segment independent)
-        from concurrent.futures import ProcessPoolExecutor
+        if cancel_event is not None and cancel_event.is_set():
+            raise DomainError("JOB_CANCELLED", "下载已取消")
 
-        t1 = time.monotonic()
-        work_items = [
-            (
-                str(encrypted_dir / f"seg_{i:05d}.ts"),
-                str(decrypted_dir / f"seg_{i:05d}.ts"),
-            )
-            for i in range(len(segment_names))
-        ]
-        workers = max(1, min(os.cpu_count() or 4, 8))
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            nal_counts = list(pool.map(_decrypt_segment, work_items))
-        LOGGER.info("cctv native: decrypt %d segments in %.1fs", len(segment_names), time.monotonic() - t1)
-
-        # 3) join in order and remux
-        t2 = time.monotonic()
-        full_ts = work_dir / "full.ts"
-        with full_ts.open("wb") as out:
-            for i in range(len(segment_names)):
-                decrypted = decrypted_dir / f"seg_{i:05d}.ts"
-                if not decrypted.exists() or decrypted.stat().st_size == 0:
+        # 2) Rebuild the encrypted transport stream in its original order.
+        encrypted_ts = work_dir / "encrypted.ts"
+        with encrypted_ts.open("wb") as out:
+            for index in range(len(segment_names)):
+                segment = encrypted_dir / f"seg_{index:05d}.ts"
+                if not segment.is_file() or segment.stat().st_size == 0:
                     raise DomainError(
                         "DOWNLOAD_FAILED",
-                        f"h5e 分片 {i} 解密失败（NAL={nal_counts[i]}）",
+                        f"h5e 分片 {index} 缺失",
                         retryable=True,
                     )
-                out.write(decrypted.read_bytes())
+                with segment.open("rb") as source:
+                    shutil.copyfileobj(source, out)
+
+        # 3) Decrypt the whole TS in one pass. A single Session sees the type25
+        # marker and keeps new-mode active for later NALs even if they reside in
+        # subsequent HLS segments.
+        from .cctv_h5e import decrypt_ts
+
+        t1 = time.monotonic()
+        encrypted_bytes = encrypted_ts.read_bytes()
+        plain_bytes, nal_count = decrypt_ts(encrypted_bytes)
+        if nal_count <= 0:
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                "h5e 原生解密未处理任何视频 NAL",
+                retryable=True,
+            )
+        if len(plain_bytes) != len(encrypted_bytes):
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                "h5e 原生解密异常改变了 TS 总长度",
+                retryable=False,
+            )
+        decrypted_ts = work_dir / "decrypted.ts"
+        decrypted_ts.write_bytes(plain_bytes)
+        LOGGER.info(
+            "cctv native: decrypted full TS (%d NALs) in %.1fs",
+            nal_count,
+            time.monotonic() - t1,
+        )
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise DomainError("JOB_CANCELLED", "下载已取消")
+
+        # 4) Remux only after the complete native decrypt has succeeded.
+        t2 = time.monotonic()
         mp4 = job_dir / f"{title}.mp4"
-        _remux_to_mp4(full_ts, mp4, timeout=timeout, cancel_event=cancel_event)
-        LOGGER.info("cctv native: mux+health in %.1fs (total %.1fs)", time.monotonic() - t2, time.monotonic() - t0)
+        _remux_to_mp4(
+            decrypted_ts,
+            mp4,
+            timeout=timeout,
+            cancel_event=cancel_event,
+        )
+        LOGGER.info(
+            "cctv native: mux in %.1fs (total %.1fs)",
+            time.monotonic() - t2,
+            time.monotonic() - t0,
+        )
         return mp4
     finally:
         import shutil as _shutil
