@@ -205,6 +205,10 @@ if ($restartCode -eq 0) {
 }
 else {
     Warn 'Gateway restart was not available. The MCP and Skill are installed; restart/start your OpenClaw Gateway before the next chat.'
+    # Gateway restart is best-effort after a successful MCP probe. Consume its
+    # native exit code so a missing Gateway credential does not turn the whole
+    # successful installation into a failed process exit.
+    $global:LASTEXITCODE = 0
 }
 
 Section 'Installation complete'
