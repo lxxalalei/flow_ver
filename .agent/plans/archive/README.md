@@ -11,19 +11,25 @@
 
 ## 当前顶层计划
 
-当前唯一 active 计划是 [0076-cctv-runtime-bundle.md](../0076-cctv-runtime-bundle.md)。
+当前唯一 active 计划是 [0077-real-user-journey-release-gate.md](../0077-real-user-journey-release-gate.md)。
+
+## 2026-08-29 CCTV runtime 阶段完成
+
+| 文件 | 原状态 | 归档说明 / 剩余事项 |
+| --- | --- | --- |
+| [0076-cctv-runtime-bundle.md](0076-cctv-runtime-bundle.md) | completed | CCTV fallback 已改为随包 static JS runtime，安装阶段移除 npm/tsx/TypeScript/esbuild/node_modules；2018 H5E 有界真实 smoke 通过，Windows packaged install / runtime verify / artifact upload 在 Actions run `33189616940` 全绿。进一步去 Node/WASM 重写不属于当前 active 路线 |
 
 ## 2026-08-28 MCP 能力契约阶段转交
 
 | 文件 | 原状态 | 归档说明 / 剩余事项 |
 | --- | --- | --- |
-| [0075-mcp-capability-elicitation.md](0075-mcp-capability-elicitation.md) | in_progress | 12 Tool description、Capability Inventory 和语义用例工程范围已由 `1a4251f` 完成；AC-07 真实 OpenClaw User Journey 保持 deferred，不与 0076 并行激活 |
+| [0075-mcp-capability-elicitation.md](0075-mcp-capability-elicitation.md) | in_progress | 12 Tool description、Capability Inventory 和语义用例工程范围已由 `1a4251f` 完成；AC-07 真实 OpenClaw User Journey 现转交 0077 收口，不伪装为已通过 |
 
 ## 2026-08-28 Skill 阶段转交
 
 | 文件 | 原状态 | 归档说明 / 剩余事项 |
 | --- | --- | --- |
-| [0074-skill-semantic-decision-kernel.md](0074-skill-semantic-decision-kernel.md) | in_progress | `c4dcf9d` / `37681b9` 已完成 decision kernel 工程范围；用户要求暂缓剩余真实 OpenClaw 验收，AC-11 明确保留并转交 0075 最终 User Journey 阶段，不伪装为已通过 |
+| [0074-skill-semantic-decision-kernel.md](0074-skill-semantic-decision-kernel.md) | in_progress | `c4dcf9d` / `37681b9` 已完成 decision kernel 工程范围；AC-11 最终真实多轮用户链现转交 0077 收口，不伪装为已通过 |
 
 ## 2026-08-26 路线收口
 
