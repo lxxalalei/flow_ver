@@ -2,9 +2,10 @@
 
 ## 当前执行路线
 
-- 当前唯一 active 实施计划：[`0077-real-user-journey-release-gate.md`](0077-real-user-journey-release-gate.md)。
+- 当前唯一 active 实施计划：[`0078-cctv-native-h5e-completion.md`](0078-cctv-native-h5e-completion.md)。
+- [`0077-real-user-journey-release-gate.md`](0077-real-user-journey-release-gate.md) 已因用户明确切换优先级暂置 `pending`；0078 收口后恢复真实多轮 OpenClaw User Journey / Capability Elicitation。
 - 0074 的 Skill decision kernel、0075 的 Tool 契约工程范围、0076 的 CCTV static runtime / Windows packaged install release gate 均已收口或归档。
-- 当前不再扩平台或能力面；只执行真实多轮 OpenClaw User Journey、Capability Elicitation 和相关 Tier 1 平台 smoke，让真实失败决定是否需要最小 Skill / Tool contract 修正。
+- 当前 CCTV 专项只处理旧 H5E native 解密正确性与真实样本验收；不扩平台、不增 Tool、不引入新的 Agent/持久语义状态，也不在没有真实 native 证据前为了目录整洁删除仍有价值的 WASM fallback。
 
 当前机器事实仍以运行时 Tool schema 为准，当前实现边界以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。Skill 语义实验不得恢复另一套 MCP 公共能力面或持久语义状态。
 
@@ -157,18 +158,3 @@ Scope drift detected?:
 ````
 
 ## 状态要求
-
-- 文件顶部状态使用 `pending`、`in_progress`、`completed` 或 `blocked`。
-- 同一计划最多一个步骤为 `in_progress`。
-- 每完成一个 milestone 就执行一次 checkpoint；不要只在最终总结时检查 scope drift。
-- 任务结束时，本次已经实施的步骤不得仍标为 `pending` 或 `in_progress`。
-- 全部承诺完成后，将顶部状态改为 `completed` 并填写完成日期。
-- 因外部条件无法完成时，顶部状态改为 `blocked`，记录连续失败证据和恢复条件。
-- 被替代的计划可以保留合法的原始状态，并在正文增加明确的 `处置：superseded` 和接替说明；
-  这不等于把它标记为 `completed`。
-- 产品开发路线图不等于当前执行计划；未来路线保持“未开始”是正常状态。
-
-## 验证预算
-
-计划中的测试范围按 `AGENTS.md` 的四级验证执行：Small Edit → Subsystem → Milestone → Release/Cross-cutting。
-昂贵测试必须能够回答“这个 diff 的什么现实回归风险只能或最适合由它发现”；否则优先 narrower targeted validation。
