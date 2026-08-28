@@ -79,8 +79,13 @@ jobs:
       - name: Run CCTV focused tests against installed package
         shell: pwsh
         run: |
+          $env:Path = @(
+            [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+            [Environment]::GetEnvironmentVariable('Path', 'User')
+          ) -join ';'
           $python = Join-Path $env:LOCALAPPDATA 'LearningResourceFlow\venv\Scripts\python.exe'
           if (-not (Test-Path $python)) { throw "Installed Python not found: $python" }
+          ffmpeg -version | Select-Object -First 1
           & $python -m pip install --disable-pip-version-check --quiet pytest
           & $python -m pytest -q `
             mcp/education-resources/tests/test_cctv_platform.py `
