@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from education_resource_mcp.adapters.cctv_hls import (
+    contiguous_segment_groups,
     resolve_hls_uri,
     select_highest_bandwidth_variant,
 )
@@ -54,3 +55,10 @@ def test_resolve_hls_uri_supports_relative_root_and_absolute_urls() -> None:
         resolve_hls_uri(parent, "https://other.example/2000.m3u8")
         == "https://other.example/2000.m3u8"
     )
+
+
+def test_parallel_fallback_groups_preserve_original_segment_order() -> None:
+    groups = contiguous_segment_groups(10, 4)
+
+    assert groups == [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
+    assert [index for group in groups for index in group] == list(range(10))
