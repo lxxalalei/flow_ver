@@ -31,7 +31,7 @@ def test_native_h5e_decrypts_joined_stream_once(tmp_path: Path) -> None:
 
     def fake_decrypt(data: bytes, vpid: int = 0x100) -> tuple[bytes, int]:
         seen_decrypt_inputs.append(data)
-        return b"plain-full-stream", 7
+        return b"P" * len(data), 7
 
     def fake_remux(source_ts, destination_mp4, *, timeout, cancel_event=None):
         seen_remux_inputs.append(Path(source_ts).read_bytes())
@@ -53,8 +53,9 @@ def test_native_h5e_decrypts_joined_stream_once(tmp_path: Path) -> None:
             h5e_url="https://cdn.example/master.m3u8",
         )
 
-    assert seen_decrypt_inputs == [b"segment-Asegment-Bsegment-C"]
-    assert seen_remux_inputs == [b"plain-full-stream"]
+    joined = b"segment-Asegment-Bsegment-C"
+    assert seen_decrypt_inputs == [joined]
+    assert seen_remux_inputs == [b"P" * len(joined)]
     assert result.read_bytes() == b"mp4"
 
 
