@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from generate_real_user_journey_report import generate_report
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PLACEHOLDER = re.compile(r"<([A-Z0-9_]+)>")
@@ -289,6 +291,7 @@ def main() -> int:
                 "journey_id": journey_id,
                 "run_index": run_index,
                 "session_id": session_id,
+                "planned_turns": len(prepared),
                 "acceptance": journey.get("acceptance") or [],
                 "forbidden": journey.get("forbidden") or [],
                 "started_at": now(),
@@ -315,8 +318,11 @@ def main() -> int:
             manifest["journeys"].append(journey_record)
 
     manifest["finished_at"] = now()
-    write_json(output_root / "manifest.json", manifest)
-    print(output_root / "manifest.json")
+    manifest_path = output_root / "manifest.json"
+    write_json(manifest_path, manifest)
+    report_path = generate_report(output_root)
+    print(manifest_path)
+    print(report_path)
     return 0
 
 
