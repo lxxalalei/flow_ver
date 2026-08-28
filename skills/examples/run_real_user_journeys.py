@@ -40,6 +40,10 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def invocation_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
 def git_head(workspace: Path) -> str:
     try:
         result = subprocess.run(
@@ -227,13 +231,20 @@ def main() -> int:
         raise SystemExit(f"HEAD mismatch: expected {args.expect_head}, got {head}")
 
     selected = set(args.case_ids or [])
-    output_root = ROOT / ".openclaw-test" / "real-user-journeys" / args.label
+    invocation = invocation_id()
+    output_root = (
+        ROOT
+        / ".openclaw-test"
+        / "real-user-journeys"
+        / f"{args.label}-{invocation}"
+    )
     output_root.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, Any] = {
         "suite_version": suite.get("version"),
         "workspace": str(workspace),
         "workspace_head": head,
         "label": args.label,
+        "invocation_id": invocation,
         "started_at": now(),
         "journeys": [],
         "skipped": [],
@@ -269,7 +280,9 @@ def main() -> int:
             continue
 
         for run_index in range(1, args.repeat + 1):
-            session_id = f"journey-{args.label}-{journey_id}-r{run_index:02d}"
+            session_id = (
+                f"journey-{args.label}-{invocation}-{journey_id}-r{run_index:02d}"
+            )
             journey_dir = output_root / journey_id / f"run-{run_index:02d}"
             journey_dir.mkdir(parents=True, exist_ok=True)
             journey_record: dict[str, Any] = {
