@@ -47,4 +47,27 @@ def resolve_hls_uri(parent_url: str, child_uri: str) -> str:
     return urljoin(parent_url, child_uri)
 
 
-__all__ = ["resolve_hls_uri", "select_highest_bandwidth_variant"]
+def contiguous_segment_groups(segment_count: int, max_groups: int) -> list[list[int]]:
+    """Split ordered HLS segment indexes into contiguous groups.
+
+    Group-level parallelism is safe only when each worker receives a contiguous
+    slice and group outputs are concatenated in group order. Interleaving
+    indexes across workers (0,4,8 / 1,5,9 / ...) destroys playback order when
+    the resulting TS files are concatenated by group.
+    """
+
+    if segment_count <= 0 or max_groups <= 0:
+        return []
+    group_count = min(segment_count, max_groups)
+    chunk_size = (segment_count + group_count - 1) // group_count
+    return [
+        list(range(start, min(start + chunk_size, segment_count)))
+        for start in range(0, segment_count, chunk_size)
+    ]
+
+
+__all__ = [
+    "contiguous_segment_groups",
+    "resolve_hls_uri",
+    "select_highest_bandwidth_variant",
+]
