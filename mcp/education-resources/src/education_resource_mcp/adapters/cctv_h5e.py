@@ -1,479 +1,536 @@
 # -*- coding: utf-8 -*-
-"""CCTV h5e MPEG-TS 解密器（Python 移植）。
+"""CCTV H5E MPEG-TS decryptor.
 
-源码渊源：移植自 letr007/CCTVVideoDownloader 的
-``cctv_h5e_decrypt.hpp``（https://github.com/letr007/CCTVVideoDownloader，
-**GPLv3**）。本文件按 GPLv3 条款使用：它是 GPLv3 衍生作品，分发时必须
-保持 GPLv3 并附源码获取说明（见 0069 M3 合规项）。算法完整性已逐行
-核对（2026-08-25）：Session / classic / type5 / type1 / TS 解析 / AF 吸收
-与 C++ 原版一致。
+This module keeps the repository's existing native Python implementation and
+restores the protocol mode switch that is signalled by H.264 NAL type 25.
+Before that marker, type 1/5 NALs use the classic TEA grid. After it, type 5
+uses the dynamic TEA grid and type 1 uses the header-derived transform.
 
-用法:
-    from education_resource_mcp.adapters.cctv_h5e import decrypt_ts
-    plain = decrypt_ts(enc_ts_bytes)   # 解密整个 TS 文件
+Historical provenance: this repository's native H5E implementation was derived
+from letr007/CCTVVideoDownloader and is documented as GPLv3 in plan 0069. This
+change only restructures the repository's existing implementation and restores
+its protocol dispatch; it does not change that provenance.
 """
+from __future__ import annotations
+
 import struct
 
 M32 = 0xFFFFFFFF
 M16 = 0xFFFF
+_TYPE_STRIDE_BASE = (160, 192, 224, 256, 288, 320)
 
 
-def tea_decrypt_block(data, pos, key):
-    """TEA-16 解密 8 字节块 (in-place)，key 16 字节，delta=0x9E3779B9
-
-    2026-08-25 修复：原 mediacrawler 移植把 ``>>5`` 项的 key 对调（v1 行误用
-    k1、v0 行误用 k3），导致解密结果错误——这正是当年"老方案"被弃用的
-    真实原因（不是性能）。已按 hpp 标准配对恢复：v1 行 k2/k3、v0 行 k0/k1。
-    """
-    v0 = struct.unpack_from('<I', data, pos)[0]
-    v1 = struct.unpack_from('<I', data, pos + 4)[0]
-    k0, k1, k2, k3 = struct.unpack_from('<IIII', key, 0)
+def tea_decrypt_block(data: bytearray, pos: int, key: bytes) -> None:
+    """Decrypt one 8-byte TEA-16 block in place."""
+    v0 = struct.unpack_from("<I", data, pos)[0]
+    v1 = struct.unpack_from("<I", data, pos + 4)[0]
+    k0, k1, k2, k3 = struct.unpack_from("<IIII", key, 0)
     delta = 0x9E3779B9
-    s = (delta * 16) & M32
+    total = (delta * 16) & M32
     for _ in range(16):
-        v1 = (v1 - ((((v0 << 4) & M32) + k2) ^ (v0 + s) ^ ((v0 >> 5) + k3))) & M32
-        v0 = (v0 - ((((v1 << 4) & M32) + k0) ^ (v1 + s) ^ ((v1 >> 5) + k1))) & M32
-        s = (s - delta) & M32
-    struct.pack_into('<II', data, pos, v0, v1)
+        v1 = (
+            v1
+            - ((((v0 << 4) & M32) + k2) ^ (v0 + total) ^ ((v0 >> 5) + k3))
+        ) & M32
+        v0 = (
+            v0
+            - ((((v1 << 4) & M32) + k0) ^ (v1 + total) ^ ((v1 >> 5) + k1))
+        ) & M32
+        total = (total - delta) & M32
+    struct.pack_into("<II", data, pos, v0, v1)
 
 
-# ===== EPB 工具 =====
-
-def collect_epb_positions(nal):
-    """收集 00 00 03 起始位置"""
-    epbs = []
-    i = 0
-    n = len(nal)
-    while i + 2 < n:
-        if nal[i] == 0 and nal[i + 1] == 0 and nal[i + 2] == 3:
-            epbs.append(i)
-        i += 1
-    return epbs
+def collect_epb_positions(nal: bytearray) -> list[int]:
+    """Return start offsets of H.264 emulation-prevention sequences 00 00 03."""
+    return [
+        index
+        for index in range(max(0, len(nal) - 2))
+        if nal[index] == 0 and nal[index + 1] == 0 and nal[index + 2] == 3
+    ]
 
 
-def drop_epb_03(nal, epbs):
-    """从尾部删除仍完整的 EPB 的 0x03 字节。返回 (新长度, 新 bytearray)"""
-    nlen = len(nal)
-    for e in reversed(epbs):
-        if e + 2 < nlen and nal[e] == 0 and nal[e + 1] == 0 and nal[e + 2] == 3:
-            del nal[e + 2]
-            nlen -= 1
-    return nlen
-
-
-# ===== 解密模式 =====
-
-def decrypt_classic(nal):
-    """classic: key@16, start=32, stride=80, grid ends at o+80 <= len.
-
-    Fixed 2026-08-25 (real-stream evidence vs the official WASM worker): the
-    grid keeps one full stride (80 bytes) of spare room at the NAL tail —
-    ``o + 80 <= len``. The cctv-dl hpp port used o + 8, decrypting blocks near
-    the tail that the encoder never encrypted, which corrupted the stream
-    (ffmpeg decode errors, "老视频乱码"). Verified byte-exact vs the WASM
-    worker on 244/250 type-1/5 NALs of a real 2021 episode; the remaining 6
-    NALs belong to the 01a8 flip family and are handled by the health-gate
-    fallback.
-    """
-    n = len(nal)
-    if n < 40:
-        return
-    key = bytes(nal[16:32])
-    j = 0
-    while 32 + j * 80 + 80 <= n:
-        tea_decrypt_block(nal, 32 + j * 80, key)
-        j += 1
-
-
-def type5_stride_f5(key16):
-    """key16: NAL 5..20 的 16 字节，只取前 6 字节"""
-    le = key16[0] | (key16[1] << 8) | (key16[2] << 16) | (key16[3] << 24)
-    base = [160, 192, 224, 256, 288, 320]
-    idx = le % 6
-    return base[idx] | key16[idx]
-
-
-def decrypt_type5_new(nal):
-    """new-mode type5: key@5, start=64, stride=type5_stride_f5(nal[5:21])"""
-    n = len(nal)
-    if n < 21:
-        return n
-    stride = type5_stride_f5(nal[5:21])
-    if stride < 8:
-        return n
-    key = bytes(nal[5:21])
-    # r2e 映射（跳过 EPB 0x03）
-    r2e = []
-    i = 0
-    while i < n:
-        if i + 2 < n and nal[i] == 0 and nal[i + 1] == 0 and nal[i + 2] == 3:
-            r2e.append(i)
-            r2e.append(i + 1)
-            i += 3
+def _rbsp_to_ebsp_map(nal: bytearray) -> list[int]:
+    """Map RBSP indexes to EBSP indexes while omitting EPB 0x03 bytes."""
+    mapping: list[int] = []
+    index = 0
+    total = len(nal)
+    while index < total:
+        if (
+            index + 2 < total
+            and nal[index] == 0
+            and nal[index + 1] == 0
+            and nal[index + 2] == 3
+        ):
+            mapping.extend((index, index + 1))
+            index += 3
         else:
-            r2e.append(i)
-            i += 1
-    rbsp_len = len(r2e)
-    tmp = bytearray(8)
-    k = 0
-    while True:
-        o = 64 + k * stride
-        if o + 16 > rbsp_len or o + 8 > rbsp_len:
-            break
-        for b in range(8):
-            tmp[b] = nal[r2e[o + b]]
-        tea_decrypt_block(tmp, 0, key)
-        for b in range(8):
-            nal[r2e[o + b]] = tmp[b]
-        k += 1
+            mapping.append(index)
+            index += 1
+    return mapping
+
+
+def drop_epb_03(nal: bytearray, epbs: list[int]) -> int:
+    """Drop still-present EPB 0x03 bytes and return the new NAL length."""
+    length = len(nal)
+    for start in reversed(epbs):
+        if (
+            start + 2 < length
+            and nal[start] == 0
+            and nal[start + 1] == 0
+            and nal[start + 2] == 3
+        ):
+            del nal[start + 2]
+            length -= 1
+    return length
+
+
+def decrypt_classic(nal: bytearray) -> int:
+    """Classic H5E mode: key@16, data@32, stride 80 with a full-stride guard."""
+    length = len(nal)
+    if length < 40:
+        return length
+    key = bytes(nal[16:32])
+    offset = 32
+    while offset + 80 <= length:
+        tea_decrypt_block(nal, offset, key)
+        offset += 80
+    return length
+
+
+def type5_stride_f5(key16: bytes | bytearray) -> int:
+    """Resolve the new-mode type-5 stride from the first six key bytes."""
+    if len(key16) < 6:
+        return 0
+    little = (
+        key16[0]
+        | (key16[1] << 8)
+        | (key16[2] << 16)
+        | (key16[3] << 24)
+    )
+    index = little % len(_TYPE_STRIDE_BASE)
+    return _TYPE_STRIDE_BASE[index] | key16[index]
+
+
+def decrypt_type5_new(nal: bytearray) -> int:
+    """Decrypt a type-5 NAL in the post-type25 H5E mode."""
+    length = len(nal)
+    if length < 21:
+        return length
+    key = bytes(nal[5:21])
+    stride = type5_stride_f5(key)
+    if stride < 8:
+        return length
+
+    mapping = _rbsp_to_ebsp_map(nal)
+    rbsp_len = len(mapping)
+    block = bytearray(8)
+    offset = 64
+    while offset + 16 <= rbsp_len:
+        for index in range(8):
+            block[index] = nal[mapping[offset + index]]
+        tea_decrypt_block(block, 0, key)
+        for index in range(8):
+            nal[mapping[offset + index]] = block[index]
+        offset += stride
+
     epbs = collect_epb_positions(nal)
-    if epbs:
-        return drop_epb_03(nal, epbs)
-    return n
+    return drop_epb_03(nal, epbs) if epbs else length
 
 
-def type1_fbit(W):
-    w0 = (W >> 0) & 1
-    w8 = (W >> 8) & 1
-    w15 = (W >> 15) & 1
-    w19 = (W >> 19) & 1
-    w25 = (W >> 25) & 1
-    w30 = (W >> 30) & 1
-    w31 = (W >> 31) & 1
+def type1_fbit(word: int) -> int:
+    w0 = (word >> 0) & 1
+    w8 = (word >> 8) & 1
+    w15 = (word >> 15) & 1
+    w19 = (word >> 19) & 1
+    w25 = (word >> 25) & 1
+    w30 = (word >> 30) & 1
+    w31 = (word >> 31) & 1
     t = w0 | w8
-    return (w31 ^ w15 ^ t
-            ^ (w8 & w19)
-            ^ (w25 & (w0 ^ w19))
-            ^ (w0 & (1 ^ w8) & w30)
-            ^ ((1 ^ w0) & w19 & w30)
-            ^ (w25 & w30 & (w8 ^ w19))) & 1
+    return (
+        w31
+        ^ w15
+        ^ t
+        ^ (w8 & w19)
+        ^ (w25 & (w0 ^ w19))
+        ^ (w0 & (1 ^ w8) & w30)
+        ^ ((1 ^ w0) & w19 & w30)
+        ^ (w25 & w30 & (w8 ^ w19))
+    ) & 1
 
 
-def type1_is_B_step(s):
-    return s in (2, 8, 9, 10)
+def type1_is_b_step(step: int) -> bool:
+    return step in (2, 8, 9, 10)
 
 
-def type1_flip_mask_from_header(hdr):
-    b0, b1, b2 = hdr[0], hdr[1], hdr[2]
-    m = 0
-    def setb(s):
-        nonlocal m
-        m |= (1 << s)
+def type1_flip_mask_from_header(header: bytes | bytearray) -> int:
+    if len(header) < 3:
+        return 0
+    b0, b1, b2 = header[0], header[1], header[2]
+    mask = 0
+
+    def set_bit(step: int) -> None:
+        nonlocal mask
+        mask |= 1 << step
+
     if b0 == 0x01 and b1 == 0xA8:
-        if (b2 >> 7) & 1: setb(0)
-        if (b2 >> 6) & 1: setb(1)
-        if 1 ^ ((b2 >> 5) & 1): setb(2)
-        if (b2 >> 4) & 1: setb(3)
-        if (b2 >> 3) & 1: setb(4)
-        if (b2 >> 1) & 1: setb(6)
-        if (b2 >> 0) & 1: setb(7)
-        setb(9)
-        setb(12)
-        return m
+        if (b2 >> 7) & 1:
+            set_bit(0)
+        if (b2 >> 6) & 1:
+            set_bit(1)
+        if 1 ^ ((b2 >> 5) & 1):
+            set_bit(2)
+        if (b2 >> 4) & 1:
+            set_bit(3)
+        if (b2 >> 3) & 1:
+            set_bit(4)
+        if (b2 >> 1) & 1:
+            set_bit(6)
+        if b2 & 1:
+            set_bit(7)
+        set_bit(9)
+        set_bit(12)
+        return mask
+
     if b0 == 0x61:
-        if (b2 >> 1) & 1: setb(0)
-        if (b2 >> 0) & 1: setb(1)
-        if 1 ^ ((b2 >> 5) & 1): setb(2)
-        if (b2 >> 3) & 1: setb(4)
-        if (b2 >> 2) & 1: setb(5)
-        if (b2 >> 1) & 1: setb(6)
-        if (b2 >> 0) & 1: setb(7)
-        if (b2 >> 3) & 1: setb(14)
-        if (b2 >> 2) & 1: setb(15)
-        return m
-    if (b0 & 0x1f) == 1 and (b1 & 0xf0) == 0x90:
-        if (b2 >> 7) & 1: setb(0)
-        if (b2 >> 6) & 1: setb(1)
-        if ((b0 >> 0) & 1) ^ ((b2 >> 5) & 1): setb(2)
-        if (b2 >> 4) & 1: setb(3)
-        if (b2 >> 3) & 1: setb(4)
-        if (b2 >> 2) & 1: setb(5)
-        if (b2 >> 1) & 1: setb(6)
-        if (b2 >> 0) & 1: setb(7)
-        if (b0 >> 0) & 1:
-            setb(9); setb(10); setb(11); setb(12); setb(14)
-        if ((b0 >> 0) & 1) ^ ((b0 >> 6) & 1): setb(13)
-        if (b1 >> 0) & 1: setb(15)
-        return m
-    return 0
+        if (b2 >> 1) & 1:
+            set_bit(0)
+        if b2 & 1:
+            set_bit(1)
+        if 1 ^ ((b2 >> 5) & 1):
+            set_bit(2)
+        if (b2 >> 3) & 1:
+            set_bit(4)
+            set_bit(14)
+        if (b2 >> 2) & 1:
+            set_bit(5)
+            set_bit(15)
+        if (b2 >> 1) & 1:
+            set_bit(6)
+        if b2 & 1:
+            set_bit(7)
+        return mask
+
+    if (b0 & 0x1F) == 1 and (b1 & 0xF0) == 0x90:
+        if (b2 >> 7) & 1:
+            set_bit(0)
+        if (b2 >> 6) & 1:
+            set_bit(1)
+        if (b0 & 1) ^ ((b2 >> 5) & 1):
+            set_bit(2)
+        if (b2 >> 4) & 1:
+            set_bit(3)
+        if (b2 >> 3) & 1:
+            set_bit(4)
+        if (b2 >> 2) & 1:
+            set_bit(5)
+        if (b2 >> 1) & 1:
+            set_bit(6)
+        if b2 & 1:
+            set_bit(7)
+        if b0 & 1:
+            for step in (9, 10, 11, 12, 14):
+                set_bit(step)
+        if (b0 & 1) ^ ((b0 >> 6) & 1):
+            set_bit(13)
+        if b1 & 1:
+            set_bit(15)
+    return mask
 
 
-def type1_G_flips(X, Y, flip_mask):
-    W = X | (Y << 16)
-    P1 = 0
-    for s in range(16):
-        fv = type1_fbit(W) ^ ((flip_mask >> s) & 1)
-        b = fv ^ (1 if type1_is_B_step(s) else 0)
-        P1 = (P1 | (b << (15 - s))) & M16
-        W = (((W << 1) & M32) | b) & M32
-    return P1
+def type1_g_flips(x: int, y: int, flip_mask: int) -> int:
+    word = x | (y << 16)
+    result = 0
+    for step in range(16):
+        f_value = type1_fbit(word) ^ ((flip_mask >> step) & 1)
+        bit = f_value ^ (1 if type1_is_b_step(step) else 0)
+        result = (result | (bit << (15 - step))) & M16
+        word = (((word << 1) & M32) | bit) & M32
+    return result
 
 
-def type1_stride_f1(nal):
-    """key = nal[1:7] (hpp: type5_stride_f5(nal + 1))"""
+def type1_stride_f1(nal: bytes | bytearray) -> int:
     if len(nal) < 7:
         return 0
-    le = nal[1] | (nal[2] << 8) | (nal[3] << 16) | (nal[4] << 24)
-    base = [160, 192, 224, 256, 288, 320]
-    idx = le % 6
-    # hpp reads key16[idx] where key16 = nal + 1, i.e. nal[1 + idx].
-    # (Fixed 2026-08-25: the port used nal[idx], off by one -> wrong stride.)
-    return base[idx] | nal[idx + 1]
+    little = nal[1] | (nal[2] << 8) | (nal[3] << 16) | (nal[4] << 24)
+    index = little % len(_TYPE_STRIDE_BASE)
+    return _TYPE_STRIDE_BASE[index] | nal[index + 1]
 
 
-def decrypt_type1_new(nal, stride=511, start=64, guard=17):
-    n = len(nal)
-    if n < 3:
-        return n
-    hdr = bytes(nal[0:3])
-    flip_mask = type1_flip_mask_from_header(hdr)
+def decrypt_type1_new(
+    nal: bytearray,
+    *,
+    stride: int,
+    start: int = 64,
+    guard: int = 17,
+) -> int:
+    """Decrypt a type-1 NAL in the post-type25 H5E mode."""
+    length = len(nal)
+    if length < 3 or stride < 4:
+        return length
+    header = bytes(nal[:3])
+    flip_mask = type1_flip_mask_from_header(header)
+    mapping = _rbsp_to_ebsp_map(nal)
+    rbsp_len = len(mapping)
+
+    offset = start
+    while offset + guard <= rbsp_len and offset + 4 <= rbsp_len:
+        x = nal[mapping[offset]] | (nal[mapping[offset + 1]] << 8)
+        y = nal[mapping[offset + 2]] | (nal[mapping[offset + 3]] << 8)
+        p1 = type1_g_flips(x, y, flip_mask)
+        nal[mapping[offset]] = p1 & 0xFF
+        nal[mapping[offset + 1]] = (p1 >> 8) & 0xFF
+        nal[mapping[offset + 2]] = x & 0xFF
+        nal[mapping[offset + 3]] = (x >> 8) & 0xFF
+        offset += stride
+
     epbs = collect_epb_positions(nal)
-    r2e = []
-    i = 0
-    while i < n:
-        if i + 2 < n and nal[i] == 0 and nal[i + 1] == 0 and nal[i + 2] == 3:
-            r2e.append(i)
-            r2e.append(i + 1)
-            i += 3
-        else:
-            r2e.append(i)
-            i += 1
-    rbsp_len = len(r2e)
-    k = 0
-    while True:
-        o = start + k * stride
-        if o + guard > rbsp_len or o + 4 > rbsp_len:
-            break
-        X = nal[r2e[o]] | (nal[r2e[o + 1]] << 8)
-        Y = nal[r2e[o + 2]] | (nal[r2e[o + 3]] << 8)
-        P1 = type1_G_flips(X, Y, flip_mask)
-        nal[r2e[o]] = P1 & 0xFF
-        nal[r2e[o + 1]] = (P1 >> 8) & 0xFF
-        nal[r2e[o + 2]] = X & 0xFF
-        nal[r2e[o + 3]] = (X >> 8) & 0xFF
-        k += 1
-    if epbs:
-        return drop_epb_03(nal, epbs)
-    return n
+    return drop_epb_03(nal, epbs) if epbs else length
 
 
-def is_type25_enable(nal):
-    return len(nal) >= 4 and (nal[0] & 0x1f) == 25 and nal[2] == 0x01 and nal[3] == 0x09
+def is_type25_enable(nal: bytes | bytearray) -> bool:
+    return (
+        len(nal) >= 4
+        and (nal[0] & 0x1F) == 25
+        and nal[2] == 0x01
+        and nal[3] == 0x09
+    )
 
 
 class Session:
-    def __init__(self):
+    """H5E stream-local decrypt mode selected by protocol NAL markers."""
+
+    def __init__(self) -> None:
         self.new_mode = False
         self.type1_start = 64
         self.type1_guard = 17
         self.type1_min_len = 129
 
-    def on_nal(self, nal):
-        """nal: bytearray，返回处理后的长度（可能变化）"""
-        n = len(nal)
-        if n < 1:
-            return n
-        ntype = nal[0] & 0x1f
-        if ntype == 25:
+    def on_nal(self, nal: bytearray) -> int:
+        length = len(nal)
+        if length < 1:
+            return length
+        nal_type = nal[0] & 0x1F
+
+        if nal_type == 25:
             if is_type25_enable(nal):
                 self.new_mode = True
-            return n
-        # Real-stream evidence (2026-08-25, vs official WASM worker): type 1
-        # and type 5 NALs always use the classic grid (key@16, start=32,
-        # stride=80, o+16 guard) — the hpp type5_new/type1_new paths
-        # (64 + header-derived stride + G-flips) are a cctv-dl extension and
-        # do NOT match the official decryptor on this stream; using them
-        # corrupts the video.
-        if ntype in (1, 5):
-            decrypt_classic(nal)
-            return n
-        return n
+            return length
 
-    def reset(self):
+        if not self.new_mode:
+            if nal_type in (1, 5):
+                return decrypt_classic(nal)
+            return length
+
+        if nal_type == 5:
+            return decrypt_type5_new(nal)
+
+        if nal_type == 1:
+            if length < self.type1_min_len:
+                return length
+            stride = type1_stride_f1(nal) or 511
+            return decrypt_type1_new(
+                nal,
+                stride=stride,
+                start=self.type1_start,
+                guard=self.type1_guard,
+            )
+
+        return length
+
+    def reset(self) -> None:
         self.new_mode = False
 
 
-# ===== MPEG-TS =====
-
-def expand_af_steal(data, pkt_off, need):
-    """在 TS 包中扩展 adaptation field 以吸收 need 字节。返回实际吸收字节数"""
-    if need == 0 or pkt_off + 188 > len(data):
+def expand_af_steal(data: bytearray, pkt_off: int, need: int) -> int:
+    """Grow a TS adaptation field to absorb bytes removed from PES payload."""
+    if need <= 0 or pkt_off + 188 > len(data):
         return 0
     afc = (data[pkt_off + 3] & 0x30) >> 4
+
     if afc == 1:
-        af_len = min(need - 1, 182) if need >= 1 else 0
+        af_len = min(need - 1, 182)
         steal = 1 + af_len
-        old_payload = bytes(data[pkt_off + 4: pkt_off + 188])
-        data[pkt_off + 3] = (data[pkt_off + 3] & 0xCF) | 0x30  # afc=3
+        old_payload = bytes(data[pkt_off + 4 : pkt_off + 188])
+        data[pkt_off + 3] = (data[pkt_off + 3] & 0xCF) | 0x30
         data[pkt_off + 4] = af_len
-        if af_len > 0:
-            data[pkt_off + 5] = 0x00
-            for i in range(1, af_len):
-                data[pkt_off + 5 + i] = 0xFF
-        new_pl = 184 - steal
-        data[pkt_off + 5 + af_len: pkt_off + 5 + af_len + new_pl] = old_payload[:new_pl]
+        if af_len:
+            data[pkt_off + 5] = 0
+            if af_len > 1:
+                data[pkt_off + 6 : pkt_off + 5 + af_len] = b"\xFF" * (af_len - 1)
+        new_payload_len = 184 - steal
+        start = pkt_off + 5 + af_len
+        data[start : start + new_payload_len] = old_payload[:new_payload_len]
         return steal
+
     if afc in (2, 3):
         af_len = data[pkt_off + 4]
-        pi = 5 + af_len
-        if pi >= 188:
+        payload_index = 5 + af_len
+        if payload_index >= 188 or af_len >= 182:
             return 0
-        old_payload_len = 188 - pi
-        add = min(need, old_payload_len)
-        if add == 0:
+        old_payload_len = 188 - payload_index
+        add = min(need, old_payload_len, 182 - af_len)
+        if add <= 0:
             return 0
-        if af_len + add > 182:
-            add = 182 - af_len
-            if add == 0:
-                return 0
-        old_payload = bytes(data[pkt_off + pi: pkt_off + 188])
-        for i in range(add):
-            data[pkt_off + 5 + af_len + i] = 0xFF
+        old_payload = bytes(data[pkt_off + payload_index : pkt_off + 188])
+        data[
+            pkt_off + 5 + af_len : pkt_off + 5 + af_len + add
+        ] = b"\xFF" * add
         new_af_len = af_len + add
         data[pkt_off + 4] = new_af_len
-        new_pl = old_payload_len - add
-        data[pkt_off + 5 + new_af_len: pkt_off + 5 + new_af_len + new_pl] = old_payload[:new_pl]
-        if new_pl == 0:
-            data[pkt_off + 3] = (data[pkt_off + 3] & 0xCF) | 0x20  # afc=2
-        else:
-            data[pkt_off + 3] = (data[pkt_off + 3] & 0xCF) | 0x30  # afc=3
+        new_payload_len = old_payload_len - add
+        start = pkt_off + 5 + new_af_len
+        data[start : start + new_payload_len] = old_payload[:new_payload_len]
+        data[pkt_off + 3] = (
+            (data[pkt_off + 3] & 0xCF) | (0x20 if new_payload_len == 0 else 0x30)
+        )
         return add
+
     return 0
 
 
-def decrypt_ts(data, vpid=0x100):
-    """解密整个 TS 数据，返回解密后的 bytes。vpid=视频流 PID（默认 0x100）"""
+def decrypt_ts(data: bytes, vpid: int = 0x100) -> tuple[bytes, int]:
+    """Decrypt one MPEG-TS buffer and return ``(plain_bytes, nal_count)``."""
     if len(data) < 188:
-        return data
-    buf = bytearray(data)
+        return data, 0
+    buffer = bytearray(data)
     session = Session()
-    nal_count = _decrypt_ts_inplace(buf, session, vpid)
-    return bytes(buf), nal_count
+    nal_count = _decrypt_ts_inplace(buffer, session, vpid)
+    return bytes(buffer), nal_count
 
 
-def _decrypt_ts_inplace(data, session, vpid):
-    n = len(data)
-    if n < 188:
+def _decrypt_ts_inplace(data: bytearray, session: Session, vpid: int) -> int:
+    total = len(data)
+    if total < 188:
         return 0
     pes = bytearray()
-    spans = []  # (pkt_off, payload_start, payload_len)
+    spans: list[tuple[int, int, int]] = []
     nal_count = 0
 
-    def flush():
+    def flush() -> None:
         nonlocal nal_count
         if not pes:
             return
+
         base_skip = 0
-        if len(pes) >= 9 and pes[0] == 0 and pes[1] == 0 and pes[2] == 1:
+        if len(pes) >= 9 and pes[:3] == b"\x00\x00\x01":
             base_skip = 9 + pes[8]
         if base_skip > len(pes):
             pes.clear()
             spans.clear()
             return
-        pes_hdr = bytes(pes[:base_skip])
+
+        pes_header = bytes(pes[:base_skip])
         es = bytearray(pes[base_skip:])
-        # 找 NAL start codes
-        starts = []  # (pos, sc_len)
-        i = 0
-        elen = len(es)
-        while i + 3 < elen:
-            if (i + 4 <= elen and es[i] == 0 and es[i + 1] == 0
-                    and es[i + 2] == 0 and es[i + 3] == 1):
-                starts.append((i, 4))
-                i += 4
-            elif es[i] == 0 and es[i + 1] == 0 and es[i + 2] == 1:
-                starts.append((i, 3))
-                i += 3
+        starts: list[tuple[int, int]] = []
+        index = 0
+        while index + 3 < len(es):
+            if (
+                index + 4 <= len(es)
+                and es[index : index + 4] == b"\x00\x00\x00\x01"
+            ):
+                starts.append((index, 4))
+                index += 4
+            elif es[index : index + 3] == b"\x00\x00\x01":
+                starts.append((index, 3))
+                index += 3
             else:
-                i += 1
+                index += 1
+
         new_es = bytearray()
         cursor = 0
-        for idx, (pos, sc) in enumerate(starts):
-            end = starts[idx + 1][0] if idx + 1 < len(starts) else len(es)
-            if cursor < pos:
-                new_es += es[cursor:pos]
-            new_es += es[pos:pos + sc]
-            if pos + sc >= end:
-                cursor = end
-                continue
-            nal = bytearray(es[pos + sc:end])
-            nlen = session.on_nal(nal)
-            new_es += nal[:nlen]
-            nal_count += 1
+        for nal_index, (position, start_code_len) in enumerate(starts):
+            end = starts[nal_index + 1][0] if nal_index + 1 < len(starts) else len(es)
+            if cursor < position:
+                new_es += es[cursor:position]
+            new_es += es[position : position + start_code_len]
+            if position + start_code_len < end:
+                nal = bytearray(es[position + start_code_len : end])
+                new_len = session.on_nal(nal)
+                new_es += nal[:new_len]
+                nal_count += 1
             cursor = end
         if cursor < len(es):
             new_es += es[cursor:]
-        new_pes = pes_hdr + bytes(new_es)
-        capacity = sum(sp[2] for sp in spans)
+
+        new_pes = pes_header + bytes(new_es)
+        capacity = sum(span[2] for span in spans)
         if capacity > len(new_pes):
             remaining = capacity - len(new_pes)
-            for sp in reversed(spans):
+            for packet_offset, _, _ in reversed(spans):
                 if remaining <= 0:
                     break
-                got = expand_af_steal(data, sp[0], remaining)
-                remaining -= got
-            # AF 变化后重算 spans
-            new_spans = []
-            for sp in spans:
-                pkt_off = sp[0]
-                afc = (data[pkt_off + 3] & 0x30) >> 4
+                remaining -= expand_af_steal(data, packet_offset, remaining)
+
+            rebuilt: list[tuple[int, int, int]] = []
+            for packet_offset, _, _ in spans:
+                afc = (data[packet_offset + 3] & 0x30) >> 4
                 if afc in (0, 2):
                     continue
-                pi = 4 if afc == 1 else 5 + data[pkt_off + 4]
-                if pi >= 188:
-                    continue
-                new_spans.append((pkt_off, pi, 188 - pi))
-            spans[:] = new_spans
-        off = 0
-        for sp in spans:
-            pkt_off, pi, pl = sp
-            chunk = min(len(new_pes) - off, pl)
-            if chunk > 0:
-                data[pkt_off + pi: pkt_off + pi + chunk] = new_pes[off:off + chunk]
-            if chunk < pl:
-                data[pkt_off + pi + chunk: pkt_off + pi + pl] = b'\xFF' * (pl - chunk)
-            off += pl
-            if off >= len(new_pes):
+                payload_index = (
+                    4 if afc == 1 else 5 + data[packet_offset + 4]
+                )
+                if payload_index < 188:
+                    rebuilt.append(
+                        (packet_offset, payload_index, 188 - payload_index)
+                    )
+            spans[:] = rebuilt
+
+        source_offset = 0
+        for packet_offset, payload_index, payload_len in spans:
+            available = max(0, len(new_pes) - source_offset)
+            chunk_len = min(available, payload_len)
+            if chunk_len:
+                data[
+                    packet_offset + payload_index : packet_offset + payload_index + chunk_len
+                ] = new_pes[source_offset : source_offset + chunk_len]
+            if chunk_len < payload_len:
+                data[
+                    packet_offset + payload_index + chunk_len : packet_offset + payload_index + payload_len
+                ] = b"\xFF" * (payload_len - chunk_len)
+            source_offset += payload_len
+            if source_offset >= len(new_pes):
                 break
+
         pes.clear()
         spans.clear()
 
-    off = 0
-    while off + 188 <= n:
-        if data[off] != 0x47:
-            off += 188
+    offset = 0
+    while offset + 188 <= total:
+        if data[offset] != 0x47:
+            offset += 188
             continue
-        pid = ((data[off + 1] & 0x1F) << 8) | data[off + 2]
+        pid = ((data[offset + 1] & 0x1F) << 8) | data[offset + 2]
         if pid != vpid:
-            off += 188
+            offset += 188
             continue
-        pusi = (data[off + 1] & 0x40) != 0
-        afc = (data[off + 3] & 0x30) >> 4
+        pusi = (data[offset + 1] & 0x40) != 0
+        afc = (data[offset + 3] & 0x30) >> 4
         if afc in (0, 2):
-            off += 188
+            offset += 188
             continue
-        pi = 4 if afc == 1 else 5 + data[off + 4]
-        if pi >= 188:
-            off += 188
+        payload_index = 4 if afc == 1 else 5 + data[offset + 4]
+        if payload_index >= 188:
+            offset += 188
             continue
-        payload_len = 188 - pi
         if pusi:
             flush()
-        pes += data[off + pi: off + 188]
-        spans.append((off, pi, payload_len))
-        off += 188
+        payload_len = 188 - payload_index
+        pes += data[offset + payload_index : offset + 188]
+        spans.append((offset, payload_index, payload_len))
+        offset += 188
+
     flush()
     return nal_count
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
-    if len(sys.argv) < 3:
-        print('用法: python cctv_h5e_decrypt.py <输入TS> <输出TS>')
-        sys.exit(1)
-    with open(sys.argv[1], 'rb') as f:
-        raw = f.read()
-    out, nal_count = decrypt_ts(raw)
-    with open(sys.argv[2], 'wb') as f:
-        f.write(out)
-    print(f'解密完成: NAL {nal_count} 个, {len(out)/1024/1024:.1f} MB')
+
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: python cctv_h5e.py <input.ts> <output.ts>")
+    with open(sys.argv[1], "rb") as source:
+        raw = source.read()
+    plain, count = decrypt_ts(raw)
+    with open(sys.argv[2], "wb") as target:
+        target.write(plain)
+    print(f"decrypted NALs: {count}; bytes: {len(plain)}")
