@@ -97,6 +97,26 @@ def _hex_window(data: bytes, offset: int, radius: int = 16) -> str:
     return f"[{start}:{end}] {data[start:end].hex(' ')}"
 
 
+def _packet_context(ts: bytes, byte_offset: int) -> dict[str, object]:
+    packet_index = byte_offset // 188
+    packet_start = packet_index * 188
+    within = byte_offset - packet_start
+    result: dict[str, object] = {
+        "packet_index": packet_index,
+        "packet_byte_offset": within,
+    }
+    if packet_start + 188 > len(ts) or ts[packet_start] != 0x47:
+        result["valid_ts_packet"] = False
+        return result
+
+    result["valid_ts_packet"] = True
+    result["pid"] = hex(((ts[packet_start + 1] & 0x1F) << 8) | ts[packet_start + 2])
+    result["pusi"] = bool(ts[packet_start + 1] & 0x40)
+    result["afc"] = (ts[packet_start + 3] & 0x30) >> 4
+    result["continuity_counter"] = ts[packet_start + 3] & 0x0F
+    return result
+
+
 def _mode_details(encrypted_nals: list[NalRecord], target_index: int) -> dict[str, object]:
     new_mode = False
     target = encrypted_nals[target_index]
@@ -126,6 +146,22 @@ def _mode_details(encrypted_nals: list[NalRecord], target_index: int) -> dict[st
     return details
 
 
+def _print_first_ts_difference(native_ts: bytes, wasm_ts: bytes) -> None:
+    diff = _first_diff(native_ts, wasm_ts)
+    if diff is None:
+        print("TS bytes are identical.")
+        return
+
+    print("\nFIRST TS-BYTE DIVERGENCE")
+    print(f"absolute byte offset: {diff}")
+    for key, value in _packet_context(native_ts, diff).items():
+        print(f"native {key}: {value}")
+    for key, value in _packet_context(wasm_ts, diff).items():
+        print(f"wasm {key}: {value}")
+    print(f"native: {_hex_window(native_ts, diff)}")
+    print(f"wasm:   {_hex_window(wasm_ts, diff)}")
+
+
 def diagnose(encrypted_ts: bytes, wasm_ts: bytes, *, vpid: int) -> int:
     native_ts, native_count = cctv_h5e.decrypt_ts(encrypted_ts, vpid=vpid)
 
@@ -142,6 +178,8 @@ def diagnose(encrypted_ts: bytes, wasm_ts: bytes, *, vpid: int) -> int:
         f"encrypted={len(encrypted_nals)} native={len(native_nals)} wasm={len(wasm_nals)}"
     )
 
+    _print_first_ts_difference(native_ts, wasm_ts)
+
     common = min(len(encrypted_nals), len(native_nals), len(wasm_nals))
     for index in range(common):
         native = native_nals[index]
@@ -151,13 +189,13 @@ def diagnose(encrypted_ts: bytes, wasm_ts: bytes, *, vpid: int) -> int:
             continue
 
         encrypted = encrypted_nals[index]
-        print("\nFIRST DIVERGENCE")
+        print("\nFIRST NAL DIVERGENCE")
         print(f"NAL index: {index}")
         for key, value in _mode_details(encrypted_nals, index).items():
             print(f"{key}: {value}")
         print(f"native length: {len(native.payload)}")
         print(f"wasm length:   {len(wasm.payload)}")
-        print(f"first differing byte: {diff}")
+        print(f"first differing NAL byte: {diff}")
         print(f"encrypted sha256: {hashlib.sha256(encrypted.payload).hexdigest()}")
         print(f"native sha256:    {hashlib.sha256(native.payload).hexdigest()}")
         print(f"wasm sha256:      {hashlib.sha256(wasm.payload).hexdigest()}")
@@ -171,13 +209,22 @@ def diagnose(encrypted_ts: bytes, wasm_ts: bytes, *, vpid: int) -> int:
         print(f"native={len(native_nals)} wasm={len(wasm_nals)}")
         return 1
 
-    print("\nNo native/WASM NAL divergence found.")
+    if native_ts != wasm_ts:
+        print(
+            "\nNAL payloads agree, but TS bytes differ. Investigate TS/PES rebuild, "
+            "adaptation-field stuffing, or packetization before changing crypto."
+        )
+        return 1
+
+    print("\nNo native/WASM divergence found.")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Locate the first byte-level CCTV H5E native/WASM NAL divergence."
+        description=(
+            "Locate the first CCTV H5E native/WASM divergence at NAL and TS packet level."
+        )
     )
     parser.add_argument("encrypted_ts", type=Path)
     parser.add_argument("wasm_ts", type=Path)
