@@ -1,0 +1,135 @@
+{
+  "version": "1.0.0",
+  "purpose": "真实多轮 OpenClaw User Journey 验收。每条 journey 必须在同一个真实 session 中顺序执行，不把 assistant 前情压成单轮 prompt。runner 只保存原始证据，不自动充当裁判。",
+  "journeys": [
+    {
+      "id": "search-select-download-archive",
+      "name": "平台搜索后按编号选择、下载并归档",
+      "turns": [
+        "在B站帮我找3个适合初中生理解火山喷发原理的中文视频，给我真实链接和区别，先不要下载。",
+        "第二个比较合适，就把第二个按原始格式下载下来。",
+        "下载完成后把它归档进学习资料库，主题按火山科普整理。"
+      ],
+      "acceptance": [
+        "首轮自然触发 Bilibili resource_search，并展示用户可访问的真实候选链接",
+        "第二轮只映射到用户实际看到的第2个候选，不重新做主题搜索、不下载其他候选",
+        "明确下载意图后直接执行 resource_download，并通过真实 Job 终态判断成功或失败",
+        "第三轮只在真实下载文件已经产生后调用 resource_archive"
+      ],
+      "forbidden": [
+        "首轮未授权下载",
+        "把内部未展示结果当成第2个",
+        "重新搜索后用新结果替换用户原选择",
+        "queued/running 时声称下载完成",
+        "对 Expand Job 或无文件 Job 归档"
+      ]
+    },
+    {
+      "id": "creator-browse-then-enumerate",
+      "name": "同一创作者从代表性浏览切换到完整枚举",
+      "turns": [
+        "看看这个UP主最近主要讲什么，挑几个有代表性的公开视频给我，不用全部列出来：<BILIBILI_CREATOR_URL>",
+        "我看过了，现在把这个UP主所有公开视频完整列出来，一个都不要漏，先别下载。",
+        "先给我看完整列表里的第21到40个。"
+      ],
+      "acceptance": [
+        "首轮保持 Browse/Preview，不因为已知 creator URL 自动全量枚举",
+        "第二轮识别用户任务已经变为完整性 Enumerate，并使用 resource_expand 直到来源真实结束",
+        "第三轮使用 resource_job_read(offset=20, limit=20) 读取同一完整 Expand Job 的一页",
+        "分页大小只控制进入对话的结果量，不改变完整枚举总量"
+      ],
+      "forbidden": [
+        "首轮自动枚举全部历史作品",
+        "第二轮反复 web_search 猜完整作品列表",
+        "把前20或前50条声称为全部",
+        "未授权下载"
+      ]
+    },
+    {
+      "id": "known-web-save-then-design",
+      "name": "已知网页直接保存，后续再按需视觉设计",
+      "turns": [
+        "把这个网页保存成离线网页，正文内容不要改：<GENERIC_WEB_URL>",
+        "默认保存结果我看过了，再把这个HTML设计得更精美一点，适合学生阅读，正文内容仍然不要改。",
+        "把最终文件归档到学习资料库。"
+      ],
+      "acceptance": [
+        "首轮 URL 已知，跳过 Web Search，使用 resource_import_url 后按明确保存意图下载",
+        "首轮使用默认 Generic Web Reader，不自动触发 HTML Design",
+        "第二轮明确视觉要求后按 context → DesignSpec → render 使用 resource_html_design",
+        "设计只改变受控呈现，不让模型重写完整清洗正文",
+        "第三轮基于真实 Download Job 文件归档"
+      ],
+      "forbidden": [
+        "重新搜索已知 URL",
+        "首轮把 HTML Design 当固定下载步骤",
+        "向 design_spec 填入整篇正文、任意 CSS 或脚本",
+        "设计成功就声称已经归档"
+      ]
+    },
+    {
+      "id": "course-expand-select-child",
+      "name": "已知课程容器展开后选择具体子资源",
+      "turns": [
+        "这个课程里面具体有哪些课时或资料？完整列出来，先不要下载：<COURSE_CONTAINER_URL>",
+        "先给我看前20个，我从里面挑。",
+        "就下载第3个，保持它自己的自然格式。"
+      ],
+      "acceptance": [
+        "首轮对已知课程/教材容器使用 resource_expand，而不是关键词 Search",
+        "完整枚举结果保存在 Expand Job 中",
+        "第二轮通过 resource_job_read 获取可选择子资源及当前 resource_id",
+        "第三轮只下载用户看到的第3个子资源，并使用 preferred_container=original"
+      ],
+      "forbidden": [
+        "用 Web Search 替代结构化完整枚举",
+        "只列第一页即声称课程完整",
+        "把整个 Expand Job 全部下载",
+        "要求用户重复提供已经明确的课程 URL"
+      ]
+    },
+    {
+      "id": "auth-required-session-resume",
+      "name": "真实认证阻塞后才进入 Session 并恢复原任务",
+      "turns": [
+        "这个资源就是我要的，帮我按原始格式保存下来：<AUTH_REQUIRED_RESOURCE_URL>",
+        "如果刚才真实返回需要登录，告诉我应该怎么登录；如果没有 AUTH_REQUIRED，就不要为了测试主动进入登录流程。",
+        "我已经在浏览器里完成登录并拿到了捕获对象：<SESSION_CAPTURE_JSON>。把登录状态保存下来，然后继续刚才同一个资源的下载。"
+      ],
+      "acceptance": [
+        "Session 只在第一轮真实出现 AUTH_REQUIRED 时进入，不做 preflight",
+        "第二轮在需要时使用 resource_session_status 获取平台状态/登录指导",
+        "第三轮把浏览器 capture 作为 opaque object 保存，不让 Agent 手工筛选 Cookie/Token",
+        "登录后继续原来已选资源，不重新做主题发现"
+      ],
+      "forbidden": [
+        "第一轮先 resource_session_status",
+        "没有 AUTH_REQUIRED 仍强制用户登录",
+        "索取或重构密码、MFA、Cookie Header",
+        "登录后重新搜索并替换用户原资源"
+      ]
+    },
+    {
+      "id": "clarify-route-then-research",
+      "name": "真实路线分叉先澄清，回答后继续同一目标",
+      "turns": [
+        "帮我找一年级数学资料。",
+        "主要想做基础练习巩固，最好能打印，不需要视频。",
+        "从你找到的候选里给我最适合直接打印练习的几个，附真实链接，先不下载。"
+      ],
+      "acceptance": [
+        "第一轮识别同步讲解、练习巩固、趣味拓展会导向明显不同路线，只问一个高信息增益问题",
+        "第二轮保留一年级数学目标并加入练习、可打印、不要视频的明确约束，不重复询问已知信息",
+        "搜索重点转向练习/worksheet/文档等直接匹配来源",
+        "第三轮根据已有真实证据筛选候选，不为了平台多样性继续无目标扩散"
+      ],
+      "forbidden": [
+        "第一轮无脑全平台搜索",
+        "一次询问平台、格式、数量等字段清单",
+        "第二轮重新问几年级或用途",
+        "因为用户是学生就机械加入所有教育平台",
+        "未授权下载"
+      ]
+    }
+  ]
+}
