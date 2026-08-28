@@ -1,9 +1,10 @@
 # 0077 — 真实多轮 User Journey 与 Agent Release Gate
 
-- 状态：in_progress
+- 状态：pending
 - 创建日期：2026-08-29
 - 完成日期：未完成
 - 范围：`skills/examples/`、真实 OpenClaw/MCP 验收证据、必要的最小 Skill/Tool contract 修正；MCP 业务能力面默认冻结
+- 暂停说明：2026-08-29 用户明确将当前优先级切换为 CCTV 旧 H5E 原生解密收口；本计划保持 pending，待 0078 完成后恢复，不把尚未执行的真实 User Journey 伪装为完成。
 
 ## Objective
 
@@ -13,7 +14,7 @@
 
 - 不新增平台或第 13 个 MCP Tool；
 - 不引入 Multi-agent；
-- 不继续重构 CCTV runtime、WASM 或安装体系；
+- 本计划本身不承担 CCTV runtime 重构；CCTV 当前专项改动由 0078 跟踪；
 - 不新增 Flow / Plan / Selection / CoverageState / capability registry / digest / canonical/projection；
 - 不把 synthetic assistant context 或单轮 judgment case 伪装成真实多轮验收；
 - 不为了让测试通过而加入静默 fallback、固定平台路由、固定搜索轮数或任意截断。
@@ -85,7 +86,8 @@
 - [x] completed：修复 Windows packaged install 非致命 Gateway restart 退出码并完成 0076 release gate；
 - [x] completed：新增真实多轮 Journey runner、6 条 Journey 和真实平台 smoke matrix；
 - [x] completed：新增确定性 Markdown 报告生成器，并让 Journey runner 在每次执行结束自动产出报告；
-- [ ] in_progress：准备真实 fixture / 配置完成的 OpenClaw 环境并执行第一批 Journey；
+- [ ] pending：0078 完成后恢复本计划；
+- [ ] pending：准备真实 fixture / 配置完成的 OpenClaw 环境并执行第一批 Journey；
 - [ ] pending：根据真实失败证据决定是否需要最小 Skill/Tool contract 修正；
 - [ ] pending：完成全部关键 Journey 复测并收口 0074/0075 deferred acceptance。
 
@@ -125,15 +127,14 @@
 
 ```text
 Original goal still unchanged?: yes
-Non-goals respected?: yes
 Runtime capability surface changed?: no
 New runtime state/source of truth?: no
 Real multi-turn harness exists?: yes
 Deterministic Markdown report exists?: yes
 Real OpenClaw journey executed?: not yet
-Current blocker?: needs configured real OpenClaw model/provider + live fixtures for fixture-required journeys
+Current status?: paused by explicit user priority change to 0078 CCTV native H5E completion
 ```
 
 ## Result
 
-进行中。当前工程侧已经把真实多轮验收所需 harness、Journey、自动 Markdown 报告和平台 smoke 边界准备好；下一步不再继续写新能力，而是执行真实 Agent/user flow，并让实际失败决定是否还有必要修改 Skill 或 MCP contract。
+待恢复。工程侧真实多轮验收资产已经准备好；当前用户明确优先处理 CCTV 旧 H5E 原生解密，因此本计划不并行推进，待 0078 收口后继续真实 Agent/user flow。
