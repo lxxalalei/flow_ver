@@ -65,3 +65,32 @@ def test_short_type1_is_untouched_in_new_mode() -> None:
         assert session.on_nal(nal) == len(nal)
 
     decrypt.assert_not_called()
+
+
+def test_type5_does_not_drop_epb_created_by_decryption() -> None:
+    nal = bytearray([0x65]) + bytearray([0x44] * 95)
+    nal[5:21] = bytes(range(16))
+    original_len = len(nal)
+
+    def fake_tea(block: bytearray, pos: int, key: bytes) -> None:
+        block[pos : pos + 8] = b"\x00\x00\x03\x44\x44\x44\x44\x44"
+
+    with mock.patch.object(cctv_h5e, "tea_decrypt_block", fake_tea):
+        new_len = cctv_h5e.decrypt_type5_new(nal)
+
+    assert new_len == original_len
+    assert nal[64:67] == b"\x00\x00\x03"
+
+
+def test_type1_does_not_drop_epb_created_by_decryption() -> None:
+    nal = bytearray([0x61]) + bytearray([0x44] * 95)
+    # At the first cell, X=0x0300. A mocked P1=0 yields 00 00 00 03, which
+    # contains a new 00 00 03 sequence that was not present in the encoded NAL.
+    nal[64:68] = b"\x00\x03\x44\x44"
+    original_len = len(nal)
+
+    with mock.patch.object(cctv_h5e, "type1_g_flips", return_value=0):
+        new_len = cctv_h5e.decrypt_type1_new(nal, stride=160)
+
+    assert new_len == original_len
+    assert nal[65:68] == b"\x00\x00\x03"
