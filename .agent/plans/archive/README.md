@@ -11,7 +11,13 @@
 
 ## 当前顶层计划
 
-当前没有未完成的顶层计划；新的非平凡实施工作开始时只建立一份 active 路线。
+当前唯一 active 计划是 [0075-mcp-capability-elicitation.md](../0075-mcp-capability-elicitation.md)。
+
+## 2026-08-28 Skill 阶段转交
+
+| 文件 | 原状态 | 归档说明 / 剩余事项 |
+| --- | --- | --- |
+| [0074-skill-semantic-decision-kernel.md](0074-skill-semantic-decision-kernel.md) | in_progress | `c4dcf9d` / `37681b9` 已完成 decision kernel 工程范围；用户要求暂缓剩余真实 OpenClaw 验收，AC-11 明确保留并转交 0075 最终 User Journey 阶段，不伪装为已通过 |
 
 ## 2026-08-26 路线收口
 

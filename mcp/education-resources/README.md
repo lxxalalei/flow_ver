@@ -36,6 +36,10 @@ Session 辅助能力：
 11. `resource_session_status`
 12. `resource_session_manage`
 
+每个 Tool 的用户意图、触发/非触发、输入身份、Job、副作用和失败边界集中记录在
+[`../../docs/MCP_CAPABILITY_INVENTORY.md`](../../docs/MCP_CAPABILITY_INVENTORY.md)；
+运行时 `tools/list` 仍是名称、description 和 input schema 的机器事实。
+
 容器资源统一通过 `resource_expand` 完整展开，结果通过 `resource_job_read` 分页进入上下文。旧 `resource_browse_creator` / `resource_batch_collect` / `resource_batch_read` 及其 mode 不属于公共能力。
 
 `resource_html_design` 只处理用户明确要求视觉优化的单网页 Download Job：`context` 返回有界且显式标记截断的设计摘要，`render` 接收受控 DesignSpec 并完整保留已经清洗的正文。默认网页下载仍直接产生稳定 Reader，不强制调用模型设计。

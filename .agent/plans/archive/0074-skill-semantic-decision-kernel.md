@@ -1,10 +1,12 @@
 # 0074 — Skill 语义决策内核与真实 A/B
 
-- 状态：in_progress
+- 状态：superseded（工程范围完成，真实验收按用户要求暂缓）
 - 创建日期：2026-08-26
-- 完成日期：未完成
+- 归档日期：2026-08-28
 - 范围：`skills/`、`.agent/plans/`、语义评测文档；MCP 公共能力面冻结
 - 外部验证条件：当前执行环境只有 GitHub 仓库连接，无法直接运行本地 OpenClaw/Gateway；真实 old/new baseline 与 A/B 仍需在 Windows/OpenClaw 环境执行。
+
+> 2026-08-28：Skill decision kernel 已由 `c4dcf9d` / `37681b9` 完成。用户明确要求暂缓剩余测试验收并进入后续 Capability Elicitation 阶段；AC-11 不标记为完成，后续真实验收转交 0075 的最终阶段。
 
 ## Objective
 
@@ -291,4 +293,4 @@ hard invariant：两侧无未授权下载（new 的下载尝试发生在用户�
 
 ## 结果
 
-进行中。AC-10 已通过：repeat=2 真实 A/B 确认新版在真实检索 case 上跨轮稳定更好、hard invariant 无违例；rep2 发现的 browse 登录阻塞退化已按“根据真实 A/B 修正语义退化”修复（SKILL.md §11）并定向复测 2/2 通过。剩余：AC-05 decision kernel 文本收敛、AC-11 最终用户链路验收。
+工程范围已结束。AC-10 已通过：repeat=2 真实 A/B 确认新版在真实检索 case 上跨轮稳定更好、hard invariant 无违例；rep2 发现的 browse 登录阻塞退化已按“根据真实 A/B 修正语义退化”修复（SKILL.md §11）并定向复测 2/2 通过。AC-05 decision kernel 文本由 `c4dcf9d` / `37681b9` 完成；AC-11 最终用户链路验收按用户要求暂缓并转交 0075。

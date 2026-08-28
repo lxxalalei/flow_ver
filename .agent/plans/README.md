@@ -2,9 +2,9 @@
 
 ## 当前执行路线
 
-- 当前唯一 active 实施计划：[`0074-skill-semantic-decision-kernel.md`](0074-skill-semantic-decision-kernel.md)。
-- 0073 已完成真实 OpenClaw/MCP release gate，MCP 公共能力面进入冻结维护阶段；当前主线转向 Skill 语义决策质量与真实 A/B。
-- 0074 baseline 完成前不得修改 active `skills/SKILL.md`，避免先改方案再用新规则证明自己正确。
+- 当前唯一 active 实施计划：[`0075-mcp-capability-elicitation.md`](0075-mcp-capability-elicitation.md)。
+- 0074 的 Skill decision kernel 工程范围已经完成；剩余真实验收按用户要求暂缓，最终并入 0075 的 User Journey 验收。
+- 当前先建立 12 Tool Capability Inventory、收敛运行时 description/schema，并补自然语言 Elicitation 用例；不新增 Tool 或平台能力。
 
 当前机器事实仍以运行时 Tool schema 为准，当前实现边界以 [`docs/CURRENT_ARCHITECTURE.md`](../../docs/CURRENT_ARCHITECTURE.md) 为唯一 active 架构说明。Skill 语义实验不得恢复另一套 MCP 公共能力面或持久语义状态。
 

@@ -89,15 +89,56 @@ class McpStdioTests(unittest.TestCase):
         tools = tools_response["result"]["tools"]
         self.assertEqual(EXPECTED_TOOLS, {item["name"] for item in tools})
 
-        search_tool = next(item for item in tools if item["name"] == "resource_search")
+        by_name = {item["name"]: item for item in tools}
+        self.assertTrue(
+            all(str(item.get("description") or "").strip() for item in tools),
+            "every public Tool must expose a runtime description",
+        )
+        self.assertIn("Open-web discovery", by_name["resource_search"]["description"])
+        self.assertIn("explicitly selected", by_name["resource_download"]["description"])
+        self.assertIn("not a preflight", by_name["resource_session_status"]["description"])
+        self.assertIn("explicitly requests", by_name["resource_html_design"]["description"])
+
+        expected_properties = {
+            "resource_search": {"search_tasks", "limit"},
+            "resource_expand": {"resource_id", "source_url"},
+            "resource_import_url": {"source_url"},
+            "resource_inspect": {"resource_id"},
+            "resource_download": {
+                "resource_ids",
+                "expand_job_id",
+                "preferred_container",
+            },
+            "resource_job_status": {"job_id"},
+            "resource_job_cancel": {"job_id"},
+            "resource_job_read": {"job_id", "offset", "limit"},
+            "resource_html_design": {"action", "job_id", "design_spec"},
+            "resource_archive": {"job_id", "domain_id", "topic"},
+            "resource_session_status": {"platforms", "deep"},
+            "resource_session_manage": {
+                "action",
+                "platform",
+                "capture",
+                "expires_at",
+            },
+        }
+        self.assertEqual(
+            expected_properties,
+            {
+                name: set(tool["inputSchema"]["properties"])
+                for name, tool in by_name.items()
+            },
+        )
+
+        search_tool = by_name["resource_search"]
         search_schema = json.dumps(search_tool["inputSchema"], ensure_ascii=False)
         self.assertNotIn('"tabs"', search_schema)
 
-        expand_tool = next(item for item in tools if item["name"] == "resource_expand")
+        expand_tool = by_name["resource_expand"]
         expand_properties = expand_tool["inputSchema"]["properties"]
         self.assertEqual({"resource_id", "source_url"}, set(expand_properties))
 
-        design_tool = next(item for item in tools if item["name"] == "resource_html_design")
+        design_tool = by_name["resource_html_design"]
         design_schema = json.dumps(design_tool["inputSchema"], ensure_ascii=False)
         self.assertIn('"light_palette"', design_schema)
         self.assertIn('"dark_palette"', design_schema)

@@ -234,6 +234,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = 8,
     ) -> dict[str, Any]:
+        """Search explicitly chosen MCP platforms for candidate resources.
+
+        Use for platform-native discovery with natural queries. Open-web discovery
+        normally belongs to the host Web Search. Do not use for a known URL,
+        structural container enumeration, or as implicit download authorization.
+        """
         return _call(lambda: _search(resource_service, search_tasks, limit))
 
     @server.tool(structured_output=True)
@@ -257,6 +263,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = "",
     ) -> dict[str, Any]:
+        """Start complete structural enumeration of one known container resource.
+
+        Use for creators, collections, albums, textbooks or courses when their
+        children are required. This starts a persistent Expand Job; it is not
+        search, leaf-to-parent discovery, or permission to download the children.
+        """
         return _call(
             lambda: start_expand(
                 resource_service,
@@ -279,6 +291,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ]
     ) -> dict[str, Any]:
+        """Turn one already-known HTTP(S) URL into a process-local Resource.
+
+        Use after the user supplies or selects a concrete URL and MCP facts or
+        file actions are needed. The URL is classified and inspected, but this
+        tool does not search the web or download the resource.
+        """
         return _call(
             lambda: import_resource_url(resource_service, source_url),
             source_url=source_url,
@@ -296,6 +314,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ]
     ) -> dict[str, Any]:
+        """Resolve current facts for one process-local Resource without downloading.
+
+        Use only when availability, identity, format or composition can change a
+        recommendation or acquisition decision. Do not inspect every candidate
+        merely to complete a fixed workflow.
+        """
         return _call(lambda: resource_service.inspect(resource_id), resource_id=resource_id)
 
     @server.tool(structured_output=True)
@@ -328,6 +352,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = "original",
     ) -> dict[str, Any]:
+        """Start a persistent Download Job for resources the user explicitly selected.
+
+        Pass resource_ids for selected individual Resources, or expand_job_id only
+        when the user chose every child of one fully succeeded Expand Job. Search,
+        Expand or recommendation alone never authorizes this file side effect.
+        """
         return _call(
             lambda: _download(
                 resource_service,
@@ -345,6 +375,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="resource_expand 或 resource_download 返回的持久 job_id。"),
         ]
     ) -> dict[str, Any]:
+        """Read progress or final file/failure facts for an Expand or Download Job.
+
+        Use the persistent job_id returned by resource_expand or resource_download.
+        For pages of expanded children, use resource_job_read instead.
+        """
         return _call(lambda: resource_service.job_status(job_id), job_id=job_id)
 
     @server.tool(structured_output=True)
@@ -354,6 +389,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="取消 queued/running/cancelling 的 Expand 或 Download Job。"),
         ]
     ) -> dict[str, Any]:
+        """Request cancellation of one active Expand or Download Job.
+
+        Use when the user asks to stop or the active operation is no longer wanted;
+        terminal Jobs are returned unchanged.
+        """
         return _call(lambda: resource_service.job_cancel(job_id), job_id=job_id)
 
     @server.tool(structured_output=True)
@@ -377,6 +417,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = 20,
     ) -> dict[str, Any]:
+        """Read one context-sized page from a persistent Expand Job result.
+
+        Paging never limits the complete on-disk enumeration. Use returned
+        resource_id values when the user selects individual children. This tool
+        does not read Download Job files; use resource_job_status for those.
+        """
         return _call(
             lambda: read_expand(resource_service, job_id, offset=offset, limit=limit),
             job_id=job_id,
@@ -407,6 +453,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             ),
         ] = None,
     ) -> dict[str, Any]:
+        """Optionally redesign one completed Generic Web download as polished HTML.
+
+        Use only after the user explicitly requests visual optimization. Call
+        context first, create a controlled DesignSpec with the HTML Design Skill,
+        then call render. It is not part of ordinary webpage download.
+        """
         return _call(
             lambda: _html_design(resource_service, action, job_id, design_spec),
             job_id=job_id,
@@ -427,6 +479,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="自由文本学习主题，例如“天文与宇宙”“自然拼读”；可留空。"),
         ] = "",
     ) -> dict[str, Any]:
+        """Move real files from a finished Download Job into the learning library.
+
+        Use only after a succeeded or partial Download Job has produced files and
+        archiving is wanted. The Agent chooses domain/topic; the MCP moves files
+        and reports real archive failures.
+        """
         return _call(
             lambda: resource_service.archive(job_id, domain_id=domain_id, topic=topic),
             job_id=job_id,
@@ -443,6 +501,11 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="是否对支持远端检查的平台验证当前登录态。"),
         ] = False,
     ) -> dict[str, Any]:
+        """Read saved platform-session status and, when needed, login guidance.
+
+        Use after a real AUTH_REQUIRED result or when the user explicitly manages
+        sessions. It is not a preflight step before ordinary Search or Download.
+        """
         return _call(lambda: _session_status(resource_service, platforms, deep))
 
     @server.tool(structured_output=True)
@@ -466,6 +529,12 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
             Field(description="仅 save 使用：可选 ISO 8601 过期时间；未知时省略。"),
         ] = None,
     ) -> dict[str, Any]:
+        """Save an opaque browser-session capture or delete one platform session.
+
+        The user completes login. For save, pass the captured object unchanged;
+        never ask for or reconstruct passwords, MFA codes, Cookie headers or
+        canonical tokens. Use delete only when session removal is requested.
+        """
         return _call(
             lambda: _session_manage(
                 resource_service,

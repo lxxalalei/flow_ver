@@ -4,6 +4,10 @@
 
 当前只有一个 active MCP：`education-resources`。
 
+12 个 Tool 的自然语言触发、非触发、副作用、Job 和认证边界审计见
+[`docs/MCP_CAPABILITY_INVENTORY.md`](docs/MCP_CAPABILITY_INVENTORY.md)。该清单是审计证据；
+运行时事实仍以实际 Tool schema 和返回为准。
+
 ## 核心边界
 
 Main Agent / Skill 负责：理解需求、设计搜索任务、判断相关性与覆盖 Gap、决定继续或停止、理解用户选择和获取意图。

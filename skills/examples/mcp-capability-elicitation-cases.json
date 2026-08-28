@@ -1,0 +1,423 @@
+{
+  "version": "1.0.0",
+  "purpose": "验证模型能否仅根据用户自然语言和当前上下文，正确激发 education-resources MCP 已有 12 个 Tool，并避免固定流水线、Session preflight、未授权下载和无关 Tool。该 suite 复用 run_semantic_baseline.py，不新增测试框架。",
+  "cases": [
+    {
+      "id": "mcp-search-explicit-platform",
+      "execution_mode": "judgment",
+      "name": "明确平台发现使用 resource_search",
+      "messages": [
+        {
+          "role": "user",
+          "content": "在B站和喜马拉雅分别找一些适合初中生听懂火山形成过程的内容，先给我候选，不要下载。"
+        }
+      ],
+      "expected": [
+        "把 Bilibili 和 Ximalaya 组织成明确平台 search_tasks",
+        "调用 resource_search 做平台原生发现",
+        "保留不同平台 query 的自然表达",
+        "只返回候选，不触发下载"
+      ],
+      "forbidden": [
+        "用 resource_expand 代替平台发现",
+        "调用 resource_download",
+        "把开放 Web Search 当唯一平台原生搜索方式",
+        "先调用 resource_session_status"
+      ]
+    },
+    {
+      "id": "host-web-search-not-mcp-generic",
+      "execution_mode": "judgment",
+      "name": "开放网页发现走宿主 Web Search",
+      "messages": [
+        {
+          "role": "user",
+          "content": "帮我在网上找三篇权威的儿童近视防控科普文章，给链接和差异即可。"
+        }
+      ],
+      "expected": [
+        "使用宿主 Web Search 做开放互联网发现",
+        "搜索证据足够时直接给出真实 URL",
+        "没有 MCP 文件或深读需求时不调用 resource_import_url"
+      ],
+      "forbidden": [
+        "默认把 generic 查询交给 resource_search",
+        "批量 Import 所有 Web 命中",
+        "下载或归档候选"
+      ]
+    },
+    {
+      "id": "mcp-import-known-url",
+      "execution_mode": "judgment",
+      "name": "已知 URL 直接 Import",
+      "messages": [
+        {
+          "role": "user",
+          "content": "把 https://example.org/lesson 这个网页接进来看看能不能保存。"
+        }
+      ],
+      "expected": [
+        "识别 URL 已知，不再搜索",
+        "调用 resource_import_url 建立当前 Resource 并取得检查事实",
+        "根据真实返回再判断是否需要下载"
+      ],
+      "forbidden": [
+        "先 web_search 或 resource_search",
+        "自行拼接另一个 URL",
+        "Import 即声称文件已经下载"
+      ]
+    },
+    {
+      "id": "mcp-expand-known-container",
+      "execution_mode": "judgment",
+      "name": "已知容器完整枚举使用 Expand",
+      "messages": [
+        {
+          "role": "user",
+          "content": "把这个喜马拉雅专辑里的全部节目列出来：https://www.ximalaya.com/album/123456，先别下载。"
+        }
+      ],
+      "expected": [
+        "调用 resource_expand 并使用 source_url",
+        "认识到 Expand 返回持久 job_id",
+        "通过 Job 能力等待并读取完整枚举",
+        "不把聊天页大小当节目总数上限"
+      ],
+      "forbidden": [
+        "用 resource_search 猜专辑节目",
+        "只返回第一页就声称全部",
+        "调用 resource_download"
+      ]
+    },
+    {
+      "id": "mcp-browse-not-enumerate",
+      "execution_mode": "judgment",
+      "name": "代表性 Browse 不自动完整 Expand",
+      "messages": [
+        {
+          "role": "user",
+          "content": "看看这个老师最近主要讲什么，挑几个有代表性的给我，不用把全部作品列出来。"
+        }
+      ],
+      "expected": [
+        "保持任务为代表性 Browse",
+        "优先使用足够判断的匿名发现路线",
+        "只有确实需要结构事实时才考虑 Expand"
+      ],
+      "forbidden": [
+        "因为存在 creator 容器就自动完整枚举",
+        "要求登录作为浏览前置",
+        "下载全部作品"
+      ]
+    },
+    {
+      "id": "mcp-inspect-decision-fact",
+      "execution_mode": "judgment",
+      "name": "关键未知事实使用 Inspect",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "当前有一个高潜教材候选，已经有 MCP resource_id，但搜索结果无法确认是否为用户要求的 PDF，也不知道当前是否可获取。"
+        },
+        {
+          "role": "user",
+          "content": "必须是能下载的PDF，确认一下。"
+        }
+      ],
+      "expected": [
+        "调用 resource_inspect 补格式和 availability 等会改变决策的事实",
+        "依据真实 Representation 决定是否可推荐或获取"
+      ],
+      "forbidden": [
+        "仅凭标题断言 PDF",
+        "Inspect 所有无关候选",
+        "Inspect 即自动下载"
+      ]
+    },
+    {
+      "id": "mcp-download-selected-resources",
+      "execution_mode": "judgment",
+      "name": "明确选择后下载指定 Resource",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "用户刚才看到三个候选，并明确保留了第 2 个候选对应的当前 MCP resource_id。"
+        },
+        {
+          "role": "user",
+          "content": "就下载第二个，保持原始格式。"
+        }
+      ],
+      "expected": [
+        "保持用户选择映射",
+        "调用 resource_download(resource_ids=[...], preferred_container=\"original\")",
+        "把 queued/running 与最终完成区分"
+      ],
+      "forbidden": [
+        "重新搜索主题",
+        "下载三个候选",
+        "再次做形式确认",
+        "在 Job 终态前声称下载完成"
+      ]
+    },
+    {
+      "id": "mcp-download-whole-expand",
+      "execution_mode": "judgment",
+      "name": "完整 Expand 结果整体下载",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "某个资源展开 Job 已完整 succeeded，用户已经看过摘要；该 expand_job_id 指向 78 个完整子资源。"
+        },
+        {
+          "role": "user",
+          "content": "这78个全部下载。"
+        }
+      ],
+      "expected": [
+        "调用 resource_download(expand_job_id=...)",
+        "不把 78 个子资源全部搬入对话再循环下载",
+        "使用完整 succeeded Expand Job 作为全部选择来源"
+      ],
+      "forbidden": [
+        "把 partial/failed Job 当完整结果",
+        "只下载当前分页",
+        "要求用户逐项确认"
+      ]
+    },
+    {
+      "id": "mcp-job-status",
+      "execution_mode": "judgment",
+      "name": "查询异步任务状态",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "刚才 resource_download 返回了一个持久 job_id，当前只知道 status=queued。"
+        },
+        {
+          "role": "user",
+          "content": "现在下载好了吗？"
+        }
+      ],
+      "expected": [
+        "调用 resource_job_status 查询进度或终态文件事实",
+        "只有终态真实文件结果才能支持完成声明"
+      ],
+      "forbidden": [
+        "调用 resource_job_read 读取下载文件",
+        "queued 即声称完成",
+        "重新发起下载"
+      ]
+    },
+    {
+      "id": "mcp-job-read-expand-page",
+      "execution_mode": "judgment",
+      "name": "分页读取 Expand 子资源",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "一个 Expand Job 已成功产生 120 个子资源，当前有其 job_id。"
+        },
+        {
+          "role": "user",
+          "content": "先给我看第21到40个，我再选。"
+        }
+      ],
+      "expected": [
+        "调用 resource_job_read(offset=20, limit=20)",
+        "使用返回的临时 resource_id 支持后续部分选择",
+        "明确分页只控制上下文"
+      ],
+      "forbidden": [
+        "调用 resource_job_status 代替读取子资源",
+        "把这20条当完整枚举",
+        "直接下载"
+      ]
+    },
+    {
+      "id": "mcp-job-cancel",
+      "execution_mode": "judgment",
+      "name": "用户要求停止活动任务",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "一个下载 Job 仍在 running，当前有准确 job_id。"
+        },
+        {
+          "role": "user",
+          "content": "这个先停掉，不下了。"
+        }
+      ],
+      "expected": [
+        "调用 resource_job_cancel(job_id=...)",
+        "根据真实返回说明 cancelling 或 cancelled"
+      ],
+      "forbidden": [
+        "删除已产生的本地文件",
+        "只口头说已停止而不调用取消能力",
+        "启动新下载"
+      ]
+    },
+    {
+      "id": "mcp-html-design-explicit",
+      "execution_mode": "judgment",
+      "name": "明确视觉优化使用 HTML Design 两阶段",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "一个单页 Generic Web Download Job 已 succeeded，默认清洗页面和 content.md 已生成。"
+        },
+        {
+          "role": "user",
+          "content": "内容别改，把这个HTML重新设计得精美一点，适合小学生阅读。"
+        }
+      ],
+      "expected": [
+        "调用 resource_html_design(action=\"context\")",
+        "由 HTML Design Skill 根据有界摘要产生 DesignSpec",
+        "再调用 resource_html_design(action=\"render\")",
+        "保持完整清洗正文和 source/content 文件不被模型替换"
+      ],
+      "forbidden": [
+        "把 HTML Design 当默认下载步骤",
+        "向 design_spec 填正文、HTML、CSS 或脚本",
+        "重新下载网页代替设计"
+      ]
+    },
+    {
+      "id": "mcp-html-design-not-default",
+      "execution_mode": "judgment",
+      "name": "普通保存网页不触发 HTML Design",
+      "messages": [
+        {
+          "role": "user",
+          "content": "把 https://example.org/article 保存成离线网页，默认样式就行。"
+        }
+      ],
+      "expected": [
+        "Import 后按明确保存意图 Download",
+        "使用默认网页物化结果",
+        "不进入视觉设计阶段"
+      ],
+      "forbidden": [
+        "调用 resource_html_design",
+        "要求用户选择主题配色",
+        "把默认保存说成必须模型设计"
+      ]
+    },
+    {
+      "id": "mcp-archive-finished-download",
+      "execution_mode": "judgment",
+      "name": "真实下载文件完成后归档",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "一个 Download Job 已 succeeded 并返回真实文件，主题是自然科学中的火山。"
+        },
+        {
+          "role": "user",
+          "content": "把这些文件归档进学习资料库。"
+        }
+      ],
+      "expected": [
+        "调用 resource_archive(job_id=..., domain_id/topic 根据语义选择)",
+        "依据真实归档返回报告文件和失败"
+      ],
+      "forbidden": [
+        "对 Expand Job 调 Archive",
+        "创建 ArchiveRecord 代替移动真实文件",
+        "下载未完成前归档"
+      ]
+    },
+    {
+      "id": "mcp-session-status-after-auth",
+      "execution_mode": "judgment",
+      "name": "真实 AUTH_REQUIRED 后查询会话",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "用户选中的平台资源下载真实返回 AUTH_REQUIRED，尚未请求用户提供任何凭据。"
+        },
+        {
+          "role": "user",
+          "content": "那我需要怎么登录？"
+        }
+      ],
+      "expected": [
+        "调用 resource_session_status 查询该平台状态和登录步骤",
+        "让用户自行完成登录",
+        "拿到 capture 后才考虑 save"
+      ],
+      "forbidden": [
+        "手工拼 Cookie Header",
+        "索取密码、短信码或 MFA",
+        "把 Session Status 当所有搜索的前置步骤"
+      ]
+    },
+    {
+      "id": "mcp-session-save-opaque-capture",
+      "execution_mode": "judgment",
+      "name": "保存浏览器会话捕获",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "用户已经自行完成平台登录，浏览器工具返回了一个合法 opaque capture object。"
+        },
+        {
+          "role": "user",
+          "content": "把这个登录状态保存下来。"
+        }
+      ],
+      "expected": [
+        "调用 resource_session_manage(action=\"save\", platform=..., capture=原对象)",
+        "不改写 capture 中的 Cookie/Token/storage 字段",
+        "根据真实保存结果汇报"
+      ],
+      "forbidden": [
+        "由 Agent 筛选或拼接 canonical Token",
+        "再次索取密码或验证码",
+        "把 capture 展开给用户"
+      ]
+    },
+    {
+      "id": "mcp-session-delete",
+      "execution_mode": "judgment",
+      "name": "删除指定平台会话",
+      "messages": [
+        {
+          "role": "user",
+          "content": "把我保存的喜马拉雅登录状态删掉。"
+        }
+      ],
+      "expected": [
+        "调用 resource_session_manage(action=\"delete\", platform=\"ximalaya\")",
+        "delete 不传 capture 或 expires_at"
+      ],
+      "forbidden": [
+        "删除其他平台 Session",
+        "调用 resource_session_status 代替删除",
+        "删除下载文件或资料库内容"
+      ]
+    },
+    {
+      "id": "mcp-no-session-preflight",
+      "execution_mode": "judgment",
+      "name": "匿名能力不做 Session preflight",
+      "messages": [
+        {
+          "role": "user",
+          "content": "在智慧教育平台搜一下七年级物理公开课程，先看候选。"
+        }
+      ],
+      "expected": [
+        "直接调用 resource_search 搜索 SmartEdu 公共能力",
+        "只有真实返回 AUTH_REQUIRED 才进入 Session"
+      ],
+      "forbidden": [
+        "搜索前先调用 resource_session_status",
+        "自动重放已存 token 处理公共网络拒绝",
+        "把搜索请求改成登录流程"
+      ]
+    }
+  ]
+}

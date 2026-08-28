@@ -274,3 +274,22 @@ Web Search 命中也不是 MCP Resource。只有用户选择、关键页面事�
 而是：
 
 > 在相同工具能力下，新版是否更稳定地找到真正适合用户的资源，并在该停的时候停？
+
+## 11. MCP Capability Elicitation cases
+
+`mcp-capability-elicitation-cases.json` 专门验证自然语言能否激发现有 12 个 MCP Tool，覆盖：
+
+- Host Web Search 与 MCP 平台 Search 的选择；
+- 已知 URL、已知容器、关键未知事实分别选择 Import、Expand、Inspect；
+- 部分资源、完整 Expand 结果和异步 Job 的 Download/Status/Read/Cancel 组合；
+- HTML Design、Archive 和 Session 的副作用门槛；
+- Session preflight、未授权下载、固定流水线等非触发行为。
+
+它复用现有 runner：
+
+```bash
+python skills/examples/run_semantic_baseline.py \
+  --suite skills/examples/mcp-capability-elicitation-cases.json
+```
+
+这组 judgment case 能发现 Tool 选择和组合错误，但不能替代真实平台结果或多轮 OpenClaw User Journey。
