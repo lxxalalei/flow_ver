@@ -33,11 +33,7 @@ LOGGER = logging.getLogger(__name__)
 from ..errors import DomainError
 from ..policy import ensure_within_root
 from ..sessions import SessionStore
-from .cctv_hls import (
-    contiguous_segment_groups,
-    resolve_hls_uri,
-    select_highest_bandwidth_variant,
-)
+from .cctv_hls import resolve_hls_uri, select_highest_bandwidth_variant
 from .http_client import urlopen_with_fallback
 
 # Static runtime bundle generated from the vendored MIT project
@@ -53,7 +49,6 @@ DOWNLOAD_TIMEOUT_SECONDS = 3600
 HEALTH_ERROR_THRESHOLD = 100
 WASM_TIMEOUT_SECONDS = 2 * 3600
 _WASM_DL_THREADS = 12
-_WASM_PARALLEL = 4
 _ILLEGAL_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
 
 
@@ -504,7 +499,7 @@ def _wasm_decrypt_group(
     timeout: float,
     cancel_event: Any = None,
 ) -> bool:
-    """Decrypt one contiguous group of local segments through the WASM worker."""
+    """Decrypt one ordered local playlist through one WASM worker Session."""
 
     group_m3u8 = output_ts.with_suffix(".m3u8")
     lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:10"]
@@ -535,7 +530,7 @@ def download_wasm(
     cancel_event: Any = None,
     h5e_url: str | None = None,
 ) -> Path:
-    """Download + decrypt + mux via the static WASM worker; returns MP4 path."""
+    """Download + decrypt + mux via one stream-wide static WASM Session."""
 
     if shutil.which("node") is None:
         raise DomainError(
@@ -586,47 +581,27 @@ def download_wasm(
         )
 
         t1 = time.monotonic()
-        index_groups = contiguous_segment_groups(len(segment_names), _WASM_PARALLEL)
-        groups = [
-            [f"seg_{index:05d}.ts" for index in indexes]
-            for indexes in index_groups
-        ]
-        group_ts = [work_dir / f"group_{g}.ts" for g in range(len(groups))]
-
-        with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
-            futures = {
-                pool.submit(
-                    _wasm_decrypt_group,
-                    h5e_proj,
-                    groups[g],
-                    group_ts[g],
-                    timeout=WASM_TIMEOUT_SECONDS,
-                    cancel_event=cancel_event,
-                ): g
-                for g in range(len(groups))
-            }
-            results: dict[int, bool] = {}
-            for future in as_completed(futures):
-                g = futures[future]
-                results[g] = future.result()
-        if not all(results.get(g) for g in range(len(groups))):
-            failed = sum(1 for g in range(len(groups)) if not results.get(g))
+        ordered_segments = [f"seg_{index:05d}.ts" for index in range(len(segment_names))]
+        full_ts = work_dir / "full.ts"
+        ok = _wasm_decrypt_group(
+            h5e_proj,
+            ordered_segments,
+            full_ts,
+            timeout=WASM_TIMEOUT_SECONDS,
+            cancel_event=cancel_event,
+        )
+        if not ok:
             raise DomainError(
                 "DOWNLOAD_FAILED",
-                f"WASM 降级失败：解密 {failed}/{len(groups)} 组失败",
+                "WASM 降级失败：完整 H5E stream 解密失败",
                 retryable=True,
             )
         LOGGER.info(
-            "cctv wasm: %d contiguous groups decrypted in %.1fs",
-            len(groups),
+            "cctv wasm: one stream-wide Session decrypted in %.1fs",
             time.monotonic() - t1,
         )
 
         t2 = time.monotonic()
-        full_ts = work_dir / "full.ts"
-        with full_ts.open("wb") as out:
-            for group_file in group_ts:
-                out.write(group_file.read_bytes())
         mp4 = job_dir / f"{title}.mp4"
         _remux_to_mp4(
             full_ts,
