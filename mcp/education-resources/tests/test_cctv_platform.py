@@ -514,6 +514,49 @@ class CctvH5eDecryptTests(unittest.TestCase):
 
 
 class CctvWasmFallbackTests(unittest.TestCase):
+    def test_resolve_h5e_proj_requires_static_bundle(self) -> None:
+        tmp = Path(self.enterContext(_tmp_dir()))
+        with mock.patch.dict(
+            cctv_download.os.environ, {"CCTV_H5E_PROJ": str(tmp)}, clear=False
+        ), mock.patch.object(cctv_download, "DEFAULT_H5E_PROJ", tmp / "missing"):
+            with self.assertRaises(DomainError) as ctx:
+                cctv_download.resolve_h5e_proj()
+        self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
+        self.assertIn("main.js", ctx.exception.message)
+
+        (tmp / "main.js").write_text("", encoding="utf-8")
+        (tmp / "worker.js").write_text("", encoding="utf-8")
+        with mock.patch.dict(
+            cctv_download.os.environ, {"CCTV_H5E_PROJ": str(tmp)}, clear=False
+        ):
+            self.assertEqual(cctv_download.resolve_h5e_proj(), tmp)
+
+    def test_wasm_group_executes_static_bundle(self) -> None:
+        tmp = Path(self.enterContext(_tmp_dir()))
+        runtime = tmp / "runtime"
+        runtime.mkdir()
+        main_js = runtime / "main.js"
+        main_js.write_text("", encoding="utf-8")
+        (runtime / "worker.js").write_text("", encoding="utf-8")
+        output = tmp / "group.ts"
+        captured: list[list[str]] = []
+
+        def fake_runner(cmd, *, timeout, cancel_event, cwd):
+            captured.append(cmd)
+            output.write_bytes(b"decrypted")
+            return 0, "", ""
+
+        with mock.patch.object(cctv_download, "_run_with_cancel", fake_runner):
+            ok = cctv_download._wasm_decrypt_group(
+                runtime, ["seg1.ts"], output, timeout=5
+            )
+        self.assertTrue(ok)
+        self.assertEqual(captured, [[
+            "node", str(main_js), "--local-m3u8",
+            str(output.with_suffix(".m3u8")), str(output),
+        ]])
+        self.assertNotIn("tsx", captured[0])
+
     def test_resolve_wasm_m3u8_prefers_per_video_h5e_url(self) -> None:
         resource = {
             "platform": "cctv",

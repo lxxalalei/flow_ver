@@ -1,5 +1,7 @@
 # 0075 — MCP 能力激发与 Tool 契约收敛
 
+> 处置：2026-08-28 工程范围完成并归档；AC-07 真实 OpenClaw User Journey 继续保持 deferred，不作为后续 CCTV 依赖减重的并行 active 路线。
+
 - 状态：in_progress
 - 创建日期：2026-08-28
 - 完成日期：未完成

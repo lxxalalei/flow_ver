@@ -156,7 +156,7 @@ video               -> Download MP4          # 自研下载链，guid 为下载�
 
 **下载链**（全部自研，无外部下载器）：普通流（HLS/直链）Python 直下；h5e 加密流分片下载 + 多进程解密（`cctv_h5e`，GPLv3 渊源标注）+ ffmpeg 封装。所有产物经 ffmpeg 全片解码体检（错误行 ≤100），脏文件自动降级。
 
-**老视频降级链**：2021 年及以前视频的个别 NAL（01a8 flip 家族）为官方 WASM 独有变换，native 解密会脏 → 体检失败后自动切换**官方 WASM worker** 重下：Python 并发拉 h5e 分片 → 分组并行 `node --import tsx` 解密 → ffmpeg 封装 → 同体检门槛。解密工程 **vendored 在包内**（`education_resource_mcp/vendor/cctv-h5e`，MIT，github.com/xiaoxi-ij478/cctv-h5e-decrypt）；首次部署需 `cd mcp/education-resources/src/education_resource_mcp/vendor/cctv-h5e && npm ci` 生成 node_modules，`CCTV_H5E_PROJ` 可覆盖其他安装。m3u8 优先取视频自身 `h5e_url`（Inspect 提供），兜底模板可用 `CCTV_H5E_BASE` 覆盖。node / h5e 工程缺失是显式失败，不静默跳过；下载结果带 `route`（native / wasm）与体检数据。
+**老视频降级链**：2021 年及以前视频的个别 NAL（01a8 flip 家族）为官方 WASM 独有变换，native 解密会脏 → 体检失败后自动切换**官方 WASM worker** 重下：Python 并发拉 h5e 分片 → 分组并行执行静态 `main.js`/`worker.js` bundle → ffmpeg 封装 → 同体检门槛。bundle **vendored 在包内**（`education_resource_mcp/vendor/cctv-h5e/runtime`，MIT，github.com/xiaoxi-ij478/cctv-h5e-decrypt），构建期已经包含完整 JS，用户安装不再执行 `npm ci`，也不需要 tsx、TypeScript、esbuild 或 node_modules；运行时使用定制 OpenClaw 已提供的 Node。`CCTV_H5E_PROJ` 可在开发时覆盖其他完整 bundle 目录。m3u8 优先取视频自身 `h5e_url`（Inspect 提供），兜底模板可用 `CCTV_H5E_BASE` 覆盖。Node / bundle 缺失是显式失败，不静默跳过；下载结果带 `route`（native / wasm）与体检数据。
 
 ## SmartEdu
 

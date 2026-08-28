@@ -151,20 +151,13 @@ $RuntimeCheck = Join-Path $InstalledMcp 'scripts\verify_runtime_environment.py'
 Invoke-Native { & $VenvPython $RuntimeCheck } 'Verify Python runtime'
 Ok 'MCP Python runtime installed'
 
-Section 'Preparing CCTV compatibility runtime'
-if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue) -and -not (Get-Command npm.exe -ErrorAction SilentlyContinue) -and -not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    Fail 'npm is unavailable. OpenClaw normally installs Node/npm; repair OpenClaw and run install.cmd again.'
+Section 'Checking CCTV compatibility runtime'
+if (-not (Get-Command node.exe -ErrorAction SilentlyContinue) -and -not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Fail 'Node is unavailable. OpenClaw normally supplies Node; repair OpenClaw and run install.cmd again.'
 }
-$VendorDir = (& $VenvPython -c "import education_resource_mcp, pathlib; print(pathlib.Path(education_resource_mcp.__file__).resolve().parent / 'vendor' / 'cctv-h5e')" | Select-Object -First 1).Trim()
-if (-not (Test-Path (Join-Path $VendorDir 'package-lock.json'))) {
+$VendorDir = (& $VenvPython -c "import education_resource_mcp, pathlib; print(pathlib.Path(education_resource_mcp.__file__).resolve().parent / 'vendor' / 'cctv-h5e' / 'runtime')" | Select-Object -First 1).Trim()
+if (-not (Test-Path (Join-Path $VendorDir 'main.js')) -or -not (Test-Path (Join-Path $VendorDir 'worker.js'))) {
     Fail "CCTV compatibility runtime is incomplete: $VendorDir"
-}
-Push-Location $VendorDir
-try {
-    Invoke-Native { npm ci --no-audit --no-fund } 'Install CCTV compatibility dependencies'
-}
-finally {
-    Pop-Location
 }
 Ok 'CCTV compatibility runtime ready'
 

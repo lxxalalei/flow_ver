@@ -34,10 +34,11 @@ from ..policy import ensure_within_root
 from ..sessions import SessionStore
 from .http_client import urlopen_with_fallback
 
-# Vendored inside this package (MIT, github.com/xiaoxi-ij478/cctv-h5e-decrypt);
-# node_modules is regenerated with `npm ci` there.
+# Static runtime bundle generated from the vendored MIT project
+# github.com/xiaoxi-ij478/cctv-h5e-decrypt. OpenClaw supplies Node; the
+# installed package does not need npm, tsx, TypeScript or node_modules.
 DEFAULT_H5E_PROJ = (
-    Path(__file__).resolve().parent.parent / "vendor" / "cctv-h5e"
+    Path(__file__).resolve().parent.parent / "vendor" / "cctv-h5e" / "runtime"
 )
 # Fixed h5e m3u8 template used only when the per-video h5e_url is unavailable.
 # Its generality is unconfirmed; CCTV_H5E_BASE can override it.
@@ -67,8 +68,8 @@ def _run_with_cancel(
     Output is redirected to temp files instead of PIPE: a child that floods
     stderr (e.g. ffmpeg decoding a corrupt stream) would otherwise block on a
     full pipe buffer while the poll loop never drains it (PIPE deadlock).
-    ``cwd`` matters for the node/tsx WASM worker — tsx resolves from the
-    vendored project's node_modules, never from the caller's directory.
+    ``cwd`` keeps the static worker bundle and its child process in the same
+    runtime directory.
     """
 
     import tempfile
@@ -446,8 +447,11 @@ def download_h5e_native(
 
 
 def resolve_h5e_proj() -> Path:
-    """Locate the WASM worker project: the package-internal vendor first,
-    ``CCTV_H5E_PROJ`` as an override."""
+    """Locate the static WASM runtime bundle.
+
+    ``CCTV_H5E_PROJ`` remains an internal development override, but now points
+    to a directory containing the generated ``main.js`` and ``worker.js``.
+    """
 
     candidates: list[Path] = []
     configured = os.environ.get("CCTV_H5E_PROJ", "").strip()
@@ -456,15 +460,19 @@ def resolve_h5e_proj() -> Path:
     candidates.append(DEFAULT_H5E_PROJ)
     for candidate in candidates:
         try:
-            if candidate.is_dir() and (candidate / "src" / "cli" / "main.ts").is_file():
+            if (
+                candidate.is_dir()
+                and (candidate / "main.js").is_file()
+                and (candidate / "worker.js").is_file()
+            ):
                 return candidate
         except OSError:
             continue
     raise DomainError(
         "PROVIDER_UNAVAILABLE",
-        "未找到 h5e 解密工程（含 src/cli/main.ts）。包内 vendor 目录缺失或未安装"
-        "依赖：请运行 `cd mcp/education-resources/vendor/cctv-h5e && npm ci`；"
-        "或用环境变量 CCTV_H5E_PROJ 指向其他安装",
+        "未找到 CCTV H5E 静态运行包（需要 main.js 和 worker.js）；"
+        "请修复 education-resources 安装，或用环境变量 CCTV_H5E_PROJ 指向"
+        "完整 bundle 目录",
         retryable=False,
     )
 
@@ -530,7 +538,7 @@ def _wasm_decrypt_group(
     group_m3u8.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     code, _, stderr = _run_with_cancel(
         [
-            "node", "--import", "tsx", "src/cli/main.ts", "--local-m3u8",
+            "node", str(h5e_proj / "main.js"), "--local-m3u8",
             str(group_m3u8), str(output_ts),
         ],
         timeout=timeout,

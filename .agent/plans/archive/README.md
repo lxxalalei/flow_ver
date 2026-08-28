@@ -11,7 +11,13 @@
 
 ## 当前顶层计划
 
-当前唯一 active 计划是 [0075-mcp-capability-elicitation.md](../0075-mcp-capability-elicitation.md)。
+当前唯一 active 计划是 [0076-cctv-runtime-bundle.md](../0076-cctv-runtime-bundle.md)。
+
+## 2026-08-28 MCP 能力契约阶段转交
+
+| 文件 | 原状态 | 归档说明 / 剩余事项 |
+| --- | --- | --- |
+| [0075-mcp-capability-elicitation.md](0075-mcp-capability-elicitation.md) | in_progress | 12 Tool description、Capability Inventory 和语义用例工程范围已由 `1a4251f` 完成；AC-07 真实 OpenClaw User Journey 保持 deferred，不与 0076 并行激活 |
 
 ## 2026-08-28 Skill 阶段转交
 

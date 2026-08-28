@@ -21,7 +21,7 @@
 - Python 3.12+ 检查/安装；
 - FFmpeg 检查/安装；
 - `education-resources` 独立 Python 环境；
-- CCTV 兼容解密运行依赖；
+- CCTV 静态兼容解密运行包体检（不执行 npm 安装）；
 - `learning-resource-flow` Skill 全局安装；
 - `education-resources` MCP 注册；
 - MCP live probe；
