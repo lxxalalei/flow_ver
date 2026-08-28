@@ -82,10 +82,10 @@ jobs:
           $python = Join-Path $env:LOCALAPPDATA 'LearningResourceFlow\venv\Scripts\python.exe'
           if (-not (Test-Path $python)) { throw "Installed Python not found: $python" }
           & $python -m pip install --disable-pip-version-check --quiet pytest
-          & $python -m pytest -q \
-            mcp/education-resources/tests/test_cctv_platform.py \
-            mcp/education-resources/tests/test_cctv_h5e_modes.py \
-            mcp/education-resources/tests/test_cctv_h5e_stream_session.py \
+          & $python -m pytest -q `
+            mcp/education-resources/tests/test_cctv_platform.py `
+            mcp/education-resources/tests/test_cctv_h5e_modes.py `
+            mcp/education-resources/tests/test_cctv_h5e_stream_session.py `
             mcp/education-resources/tests/test_cctv_hls_variants.py
 
       - name: Verify installed runtime
