@@ -59,9 +59,6 @@ def _split_annex_b(es: bytes) -> list[NalRecord]:
         if es[index : index + 4] == b"\x00\x00\x00\x01":
             starts.append((index, 4))
             index += 4
-        elif es[index : index + 3] == b"\x00\x01":
-            # Deliberately not accepted: a two-byte prefix is not Annex B.
-            index += 1
         elif es[index : index + 3] == b"\x00\x00\x01":
             starts.append((index, 3))
             index += 3
