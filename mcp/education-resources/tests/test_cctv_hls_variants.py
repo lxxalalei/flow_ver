@@ -3,6 +3,7 @@ from __future__ import annotations
 from education_resource_mcp.adapters.cctv_hls import (
     resolve_hls_uri,
     select_highest_bandwidth_variant,
+    select_highest_quality_variant,
 )
 
 
@@ -56,6 +57,20 @@ def test_bandwidth_breaks_tie_at_same_resolution() -> None:
     assert select_highest_bandwidth_variant(playlist) == "2000.m3u8"
 
 
+def test_quality_selector_returns_score_for_cross_stream_comparison() -> None:
+    playlist = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=2048000,RESOLUTION=1280x720
+720p.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=4096000,RESOLUTION=1920x1080
+1080p.m3u8
+"""
+
+    assert select_highest_quality_variant(playlist) == (
+        "1080p.m3u8",
+        (1920 * 1080, 4096000),
+    )
+
+
 def test_selects_variant_from_cctv_master_with_spaced_attributes() -> None:
     playlist = """#EXTM3U
 #EXT-X-STREAM-INF:PROGRAM-ID=1, BANDWIDTH=460800, RESOLUTION=640x360
@@ -92,6 +107,7 @@ seg-002.ts
 """
 
     assert select_highest_bandwidth_variant(playlist) is None
+    assert select_highest_quality_variant(playlist) is None
 
 
 def test_resolve_hls_uri_supports_relative_root_and_absolute_urls() -> None:
