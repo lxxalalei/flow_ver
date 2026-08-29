@@ -151,16 +151,6 @@ $RuntimeCheck = Join-Path $InstalledMcp 'scripts\verify_runtime_environment.py'
 Invoke-Native { & $VenvPython $RuntimeCheck } 'Verify Python runtime'
 Ok 'MCP Python runtime installed'
 
-Section 'Checking CCTV compatibility runtime'
-if (-not (Get-Command node.exe -ErrorAction SilentlyContinue) -and -not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Fail 'Node is unavailable. OpenClaw normally supplies Node; repair OpenClaw and run install.cmd again.'
-}
-$VendorDir = (& $VenvPython -c "import education_resource_mcp, pathlib; print(pathlib.Path(education_resource_mcp.__file__).resolve().parent / 'vendor' / 'cctv-h5e' / 'runtime')" | Select-Object -First 1).Trim()
-if (-not (Test-Path (Join-Path $VendorDir 'main.js')) -or -not (Test-Path (Join-Path $VendorDir 'worker.js'))) {
-    Fail "CCTV compatibility runtime is incomplete: $VendorDir"
-}
-Ok 'CCTV compatibility runtime ready'
-
 Section 'Installing learning-resource-flow Skill'
 Invoke-Native {
     openclaw skills install $SkillSource --global --force
