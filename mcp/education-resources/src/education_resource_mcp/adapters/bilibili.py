@@ -7,6 +7,7 @@ collection expansion can stream pages until the platform reports the end.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from datetime import datetime
@@ -32,6 +33,13 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137 Safari/537.36"
 )
 _SPACE_MID_RE = re.compile(r"https?://space\.bilibili\.com/(\d+)")
+
+LOGGER = logging.getLogger(__name__)
+
+# Anti-risk pacing: pages advance no faster than _PAGE_PACE_SECONDS, and
+# NETWORK_BLOCKED (HTTP 412 / non-JSON body) retries with exponential backoff
+# capped at _BACKOFF_WAITS[-1] within a total _BACKOFF_BUDGET_SECONDS budget.
+# Class attributes so tests can shrink the waits without touching real pacing.
 
 
 def _strip_html(text: Any) -> str:
@@ -105,6 +113,9 @@ def _parse_collection_url(source_url: str) -> tuple[str, str, str]:
 
 
 class BilibiliSearchAdapter:
+    _PAGE_PACE_SECONDS = 0.8
+    _BACKOFF_WAITS = (5.0, 10.0, 20.0, 40.0, 60.0)
+    _BACKOFF_BUDGET_SECONDS = 300.0
     """Search Bilibili videos through the WBI-signed web API."""
 
     platform_id = "bilibili"
@@ -135,6 +146,40 @@ class BilibiliSearchAdapter:
         return None
 
     def _request_json(
+        self, url: str, *, referer: str, cookie: str
+    ) -> dict[str, Any]:
+        """One request with bounded backoff on risk-control blocks.
+
+        Only ``NETWORK_BLOCKED`` (HTTP 412 or a non-JSON body) retries; other
+        adapter errors propagate immediately. Waits walk ``_BACKOFF_WAITS``
+        and give up once the overall budget is exhausted.
+        """
+        budget = self._BACKOFF_BUDGET_SECONDS
+        attempt = 0
+        while True:
+            try:
+                return self._request_json_once(url, referer=referer, cookie=cookie)
+            except _AdapterError as exc:
+                if exc.code != "NETWORK_BLOCKED":
+                    raise
+                waits = self._BACKOFF_WAITS
+                wait = waits[min(attempt, len(waits) - 1)]
+                if budget <= wait:
+                    LOGGER.warning(
+                        "bilibili risk block persists after budget; giving up (%s)",
+                        exc.message,
+                    )
+                    raise
+                budget -= wait
+                attempt += 1
+                LOGGER.warning(
+                    "bilibili risk block (attempt %d); retrying in %.0fs",
+                    attempt,
+                    wait,
+                )
+                time.sleep(wait)
+
+    def _request_json_once(
         self, url: str, *, referer: str, cookie: str
     ) -> dict[str, Any]:
         headers = {
@@ -372,7 +417,7 @@ class BilibiliSearchAdapter:
             )
         img_key, sub_key = self._wbi_keys(cookie)
         pn = 1
-        page_size = 30
+        page_size = 20
 
         while True:
             if cancel_event is not None and cancel_event.is_set():
@@ -393,6 +438,8 @@ class BilibiliSearchAdapter:
                 referer=f"https://space.bilibili.com/{mid}/video",
                 cookie=cookie,
             )
+            if pn > 1:
+                time.sleep(self._PAGE_PACE_SECONDS)
             code = response.get("code")
             if code not in (None, 0):
                 raise _AdapterError(
