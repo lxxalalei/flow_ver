@@ -91,7 +91,8 @@ jobs:
             mcp/education-resources/tests/test_cctv_platform.py `
             mcp/education-resources/tests/test_cctv_h5e_modes.py `
             mcp/education-resources/tests/test_cctv_h5e_stream_session.py `
-            mcp/education-resources/tests/test_cctv_hls_variants.py
+            mcp/education-resources/tests/test_cctv_hls_variants.py `
+            mcp/education-resources/tests/test_cctv_quality_routing.py
 
       - name: Verify installed runtime
         shell: pwsh
