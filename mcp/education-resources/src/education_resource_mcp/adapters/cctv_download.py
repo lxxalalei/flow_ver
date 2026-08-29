@@ -1,19 +1,15 @@
-"""CCTV video downloader: native Python first, static WASM fallback.
+"""CCTV video downloader: highest quality first, then stream-specific handling.
 
 Plain streams are fetched directly (direct MP4 or HLS segments + ffmpeg mux).
 H5E streams are fetched as ordered TS segments, concatenated while still
 encrypted, then decrypted once with one stream-wide ``cctv_h5e.Session`` before
-ffmpeg remux. The static WASM worker remains a last-resort fallback until the
-native path has enough real-stream coverage to remove it safely.
-
-The m3u8 prefers the per-video ``h5e_url`` from ``getHttpVideoInfo``; the fixed
-``H5E_BASE`` template is only a fallback.
+ffmpeg remux. The static WASM worker remains a same-stream fallback for H5E
+until the native path is ready to remove it.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import re
@@ -24,32 +20,35 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request
 
 from ..config import Settings
 from ..downloader import DownloadResult
-
-LOGGER = logging.getLogger(__name__)
 from ..errors import DomainError
 from ..policy import ensure_within_root
 from ..sessions import SessionStore
-from .cctv_hls import resolve_hls_uri, select_highest_bandwidth_variant
+from .cctv_hls import (
+    resolve_hls_uri,
+    select_highest_bandwidth_variant,
+    select_highest_quality_variant,
+)
 from .http_client import urlopen_with_fallback
 
-# Static runtime bundle generated from the vendored MIT project
-# github.com/xiaoxi-ij478/cctv-h5e-decrypt. OpenClaw supplies Node; the
-# installed package does not need npm, tsx, TypeScript or node_modules.
+LOGGER = logging.getLogger(__name__)
+
 DEFAULT_H5E_PROJ = (
     Path(__file__).resolve().parent.parent / "vendor" / "cctv-h5e" / "runtime"
 )
-# Fixed h5e m3u8 template used only when the per-video h5e_url is unavailable.
-# Its generality is unconfirmed; CCTV_H5E_BASE can override it.
 DEFAULT_H5E_BASE = "https://dh5ws01.v.cntv.cn/asp/h5e/hls/2000/0303000a/3/default"
 DOWNLOAD_TIMEOUT_SECONDS = 3600
 HEALTH_ERROR_THRESHOLD = 100
 WASM_TIMEOUT_SECONDS = 2 * 3600
 _WASM_DL_THREADS = 12
 _ILLEGAL_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
+_NUMERIC_M3U8_RE = re.compile(r"(?:^|/)(\d{3,5})\.m3u8(?:$|[?#])", re.IGNORECASE)
+
+Quality = tuple[int | None, int | None]
 
 
 def _safe_title(title: str) -> str:
@@ -103,17 +102,6 @@ def ffmpeg_error_count(mp4: Path) -> int | None:
     return len([line for line in proc.stderr.splitlines() if line.strip()])
 
 
-def _unique_destination(destination: Path) -> Path:
-    if not destination.exists():
-        return destination
-    stem, suffix = destination.stem, destination.suffix
-    for index in range(2, 1000):
-        candidate = destination.with_name(f"{stem} ({index}){suffix}")
-        if not candidate.exists():
-            return candidate
-    return destination
-
-
 def _download_stream_url(
     url: str,
     destination: Path,
@@ -164,7 +152,7 @@ def _fetch_playlist(
     cancel_event: Any = None,
     error_prefix: str,
 ) -> tuple[str, str]:
-    """Fetch a media playlist, resolving a bounded master to its top variant."""
+    """Fetch a media playlist, resolving a master to its highest-quality variant."""
 
     body = _http_fetch_bytes(playlist_url, timeout=timeout, cancel_event=cancel_event)
     if body is None:
@@ -181,7 +169,7 @@ def _fetch_playlist(
     if variant is None:
         raise DomainError(
             "DOWNLOAD_FAILED",
-            f"{error_prefix}master 播放列表没有可识别的 BANDWIDTH 变体",
+            f"{error_prefix}master 播放列表没有可识别的质量变体",
             retryable=True,
         )
     media_url = resolve_hls_uri(playlist_url, variant)
@@ -285,7 +273,7 @@ def _fetch_media_m3u8(
     timeout: float,
     cancel_event: Any = None,
 ) -> tuple[str, list[str]]:
-    """Fetch an H5E media playlist, selecting the top maxbr-bounded variant."""
+    """Fetch an H5E media playlist, selecting its highest-quality variant."""
 
     media_url, text = _fetch_playlist(
         m3u8_url,
@@ -447,7 +435,7 @@ def resolve_h5e_proj() -> Path:
 
 
 def resolve_wasm_m3u8(resource: Mapping[str, Any], guid: str) -> str:
-    """Prefer the per-video h5e_url from getHttpVideoInfo, else the template."""
+    """Prefer a per-video h5e_url, otherwise retain the legacy template."""
 
     metadata = resource.get("metadata")
     signals = (
@@ -489,6 +477,130 @@ def _http_fetch_bytes(
                 return None
             time.sleep(1 + attempt)
     return None
+
+
+def _bandwidth_hint_from_url(url: str) -> int | None:
+    """Use explicit server URL hints only when a media playlist has no master."""
+
+    try:
+        query = parse_qs(urlsplit(url).query)
+    except ValueError:
+        query = {}
+    for key in ("maxbr", "br", "bandwidth"):
+        values = query.get(key) or []
+        if not values:
+            continue
+        try:
+            value = int(values[0])
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value * 1000 if value < 100000 else value
+
+    match = _NUMERIC_M3U8_RE.search(url)
+    if match is None:
+        return None
+    value = int(match.group(1))
+    return value * 1000 if value < 100000 else value
+
+
+def _probe_stream_quality(
+    url: str,
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> Quality:
+    """Read one candidate playlist and return its best available quality facts."""
+
+    body = _http_fetch_bytes(url, timeout=timeout, cancel_event=cancel_event)
+    if body is None:
+        raise DomainError(
+            "DOWNLOAD_FAILED",
+            f"无法探测候选流画质（{url[:120]}）",
+            retryable=True,
+        )
+    text = body.decode("utf-8", "replace")
+    selected = select_highest_quality_variant(text)
+    if selected is not None:
+        pixels, bandwidth = selected[1]
+        return (pixels or None, bandwidth or None)
+    return (None, _bandwidth_hint_from_url(url))
+
+
+def _compare_quality(left: Quality, right: Quality) -> int | None:
+    """Compare two stream qualities; return 1/-1/0, or None when unknowable."""
+
+    left_pixels, left_bandwidth = left
+    right_pixels, right_bandwidth = right
+
+    if left_pixels is not None and right_pixels is not None:
+        if left_pixels != right_pixels:
+            return 1 if left_pixels > right_pixels else -1
+        if left_bandwidth is not None and right_bandwidth is not None:
+            if left_bandwidth == right_bandwidth:
+                return 0
+            return 1 if left_bandwidth > right_bandwidth else -1
+        return None
+
+    if left_bandwidth is not None and right_bandwidth is not None:
+        if left_bandwidth != right_bandwidth:
+            return 1 if left_bandwidth > right_bandwidth else -1
+        if left_pixels is not None and right_pixels is None:
+            return 1
+        if right_pixels is not None and left_pixels is None:
+            return -1
+        return 0
+
+    return None
+
+
+def _select_best_stream(
+    manifest: Mapping[str, Any],
+    *,
+    timeout: float,
+    cancel_event: Any = None,
+) -> tuple[str, str, Quality | None]:
+    """Choose the video's highest-quality downloadable clear/H5E stream.
+
+    Encryption type is not a ranking signal. When quality is equal, clear wins
+    because it avoids unnecessary decryption. If two real candidates exist but
+    their quality cannot be compared, fail rather than silently pick or degrade.
+    """
+
+    clear_url = str(manifest.get("hls_url") or "").strip()
+    h5e_url = str(manifest.get("h5e_url") or "").strip()
+    candidates = [
+        ("clear", clear_url) if clear_url.startswith("http") else None,
+        ("h5e", h5e_url) if h5e_url.startswith("http") else None,
+    ]
+    available = [item for item in candidates if item is not None]
+    if not available:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            "央视视频详情未提供可用 clear/H5E 流地址",
+            retryable=False,
+        )
+    if len(available) == 1:
+        kind, url = available[0]
+        return kind, url, None
+
+    clear_quality = _probe_stream_quality(
+        clear_url, timeout=timeout, cancel_event=cancel_event
+    )
+    h5e_quality = _probe_stream_quality(
+        h5e_url, timeout=timeout, cancel_event=cancel_event
+    )
+    comparison = _compare_quality(clear_quality, h5e_quality)
+    if comparison is None:
+        raise DomainError(
+            "DOWNLOAD_FAILED",
+            "同时存在 clear/H5E 流，但服务端信息不足以确认哪一个画质更高；"
+            "为避免静默降质，本次不猜测",
+            retryable=True,
+        )
+    if comparison >= 0:
+        return "clear", clear_url, clear_quality
+    return "h5e", h5e_url, h5e_quality
 
 
 def _wasm_decrypt_group(
@@ -619,8 +731,37 @@ def download_wasm(
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def _download_result(
+    mp4: Path,
+    *,
+    guid: str,
+    route: str,
+    stream_type: str,
+    health_errors: int | None,
+) -> DownloadResult:
+    byte_size = mp4.stat().st_size
+    digest = hashlib.sha256()
+    with mp4.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            digest.update(chunk)
+    return DownloadResult(
+        mp4,
+        byte_size,
+        "video/mp4",
+        digest.hexdigest(),
+        mp4.name,
+        metadata={
+            "guid": guid,
+            "route": route,
+            "stream_type": stream_type,
+            "health_errors": health_errors,
+            "attempts": 1,
+        },
+    )
+
+
 class CctvVideoDownloader:
-    """Download one CCTV episode to an MP4 inside the job directory."""
+    """Download one CCTV episode at the highest quality exposed by the server."""
 
     def __init__(
         self,
@@ -679,15 +820,31 @@ class CctvVideoDownloader:
 
         native_mp4: Path | None = None
         native_reason = ""
+        selected_type = ""
+        selected_url = ""
         hls_h5e = ""
+
         try:
             manifest = (
                 self._video_info_func(guid, timeout=self.timeout)
                 if self._video_info_func is not None
                 else video_info(guid, timeout=self.timeout)
             )
-            hls_h5e = str((manifest or {}).get("h5e_url") or "").strip()
-            if hls_h5e.startswith("http"):
+            manifest = manifest or {}
+            hls_h5e = str(manifest.get("h5e_url") or "").strip()
+            selected_type, selected_url, quality = _select_best_stream(
+                manifest,
+                timeout=self.timeout,
+                cancel_event=cancel_event,
+            )
+            LOGGER.info(
+                "cctv selected highest stream: type=%s quality=%s url=%s",
+                selected_type,
+                quality,
+                selected_url[:160],
+            )
+
+            if selected_type == "h5e":
                 native_mp4 = download_h5e_native(
                     resource,
                     guid,
@@ -695,23 +852,11 @@ class CctvVideoDownloader:
                     job_dir,
                     timeout=self.timeout,
                     cancel_event=cancel_event,
-                    h5e_url=hls_h5e,
+                    h5e_url=selected_url,
                 )
             else:
-                stream_url = str((manifest or {}).get("hls_url") or "").strip()
-                if not stream_url.startswith("http"):
-                    stream_url = resolve_wasm_m3u8(resource, guid)
-                    probe = _http_fetch_bytes(
-                        stream_url, timeout=self.timeout, cancel_event=cancel_event
-                    )
-                    if probe is None:
-                        raise DomainError(
-                            "CONTENT_VALIDATION_FAILED",
-                            "央视视频详情未提供可用流地址",
-                            retryable=False,
-                        )
                 native_mp4 = download_stream_native(
-                    stream_url,
+                    selected_url,
                     title,
                     job_dir,
                     timeout=self.timeout,
@@ -727,29 +872,27 @@ class CctvVideoDownloader:
         if native_mp4 is not None:
             native_errors = self._health_checker(native_mp4)
             if native_errors is not None and native_errors <= HEALTH_ERROR_THRESHOLD:
-                byte_size = native_mp4.stat().st_size
-                digest = hashlib.sha256()
-                with native_mp4.open("rb") as handle:
-                    for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                        digest.update(chunk)
-                return DownloadResult(
+                return _download_result(
                     native_mp4,
-                    byte_size,
-                    "video/mp4",
-                    digest.hexdigest(),
-                    native_mp4.name,
-                    metadata={
-                        "guid": guid,
-                        "route": "native",
-                        "health_errors": native_errors,
-                        "attempts": 1,
-                    },
+                    guid=guid,
+                    route="native",
+                    stream_type=selected_type or "unknown",
+                    health_errors=native_errors,
                 )
             native_mp4.unlink(missing_ok=True)
             native_reason = f"自研产物体检失败（{native_errors} 错）"
 
+        if selected_type == "clear":
+            raise DomainError(
+                "DOWNLOAD_FAILED",
+                f"央视最高画质 clear 流下载失败：{native_reason or '未知错误'}。"
+                "为避免静默降质，不自动改下更低画质或切到其他流",
+                retryable=False,
+            )
+
         if cancel_event is not None and cancel_event.is_set():
             raise DomainError("JOB_CANCELLED", "下载已取消")
+
         try:
             wasm_mp4 = download_wasm(
                 resource,
@@ -758,7 +901,11 @@ class CctvVideoDownloader:
                 job_dir,
                 timeout=self.timeout,
                 cancel_event=cancel_event,
-                h5e_url=hls_h5e if hls_h5e.startswith("http") else None,
+                h5e_url=(
+                    selected_url
+                    if selected_type == "h5e" and selected_url.startswith("http")
+                    else hls_h5e if hls_h5e.startswith("http") else None
+                ),
             )
         except DomainError as exc:
             raise DomainError(
@@ -767,25 +914,15 @@ class CctvVideoDownloader:
                 f"WASM 降级失败（{exc.message}）",
                 retryable=False,
             ) from exc
+
         wasm_errors = self._health_checker(wasm_mp4)
         if wasm_errors is None or wasm_errors <= HEALTH_ERROR_THRESHOLD:
-            byte_size = wasm_mp4.stat().st_size
-            digest = hashlib.sha256()
-            with wasm_mp4.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                    digest.update(chunk)
-            return DownloadResult(
+            return _download_result(
                 wasm_mp4,
-                byte_size,
-                "video/mp4",
-                digest.hexdigest(),
-                wasm_mp4.name,
-                metadata={
-                    "guid": guid,
-                    "route": "wasm",
-                    "health_errors": wasm_errors,
-                    "attempts": 1,
-                },
+                guid=guid,
+                route="wasm",
+                stream_type="h5e",
+                health_errors=wasm_errors,
             )
         wasm_mp4.unlink(missing_ok=True)
         raise DomainError(
