@@ -6,6 +6,7 @@ attributes exposed for exactly this purpose.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -123,6 +124,29 @@ class BilibiliRiskPacingTests(unittest.TestCase):
         # Budget 1.0s with waits 0.01/0.02 -> bounded attempts, not infinite.
         self.assertLess(len(calls), 100)
         self.assertGreater(len(calls), 1)
+
+    def test_api_risk_codes_raise_netblock(self) -> None:
+        """-352/-412 in the JSON body become NETWORK_BLOCKED, not PARTIAL_FAILURE."""
+        from education_resource_mcp.adapters import bilibili as bilibili_mod
+
+        for code in (-352, -412):
+            with self.subTest(code=code):
+                fake_response = mock.MagicMock()
+                fake_response.headers = {"Content-Type": "application/json"}
+                fake_response.read.return_value = (
+                    json.dumps({"code": code, "message": "风控校验失败"}).encode("utf-8")
+                )
+                with mock.patch.object(
+                    bilibili_mod, "urlopen_with_fallback", return_value=fake_response
+                ):
+                    with self.assertRaises(_AdapterError) as ctx:
+                        self.adapter._request_json_once(
+                            "https://api.example/x",
+                            referer="https://space.bilibili.com/1",
+                            cookie="",
+                        )
+                self.assertEqual("NETWORK_BLOCKED", ctx.exception.code)
+                self.assertTrue(ctx.exception.retryable)
 
     def test_creator_uses_paced_smaller_pages(self) -> None:
         calls: list[str] = []

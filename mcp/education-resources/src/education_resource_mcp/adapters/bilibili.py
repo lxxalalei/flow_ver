@@ -213,6 +213,15 @@ class BilibiliSearchAdapter:
             raise _AdapterError("PARTIAL_FAILURE", "B站响应不是有效 JSON", False)
         if not isinstance(value, dict):
             raise _AdapterError("PARTIAL_FAILURE", "B站响应根节点不是 object", False)
+        # Business-level risk-control codes arrive in the JSON body, not as
+        # HTTP statuses; treat them like HTTP 412 so the backoff wrapper retries.
+        api_code = value.get("code")
+        if api_code in (-352, -412):
+            raise _AdapterError(
+                "NETWORK_BLOCKED",
+                f"B站 API 风控码 {api_code}: {value.get('message', '')}",
+                True,
+            )
         return value
 
     def _wbi_keys(self, cookie: str) -> tuple[str, str]:
