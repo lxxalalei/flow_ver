@@ -3,31 +3,43 @@ from __future__ import annotations
 import re
 from urllib.parse import urljoin
 
-_STREAM_INF_RE = re.compile(
+_BANDWIDTH_RE = re.compile(
     r"(?:^|,)\s*BANDWIDTH\s*=\s*(\d+)\s*(?:,|$)", re.IGNORECASE
+)
+_RESOLUTION_RE = re.compile(
+    r"(?:^|,)\s*RESOLUTION\s*=\s*(\d+)\s*x\s*(\d+)\s*(?:,|$)",
+    re.IGNORECASE,
 )
 
 
 def select_highest_bandwidth_variant(playlist_text: str) -> str | None:
-    """Return the URI of the highest-bandwidth HLS variant in a master list.
+    """Return the highest-quality HLS variant exposed by a master playlist.
 
-    CCTV's getHttpVideoInfo URLs already carry a ``maxbr`` quality bound.
-    Selecting the highest BANDWIDTH from that bounded master
-    therefore chooses the intended top tier instead of accidentally taking the
-    first (commonly 450 kbps) variant.
+    Quality is ranked by encoded resolution first and BANDWIDTH second. When a
+    master omits RESOLUTION entirely, BANDWIDTH remains the deciding signal.
+    The function intentionally does not impose a 450/1200/2000 ceiling: the
+    server-provided master decides which quality levels actually exist.
     """
 
     lines = [line.strip() for line in playlist_text.splitlines()]
     best_uri: str | None = None
-    best_bandwidth = -1
+    best_score = (-1, -1)
 
     for index, line in enumerate(lines):
         if not line.startswith("#EXT-X-STREAM-INF:"):
             continue
-        match = _STREAM_INF_RE.search(line.split(":", 1)[1])
-        if match is None:
+        attributes = line.split(":", 1)[1]
+        bandwidth_match = _BANDWIDTH_RE.search(attributes)
+        if bandwidth_match is None:
             continue
-        bandwidth = int(match.group(1))
+        bandwidth = int(bandwidth_match.group(1))
+        resolution_match = _RESOLUTION_RE.search(attributes)
+        pixels = 0
+        if resolution_match is not None:
+            width = int(resolution_match.group(1))
+            height = int(resolution_match.group(2))
+            pixels = width * height
+
         uri: str | None = None
         for candidate in lines[index + 1 :]:
             if not candidate:
@@ -36,9 +48,11 @@ def select_highest_bandwidth_variant(playlist_text: str) -> str | None:
                 continue
             uri = candidate
             break
-        if uri is not None and bandwidth > best_bandwidth:
+
+        score = (pixels, bandwidth)
+        if uri is not None and score > best_score:
             best_uri = uri
-            best_bandwidth = bandwidth
+            best_score = score
 
     return best_uri
 
