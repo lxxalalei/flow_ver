@@ -12,13 +12,15 @@ _RESOLUTION_RE = re.compile(
 )
 
 
-def select_highest_bandwidth_variant(playlist_text: str) -> str | None:
-    """Return the highest-quality HLS variant exposed by a master playlist.
+def select_highest_quality_variant(
+    playlist_text: str,
+) -> tuple[str, tuple[int, int]] | None:
+    """Return ``(uri, (pixels, bandwidth))`` for the best master variant.
 
-    Quality is ranked by encoded resolution first and BANDWIDTH second. When a
-    master omits RESOLUTION entirely, BANDWIDTH remains the deciding signal.
-    The function intentionally does not impose a 450/1200/2000 ceiling: the
-    server-provided master decides which quality levels actually exist.
+    Resolution is the primary quality signal and BANDWIDTH breaks ties. When a
+    variant omits RESOLUTION its pixel score is zero, so masters that expose
+    real resolution metadata are ranked by that fact rather than by URL order.
+    No fixed CCTV bitrate ceiling is imposed here.
     """
 
     lines = [line.strip() for line in playlist_text.splitlines()]
@@ -54,7 +56,16 @@ def select_highest_bandwidth_variant(playlist_text: str) -> str | None:
             best_uri = uri
             best_score = score
 
-    return best_uri
+    if best_uri is None:
+        return None
+    return best_uri, best_score
+
+
+def select_highest_bandwidth_variant(playlist_text: str) -> str | None:
+    """Backward-compatible URI-only wrapper for the highest-quality variant."""
+
+    selected = select_highest_quality_variant(playlist_text)
+    return selected[0] if selected is not None else None
 
 
 def resolve_hls_uri(parent_url: str, child_uri: str) -> str:
@@ -63,4 +74,8 @@ def resolve_hls_uri(parent_url: str, child_uri: str) -> str:
     return urljoin(parent_url, child_uri)
 
 
-__all__ = ["resolve_hls_uri", "select_highest_bandwidth_variant"]
+__all__ = [
+    "resolve_hls_uri",
+    "select_highest_bandwidth_variant",
+    "select_highest_quality_variant",
+]
