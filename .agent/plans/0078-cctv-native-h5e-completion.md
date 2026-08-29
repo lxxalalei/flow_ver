@@ -46,10 +46,21 @@
 
 2018 同一批分片 native 1,225 条错误、WASM 仅 1 条，差距足以确认是 native 解密差异，不是一般截断噪声。因此当前**禁止删除 WASM/vendor**。
 
+### 2026-08-29 2018 定向修复进展
+
+- 已重新固定原审计使用的同一 450 档前 10 分片：`4,524,032 bytes`、`10,004 NAL`；fixture 只保存在 `.openclaw-test/`，不提交媒体数据；
+- 首个真实差异位于 new-mode type1 NAL `41 9e 41` 的 byte 64：native 使用 flip mask `0x5e86`，WASM oracle 唯一匹配 `0x7e86`；
+- 对 2018 / 2021 / 2026 三组真实流共 `65,257` 个可直接对照 type1 cell 校准后，step 13 应由 header byte 1 bit 2 决定；新规则 0 个 cell 不匹配，旧规则 11,840 个不匹配；
+- 修复后原 2018 450 档 10 分片 native MP4 full-decode 为 **0 error**，WASM reference 为 **1 error**；原 1,225-error 反例已消失；
+- 新增 2020《新闻联播》`6e97ca203f2845069c5fbb06cab375ce` 2000 档前 5 分片验证，native / WASM 均为 **0 error**；2021 / 2026 既有样本重跑 native 仍为 **0 error**；
+- 同时发现真实 CCTV master 属性带空格（`PROGRAM-ID=1, BANDWIDTH=...`），已修 selector 并补真实格式测试；否则当前代码无法进入 2018 最高档变体；
+- 选择器修复后，2018 当前实际最高档为 1200。该档前 10 分片 native 仍有 **334 errors**，WASM 为 **2 errors**，首差异位于 type25 前 classic EPB/尾部填充边界；尝试过的 direct/RBSP/全量或有界 EPB 猜测均未达到门槛，未写入生产代码；
+- 当前结论：450 档原反例和 type1 step-13 已修，但最高档 classic 反例仍存在，因此继续保留 WASM/vendor。
+
 ### 本轮针对审计缺口的修正
 
 - 修正错误 test fixture：mock decrypt 现在保持 TS 输入/输出等长，不再与生产不变量冲突；
-- 新增 `adapters/cctv_hls.py`：统一解析 HLS master 的 `BANDWIDTH`，在 `getHttpVideoInfo` 已带 `maxbr=2048` 的 bounded master 内选择最高档，不再误拿首个 450 档；
+- 新增 `adapters/cctv_hls.py`：统一解析 HLS master 的 `BANDWIDTH`，在 `getHttpVideoInfo` 已带 `maxbr` 上限的 bounded master 内选择最高档，不再误拿首个 450 档；
 - clear HLS master 与 H5E master 复用同一 selector，clear HLS 不再直接 `FEATURE_NOT_SUPPORTED`；
 - relative / root-relative / absolute HLS child URI 统一通过 `urljoin` 解析；
 - WASM fallback 从分组并行改为**整个 ordered stream 一个 worker Session**，避免 type25/new-mode 状态跨 worker 丢失；
@@ -65,9 +76,10 @@
 - [x] AC-05：HLS master 能选择 bounded master 的最高 BANDWIDTH，clear HLS 与 H5E 共用选择逻辑；
 - [x] AC-06：WASM fallback 对完整 ordered stream 使用一个 Session，不按组切断协议状态；
 - [ ] AC-07：最新 installed-package CCTV focused pytest 全绿。前一轮实际结果为 41 passed / 1 failed，唯一失败来自新 step 未刷新 winget 安装后的 ffmpeg PATH；`4b63ca6` 已修 CI 环境，重跑中；
-- [ ] AC-08：2018 `ef2366...` native/WASM 首个 NAL divergence 已定位并有针对性修复；
-- [ ] AC-09：修复后重跑同一 2018 10 分片，native full-decode error 降到与 WASM 同量级，并补一个 2019/2020 左右旧样本防止单样本过拟合；
-- [x] AC-10：当前真实反例存在，因此明确保留 JS/WASM/vendor；只有 AC-08/09 真正通过后才能重新讨论删除。
+- [x] AC-08：2018 `ef2366...` 原 450 档首个 NAL divergence 已定位为 type1 step-13，并有针对性修复；
+- [x] AC-09：同一 2018 450 档 10 分片 native 从 1,225 errors 降为 0；新增 2020 2000 档 5 分片 native / WASM 均为 0；2021 / 2026 native 仍为 0；
+- [x] AC-10：当前真实反例存在，因此明确保留 JS/WASM/vendor；只有 AC-08/09/11 全部通过后才能重新讨论删除。
+- [ ] AC-11：当前实际选择的 2018 1200 档 classic EPB/尾部填充差异修复，native 334 errors 降至与 WASM 2 同量级；通过前不得删除 fallback。
 
 ## Expected change surface
 
@@ -87,7 +99,7 @@
 - Job / SessionStore；
 - Generic Web / Archive。
 
-只有 AC-08/09 真实通过后才允许：
+只有 AC-08/09/11 真实通过后才允许：
 
 - 删除 `vendor/cctv-h5e/runtime`；
 - 删除 Node/WASM fallback；
@@ -100,9 +112,9 @@
 - [x] completed：执行 2021 / 2018 / 2026 有界真实 smoke，并确认 2018 native 反例；
 - [x] completed：修测试 fixture、450/2000 variant、clear-HLS master、HLS URI 和 WASM Session 生命周期；
 - [x] completed：增加 native/WASM NAL divergence 诊断脚本；
-- [ ] in_progress：等待最新 installed-package focused CI 结果；取得 2018 同一 encrypted/WASM TS 后运行 divergence 诊断；
-- [ ] pending：只按首个真实 divergence 修 native；
-- [ ] pending：重跑 2018 + 一个额外旧年代样本；
+- [x] completed：取得 2018 原 450 档同一 encrypted/WASM TS 并定位、修复 type1 step-13；
+- [x] completed：重跑 2018 450 + 2020 + 2021 + 2026 有界真实样本；
+- [ ] in_progress：定位 2018 当前最高 1200 档 classic EPB/尾部填充边界；
 - [ ] pending：通过真实门槛后再决定是否删除 fallback；否则保留并结束本计划；
 - [ ] pending：0078 收口后恢复 0077 Real User Journey。
 
@@ -112,7 +124,11 @@
 | --- | --- | --- | --- |
 | 2021 bounded H5E | native 0 ffmpeg errors | 该 `01a8` 样本可 native | 所有旧 H5E |
 | 2018 bounded H5E | native 1225 / WASM 1 | 存在真实 native gap | gap 的具体算法原因 |
+| 2018 450 定向修复后 | native 0 / WASM 1 | 原反例已由 step-13 修复 | 2018 所有码率 |
+| 2018 1200 当前最高档 | native 334 / WASM 2 | 仍有 classic EPB/尾部填充反例 | 可安全删除 fallback |
+| 2020 2000 bounded H5E | native 0 / WASM 0 | 中间年代额外样本通过 | 全部 2019/2020 视频 |
 | 2026 bounded H5E | native 0 | 当前单样本可用 | 2025-08 后全面覆盖 |
+| CCTV focused pytest | 44 passed | type1 mask、spaced master、HLS/session 聚焦回归通过 | installed-package / Windows CI |
 | installed-package focused CI（旧轮次） | 41 passed / 1 env failure | fixture/HLS tests 未暴露逻辑失败 | 最新 runtime 全绿 |
 | Windows packaged install（此前） | success | clean package 能安装并启动 MCP | H5E 算法正确 |
 
@@ -127,10 +143,11 @@ HLS 450/2000 bug fixed in code?: yes
 Clear-HLS master supported in code?: yes
 WASM stream state preserved?: yes, one Session
 Latest installed-package focused pytest green?: pending CI
-2018 byte-level divergence located?: pending raw encrypted/WASM TS pair
+2018 original 450 divergence fixed?: yes, native 0 / WASM 1
+2018 selected 1200 native healthy?: no, native 334 / WASM 2
 Safe to delete vendor now?: no
 ```
 
 ## Result
 
-进行中。当前工作重点已经从“继续泛化 H5E 算法”缩小为一个明确问题：用 2018 `ef2366...` 的同一份 encrypted/WASM TS 找到第一个 native/WASM NAL divergence，并只修该真实差异。目录清理不是当前验收目标。
+进行中。2018 原 450 档 type1 step-13 反例已经修复并跨 2020/2021/2026 样本复核；新的唯一阻塞是 selector 修正后实际会选择的 1200 档仍存在 classic EPB/尾部填充差异。未达到该真实门槛前不删除 WASM/vendor，目录清理不是当前验收目标。

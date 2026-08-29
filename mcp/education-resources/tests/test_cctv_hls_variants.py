@@ -34,6 +34,20 @@ def test_variant_selection_does_not_depend_on_playlist_order() -> None:
     assert select_highest_bandwidth_variant(playlist) == "2000.m3u8"
 
 
+def test_selects_variant_from_cctv_master_with_spaced_attributes() -> None:
+    playlist = """#EXTM3U
+#EXT-X-STREAM-INF:PROGRAM-ID=1, BANDWIDTH=460800, RESOLUTION=640x360
+/asp/h5e/hls/450/video/450.m3u8
+#EXT-X-STREAM-INF:PROGRAM-ID=1, BANDWIDTH=1228800, RESOLUTION=1280x720
+/asp/h5e/hls/1200/video/1200.m3u8
+"""
+
+    assert (
+        select_highest_bandwidth_variant(playlist)
+        == "/asp/h5e/hls/1200/video/1200.m3u8"
+    )
+
+
 def test_returns_none_for_media_playlist() -> None:
     playlist = """#EXTM3U
 #EXTINF:10,

@@ -3,14 +3,16 @@ from __future__ import annotations
 import re
 from urllib.parse import urljoin
 
-_STREAM_INF_RE = re.compile(r"(?:^|,)BANDWIDTH=(\d+)(?:,|$)", re.IGNORECASE)
+_STREAM_INF_RE = re.compile(
+    r"(?:^|,)\s*BANDWIDTH\s*=\s*(\d+)\s*(?:,|$)", re.IGNORECASE
+)
 
 
 def select_highest_bandwidth_variant(playlist_text: str) -> str | None:
     """Return the URI of the highest-bandwidth HLS variant in a master list.
 
-    CCTV's getHttpVideoInfo URLs already carry ``maxbr=2048`` for the current
-    quality contract. Selecting the highest BANDWIDTH from that bounded master
+    CCTV's getHttpVideoInfo URLs already carry a ``maxbr`` quality bound.
+    Selecting the highest BANDWIDTH from that bounded master
     therefore chooses the intended top tier instead of accidentally taking the
     first (commonly 450 kbps) variant.
     """

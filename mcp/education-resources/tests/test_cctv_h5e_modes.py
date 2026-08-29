@@ -67,6 +67,17 @@ def test_short_type1_is_untouched_in_new_mode() -> None:
     decrypt.assert_not_called()
 
 
+def test_2018_slice_header_keeps_step_13_flip() -> None:
+    header = bytes.fromhex("41 9e 41")
+
+    assert cctv_h5e.type1_flip_mask_from_header(header) == 0x7E86
+    assert cctv_h5e.type1_g_flips(0x56DC, 0xDDE1, 0x7E86) == 0xF1A6
+
+
+def test_2018_slice_header_without_bit_2_leaves_step_13_clear() -> None:
+    assert cctv_h5e.type1_flip_mask_from_header(bytes.fromhex("41 9a 23")) == 0x5EC0
+
+
 def test_type5_does_not_drop_epb_created_by_decryption() -> None:
     nal = bytearray([0x65]) + bytearray([0x44] * 95)
     nal[5:21] = bytes(range(16))

@@ -235,7 +235,11 @@ def type1_flip_mask_from_header(header: bytes | bytearray) -> int:
         if b0 & 1:
             for step in (9, 10, 11, 12, 14):
                 set_bit(step)
-        if (b0 & 1) ^ ((b0 >> 6) & 1):
+        # Worker-oracle comparison across the 2018, 2021, and 2026 real
+        # streams shows that step 13 follows header byte 1 bit 2.  The former
+        # b0[0] XOR b0[6] rule produced 11,840 wrong cells in that corpus; for
+        # example 41 9e 41 must use 0x7e86 while 41 9a 23 keeps 0x5ec0.
+        if (b1 >> 2) & 1:
             set_bit(13)
         if b1 & 1:
             set_bit(15)
