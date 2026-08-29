@@ -34,6 +34,28 @@ def test_variant_selection_does_not_depend_on_playlist_order() -> None:
     assert select_highest_bandwidth_variant(playlist) == "2000.m3u8"
 
 
+def test_resolution_has_priority_over_bandwidth() -> None:
+    playlist = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=960x540
+high-bitrate-540p.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=1280x720
+lower-bitrate-720p.m3u8
+"""
+
+    assert select_highest_bandwidth_variant(playlist) == "lower-bitrate-720p.m3u8"
+
+
+def test_bandwidth_breaks_tie_at_same_resolution() -> None:
+    playlist = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=1280x720
+1200.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2048000,RESOLUTION=1280x720
+2000.m3u8
+"""
+
+    assert select_highest_bandwidth_variant(playlist) == "2000.m3u8"
+
+
 def test_selects_variant_from_cctv_master_with_spaced_attributes() -> None:
     playlist = """#EXTM3U
 #EXT-X-STREAM-INF:PROGRAM-ID=1, BANDWIDTH=460800, RESOLUTION=640x360
@@ -46,6 +68,19 @@ def test_selects_variant_from_cctv_master_with_spaced_attributes() -> None:
         select_highest_bandwidth_variant(playlist)
         == "/asp/h5e/hls/1200/video/1200.m3u8"
     )
+
+
+def test_does_not_impose_a_fixed_2000_ceiling() -> None:
+    playlist = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=2048000,RESOLUTION=1280x720
+2000.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=3072000,RESOLUTION=1920x1080
+3000.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=4096000,RESOLUTION=3840x2160
+4000.m3u8
+"""
+
+    assert select_highest_bandwidth_variant(playlist) == "4000.m3u8"
 
 
 def test_returns_none_for_media_playlist() -> None:
