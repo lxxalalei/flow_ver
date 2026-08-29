@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | Bilibili | `resource_search` 找到公开学习视频；对一个公开 creator/collection 做 `resource_expand`；下载一个明确选中的公开视频 | Search 返回真实 URL；Expand 到来源真实结束并可分页读取；Download Job 产生可用媒体文件 | WBI/接口变化、creator/collection 结构变化、下载解析失效 |
 | Douyin | `resource_search` 找到公开视频；对一个已知 creator/collection 做 `resource_expand`；下载一个明确选中的公开视频 | Search/Expand 返回真实资源身份；Download 产生可用媒体文件；失败时错误事实明确 | 签名、页面结构、风控和媒体地址变化 |
-| CCTV | 搜一个公开视频并下载；额外使用一个已确认的旧 H5E 样本走 compatibility fallback | 普通视频可获取；旧样本按 native-first → static WASM fallback 产生媒体；最终 ffmpeg 全解码无错误 | CCTV 页面/API变化、旧 H5E fallback、静态 runtime/Node/ffmpeg 集成 |
+| CCTV | 搜一个公开视频并下载；额外使用一个已确认的旧 H5E 样本验证当前最高可用画质 | clear/H5E 先按真实画质统一选择最高档；clear 直接下载，H5E 由 Python native 解密；最终 MP4 通过 ffmpeg 全解码检查；失败不静默降质 | CCTV 页面/API变化、最高画质选择、旧 H5E native 解密、ffmpeg 集成 |
 | SmartEdu | 搜一个明确教材/同步主题；展开一个已知教材或课程容器；Inspect 一个具体资源 | Search 匹配真实版本/课程；Expand 完整结束；Inspect 返回真实组成/可获取事实；匿名能力不被错误转成 Session preflight | 教材结构、分片结束条件、资源 detail、匿名/认证边界 |
 | Ximalaya | 搜一个公开音频主题；完整展开一个公开专辑；下载一个明确选中的 track | Search 返回真实 track/album URL；Expand 完整结束；下载产生可播放音频 | 搜索接口、专辑分页、音频获取路径变化 |
 | Generic Web | `resource_import_url` 一个稳定公开文章；Download；检查 `source.html/content.md/index.html`；对另一轮明确视觉请求执行 HTML Design | 原始响应保留；正文抽取/Reader 事实明确；离线 Reader 不依赖在线资源；HTML Design 不改写完整清洗正文 | 网页获取、Trafilatura、图片内嵌、Reader、HTML Design 边界 |
