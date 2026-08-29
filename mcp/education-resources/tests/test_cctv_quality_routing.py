@@ -127,10 +127,32 @@ def test_highest_clear_failure_does_not_silently_downgrade(tmp_path: Path) -> No
                 "download_stream_native",
                 side_effect=DomainError("DOWNLOAD_FAILED", "clear 下载失败"),
             ), \
-            mock.patch.object(cctv_download, "download_wasm") as wasm_download:
+            mock.patch.object(cctv_download, "download_h5e_native") as h5e_download:
         with pytest.raises(DomainError) as exc_info:
             downloader.download(_resource(), "no-downgrade", "direct", threading.Event())
 
     assert exc_info.value.code == "DOWNLOAD_FAILED"
     assert "不自动改下更低画质" in exc_info.value.message
-    wasm_download.assert_not_called()
+    h5e_download.assert_not_called()
+
+
+def test_highest_h5e_native_failure_is_final(tmp_path: Path) -> None:
+    downloader = _downloader(tmp_path)
+
+    def probe(url: str, **kwargs):
+        return (1280 * 720, 2_000_000) if url == _CLEAR else (1920 * 1080, 4_000_000)
+
+    with mock.patch.object(cctv_download, "_probe_stream_quality", probe), \
+            mock.patch.object(
+                cctv_download,
+                "download_h5e_native",
+                side_effect=DomainError("DOWNLOAD_FAILED", "native H5E 解密失败"),
+            ), \
+            mock.patch.object(cctv_download, "download_stream_native") as clear_download:
+        with pytest.raises(DomainError) as exc_info:
+            downloader.download(_resource(), "h5e-native-fail", "direct", threading.Event())
+
+    assert exc_info.value.code == "DOWNLOAD_FAILED"
+    assert "native H5E 解密失败" in exc_info.value.message
+    assert "不自动改下更低画质或切换到其他流" in exc_info.value.message
+    clear_download.assert_not_called()
