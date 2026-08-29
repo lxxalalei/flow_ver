@@ -61,7 +61,28 @@
 - 因 1200 才是该样本当前最高实际可选档，450 的 0 error 现在只算诊断成功，**不算最终下载验收通过**；
 - 当前结论：type1 step-13 已修，但最高档 classic 反例仍存在，因此继续保留 WASM/vendor。
 
+### 2026-08-29 1200 档收口：三项协议修正（AC-11 达成）
+
+fixture 重建于 `.openclaw-test/cctv-fixture-2018-1200/`（前 10 分片 + WASM oracle + NALU 级 worker 探针，媒体数据不提交）。逐 NAL 对真实 worker 校准后定位三个独立根因，全部修复：
+
+- **classic 模式改为 RBSP grid 解密 + EPB 压缩**（原 EBSP 原地解密自首个 EPB 后全部 cell 错位）：单趟 RBSP 提取 → key=RBSP[15:31/16:32] 视 EPB 位置 → stride 80 cell → 输出压缩 RBSP；
+- **type25 是双向模式开关**：真实流中 ES3=`0x09` 切 new-mode、`0x06` 切回 classic。2018 1200 档 new-mode 区间仅为 NAL 969–9050，两端都是 classic；450 档有 5 个交替区间。原实现一旦 enable 永不回退；
+- **129 字节门槛适用于两种模式**：worker 对 <129B 的 type1/5 一律原样保留（加密直接出片），原 classic 门槛 40B 会过度解密 113–126B 的短 NAL。
+
+worker 侧另有两个与本仓库无关的已观察事实：其 TS 重打包会把 FF 填充写进 PES payload 并改写 SDT（这解释了 WASM 参考产物残余 1–2 个 decode error）；其 EPB 尾部剥离数随会话状态 ±1 漂移（NALU 级探针 warm≥8 后输出与 wasm.ts 逐字节一致）。
+
+最终有界真实矩阵（native remux MP4 full-decode error 行数 / WASM oracle）：
+
+| 样本 | 档 | native | WASM |
+| --- | --- | ---: | ---: |
+| 2018 `ef2366...` 当前最高 1200 | 前 10 分片 | **0** | 1 |
+| 2018 `ef2366...` 450（原审计档） | 前 10 分片 | **0** | 未需要 |
+| 2020 `6e97ca20...` 2000 | 前 5 分片 | **0** | 未需要 |
+| 2021 `8fc41c33...` 2000 | 前 5 分片 | **0** | 未需要 |
+| 2026 `04373225...` 2000 | 前 10 分片 | **1** | 2 |
+
 ### 最高画质规则收敛
+
 
 - `cctv_hls.py` 已从“单纯最高 BANDWIDTH”收紧为：有 `RESOLUTION` 时按像素数优先、BANDWIDTH 次之；无 `RESOLUTION` 时退回 BANDWIDTH；
 - selector 不包含 2000 ceiling；focused fixture 明确包含 3000/4000，并要求服务端 master 若实际暴露更高档就选择更高档；
@@ -88,7 +109,7 @@
 - [x] AC-08：2018 `ef2366...` 原 450 档首个 NAL divergence 已定位为 type1 step-13，并有针对性修复；
 - [x] AC-09：同一 2018 450 档 10 分片 native 从 1,225 errors 降为 0；新增 2020 2000 档 5 分片 native / WASM 均为 0；2021 / 2026 native 仍为 0；
 - [x] AC-10：当前真实高画质反例仍存在，因此明确保留 JS/WASM/vendor；
-- [ ] AC-11：当前实际选择的 2018 **最高档 1200** classic EPB/尾部填充差异修复，native 334 errors 降至与 WASM 2 同量级；通过前不得删除 fallback；
+- [x] AC-11：2018 最高档 1200 修复完成，native 334 → **0** errors（WASM 参考为 1）；450 档 0、2020 0、2021 0、2026 1（其 WASM 自身 2），全部样本 native ≤ WASM；
 - [ ] AC-12：下载器从“有 H5E 就优先 H5E”改为对当前**可下载** clear/H5E representation 做真实画质比较，选择整体最高；同档优先 clear；最高档失败不得静默降质。
 
 ## Expected change surface
@@ -127,8 +148,8 @@
 - [x] completed：取得 2018 原 450 档同一 encrypted/WASM TS 并定位、修复 type1 step-13；
 - [x] completed：重跑 2018 450 + 2020 + 2021 + 2026 有界真实样本；
 - [x] completed：明确最高画质产品规则，并让 master selector 按分辨率 → BANDWIDTH 选择且无固定 2000 ceiling；
-- [ ] in_progress：定位 2018 当前最高 1200 档 classic EPB/尾部填充边界；
-- [ ] pending：实现 clear/H5E representation 级最高画质比较，不允许静默降质；
+- [x] completed：定位并修复 1200 档全部反例（classic RBSP grid、type25 双向开关、129B 门槛），AC-11 通过；
+- [ ] in_progress：实现 clear/H5E representation 级最高画质比较，不允许静默降质；
 - [ ] pending：当前 HEAD installed-package focused CI 全绿；
 - [ ] pending：通过真实门槛后再决定是否删除 fallback；否则保留并结束本计划；
 - [ ] pending：0078 收口后恢复 0077 Real User Journey。
@@ -141,6 +162,8 @@
 | 2018 原 450 H5E | native 1225 / WASM 1 | 原生存在真实 gap | 最高画质可用 |
 | 2018 450 定向修复后 | native 0 / WASM 1 | step-13 修复正确 | 2018 最高档可用 |
 | 2018 1200 当前最高档 | native 334 / WASM 2 | 最高档仍有 classic EPB/尾部反例 | 可安全删除 fallback |
+| 2018 1200 三项修正后 | **native 0 / WASM 1** | 1200 档 native 路径达到产品级（AC-11） | 2025-08 后全部新加密形态 |
+| 450/2020/2021/2026 修正后回归 | native 0/0/0/1 | 双向开关与 129B 门槛无样本回归 | 全部年代与档位 |
 | 2020 2000 bounded H5E | native 0 / WASM 0 | 中间年代额外样本通过 | 全部 2019/2020 视频 |
 | 2026 bounded H5E | native 0 | 当前单样本可用 | 2025-08 后全面覆盖 |
 | HLS quality focused tests | 3000/4000 fixture 可选最高 | selector 无 2000 hard ceiling | CCTV 实际一定暴露 3000/4000 |
@@ -158,10 +181,10 @@ HLS selector fixed ceiling?: no
 HLS selection rule?: resolution first, bandwidth second
 Cross-representation highest-quality routing?: pending
 2018 original 450 divergence fixed?: yes, native 0 / WASM 1
-2018 selected highest 1200 native healthy?: no, native 334 / WASM 2
-Safe to delete vendor now?: no
+2018 selected highest 1200 native healthy?: yes, native 0 / WASM 1 (AC-11 passed)
+Safe to delete vendor now?: no (AC-12 pending; deletion gated on it)
 ```
 
 ## Result
 
-进行中。产品验收口径已经明确为“该视频当前实际可获取的最高画质”，低档成功仅用于诊断。2018 原 450 档 type1 step-13 已修，但该视频当前最高 1200 档仍有 classic EPB/尾部填充差异；同时下载器仍需从 H5E-first 收敛为 clear/H5E representation 级最高画质选择。两项完成前都不能把 CCTV 下载能力视为最高画质闭环，也不能删除 WASM/vendor。
+进行中。产品验收口径已经明确为“该视频当前实际可获取的最高画质”，低档成功仅用于诊断。AC-08/09/11 已全部通过：2018 最高 1200 档 native 0 error（WASM 参考 1），三个协议根因（classic RBSP grid、type25 双向开关、129B 门槛）均已按真实 worker 逐 NAL 校准修复并落 focused 测试。剩余：AC-12 下载器 clear/H5E representation 级最高画质选择；完成后按真实门槛评估是否删除 WASM/vendor。

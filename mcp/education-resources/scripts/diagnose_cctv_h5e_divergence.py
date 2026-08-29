@@ -121,8 +121,14 @@ def _mode_details(encrypted_nals: list[NalRecord], target_index: int) -> dict[st
     new_mode = False
     target = encrypted_nals[target_index]
     for record in encrypted_nals[:target_index]:
-        if record.nal_type == 25 and cctv_h5e.is_type25_enable(record.payload):
-            new_mode = True
+        # Mirror Session.on_nal: ES3 0x09 enables the new mode, 0x06
+        # switches back to the classic grid.
+        if (
+            record.nal_type == 25
+            and len(record.payload) >= 4
+            and record.payload[2] == 0x01
+        ):
+            new_mode = record.payload[3] == 0x09
 
     details: dict[str, object] = {
         "new_mode_before": new_mode,

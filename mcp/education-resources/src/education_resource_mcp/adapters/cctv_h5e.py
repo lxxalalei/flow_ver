@@ -85,16 +85,38 @@ def drop_epb_03(nal: bytearray, epbs: list[int]) -> int:
 
 
 def decrypt_classic(nal: bytearray) -> int:
-    """Classic H5E mode: key@16, data@32, stride 80 with a full-stride guard."""
+    """Classic H5E mode: key@16, data@32, stride 80 on the RBSP grid.
+
+    Byte-level calibration against the official worker on real 2018/2021/2026
+    streams shows classic mode shares the new-mode EPB discipline: emulation
+    prevention is collected on the encrypted NAL, stride-80 TEA cells are
+    decrypted over RBSP coordinates with ``key = RBSP[16:32]``, and the
+    compacted RBSP is emitted. Decrypting on the raw EBSP grid desynced every
+    cell after the first emulation-prevention sequence. NALs below the
+    session-wide 129-byte threshold are left untouched, EPBs included; the
+    official worker ships those still encrypted in both modes.
+    """
     length = len(nal)
     if length < 40:
         return length
-    key = bytes(nal[16:32])
+    epbs = collect_epb_positions(nal)
+    mapping = _rbsp_to_ebsp_map(nal)
+    rbsp_len = len(mapping)
+    if rbsp_len < 112:
+        return length
+
+    key = bytes(nal[mapping[index]] for index in range(16, 32))
+    block = bytearray(8)
     offset = 32
-    while offset + 80 <= length:
-        tea_decrypt_block(nal, offset, key)
+    while offset + 80 <= rbsp_len:
+        for index in range(8):
+            block[index] = nal[mapping[offset + index]]
+        tea_decrypt_block(block, 0, key)
+        for index in range(8):
+            nal[mapping[offset + index]] = block[index]
         offset += 80
-    return length
+
+    return drop_epb_03(nal, epbs) if epbs else length
 
 
 def type5_stride_f5(key16: bytes | bytearray) -> int:
@@ -312,7 +334,9 @@ class Session:
         self.new_mode = False
         self.type1_start = 64
         self.type1_guard = 17
-        self.type1_min_len = 129
+        # Official worker calibration (2018/2020/2026 real streams): NALs
+        # shorter than 129 bytes are shipped encrypted in both modes.
+        self.min_decrypt_len = 129
 
     def on_nal(self, nal: bytearray) -> int:
         length = len(nal)
@@ -321,12 +345,18 @@ class Session:
         nal_type = nal[0] & 0x1F
 
         if nal_type == 25:
-            if is_type25_enable(nal):
-                self.new_mode = True
+            # Real streams alternate markers: ES3 0x09 switches to the new
+            # mode and 0x06 switches back to the classic grid. The 2018
+            # 1200-bitrate sample runs new-mode from marker NAL 969 to 9050
+            # and classic on both sides, so the switch must be bidirectional.
+            if length >= 4 and nal[2] == 0x01:
+                self.new_mode = nal[3] == 0x09
             return length
 
         if not self.new_mode:
             if nal_type in (1, 5):
+                if length < self.min_decrypt_len:
+                    return length
                 return decrypt_classic(nal)
             return length
 
@@ -334,7 +364,7 @@ class Session:
             return decrypt_type5_new(nal)
 
         if nal_type == 1:
-            if length < self.type1_min_len:
+            if length < self.min_decrypt_len:
                 return length
             stride = type1_stride_f1(nal) or 511
             return decrypt_type1_new(
