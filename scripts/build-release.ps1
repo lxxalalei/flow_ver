@@ -79,35 +79,6 @@ Get-ChildItem -Path $ReleaseRoot -File -Recurse -Force |
     Where-Object { $_.Extension -in @('.pyc', '.pyo') } |
     Remove-Item -Force
 
-# The CCTV fallback executes a prebuilt main.js/worker.js pair. Release packages
-# retain only that runtime bundle and its provenance/license; npm/tsx/TypeScript
-# sources and reverse-engineering artifacts stay in the development repository.
-$CctvVendor = Join-Path $ReleaseMcp 'src\education_resource_mcp\vendor\cctv-h5e'
-foreach ($relative in @(
-    'README.md',
-    'LICENSE',
-    'package.json',
-    'package-lock.json',
-    'tsconfig.json',
-    'src',
-    'build'
-)) {
-    $target = Join-Path $CctvVendor $relative
-    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-}
-$AllowedCctvRuntimeFiles = @(
-    'runtime\LICENSE',
-    'runtime\README.md',
-    'runtime\main.js',
-    'runtime\worker.js'
-)
-foreach ($file in Get-ChildItem -Path $CctvVendor -File -Recurse -Force) {
-    $relative = [IO.Path]::GetRelativePath($CctvVendor, $file.FullName)
-    if ($AllowedCctvRuntimeFiles -notcontains $relative) {
-        throw "Unexpected CCTV development artifact leaked into release: $relative"
-    }
-}
-
 # Release is built from an allowlist. This assertion prevents accidental leakage if the builder changes later.
 $ForbiddenNames = @(
     'legacy',
