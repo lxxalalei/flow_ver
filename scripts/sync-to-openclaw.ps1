@@ -150,7 +150,9 @@ Ok 'Import smoke test passed'
 # 2. Skills
 # ---------------------------------------------------------------------------
 Section 'Syncing learning-resource-flow skill'
-MirrorDir "$Repo\skills" $LrfSkillTarget
+# examples/ holds semantic eval suites and the runner; they are repo-side test
+# assets, not skill content for the deployed agent.
+MirrorDir "$Repo\skills" $LrfSkillTarget @('examples')
 Ok "Skill synced to $LrfSkillTarget"
 
 # ---------------------------------------------------------------------------
