@@ -117,6 +117,11 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
         frozenset(), frozenset({"book", "document"}),
     ),
     ProviderSpec(
+        "zlibrary", "primary_resource", "document", "primary",
+        AcquisitionStrategy.DIRECT_FILE, "zlibrary",
+        frozenset(), frozenset({"book", "document"}),
+    ),
+    ProviderSpec(
         "shuge", "primary_resource", "document", "primary",
         AcquisitionStrategy.DIRECT_FILE, "generic-direct",
         _DOCUMENT_CONTAINERS, frozenset({"book", "document", "other"}),

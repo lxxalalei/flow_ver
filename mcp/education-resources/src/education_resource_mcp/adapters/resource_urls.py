@@ -86,6 +86,23 @@ def identify_resource_url(source_url: str) -> dict[str, Any]:
             platform_signals=signals,
         )
 
+    if host in {"z-library.ec", "z-library.sk", "1lib.sk"} or any(
+        host.endswith(f".{suffix}")
+        for suffix in ("z-library.ec", "z-library.sk", "1lib.sk")
+    ):
+        match = re.search(r"/book/(\d+)/([0-9A-Za-z_-]{4,128})(?:/|$)", path)
+        signals = (
+            {"book_id": match.group(1), "book_hash": match.group(2)}
+            if match
+            else {}
+        )
+        return resource(
+            "zlibrary",
+            "book",
+            "Z-Library book",
+            platform_signals=signals,
+        )
+
     if host in {"www.zhihu.com", "zhuanlan.zhihu.com"}:
         return resource("zhihu", "文章")
 

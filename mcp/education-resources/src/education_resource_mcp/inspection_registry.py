@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .adapters.inspect_libgen import LibgenInspector
+from .adapters.inspect_zlibrary import ZlibraryInspector
 from .adapters.inspect_bilibili import BilibiliInspector
 from .adapters.inspect_cctv import CctvInspector
 from .adapters.inspect_douyin import DouyinInspector
@@ -38,6 +39,7 @@ def default_inspection_router(
             DouyinInspector(session_store=session_store),
             NlcInspector(**options),
             LibgenInspector(**options),
+            ZlibraryInspector(session_store=session_store, **options),
             XimalayaInspector(session_store=session_store, **options),
             ZhihuInspector(**options),
             SmartEduInspector(session_store=session_store, **options),

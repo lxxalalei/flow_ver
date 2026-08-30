@@ -18,7 +18,7 @@ from .service import ResourceService
 
 
 PLATFORM_CAPABILITY_GUIDANCE = (
-    "主要平台 id：bilibili、douyin、smartedu、ximalaya、libgen、zjer、zhihu、"
+    "主要平台 id：bilibili、douyin、smartedu、ximalaya、libgen、zlibrary、zjer、zhihu、"
     "shuge、yixi、nlc、cctv、kepu、baiduwenku、runoob、open163、weibo、"
     "wechat、generic。平台是否支持 Search/Expand/Inspect/Download 以真实返回为准；"
     "不要因为平台存在某功能就猜测 MCP 已实现。"

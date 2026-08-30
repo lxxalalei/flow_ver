@@ -116,7 +116,7 @@ required_storage_keys = accessToken
 
 这些内部字段不通过 `resource_session_status` 暴露给 Agent；status 只保留平台、登录 URL、捕获方式、probe 能力和状态。指定平台查询且确实需要登录时才附带登录步骤，全量状态查询不重复展开步骤。
 
-Cookie 平台当前已确认域名边界，但并非每个平台都已经实测到最小 Cookie 名集合。没有证据时继续按当前内部域名筛选，不为了“更严格”凭经验增加 Cookie 名白名单。
+Cookie 平台当前已确认域名边界，但并非每个平台都已经实测到最小 Cookie 名集合。没有证据时继续按当前内部域名筛选，不为了“更严格”凭经验增加 Cookie 名白名单。Z-Library 是明确例外：现行 EAPI 已确认只需要 `remix_userid` 与 `remix_userkey`，SessionStore 会丢弃同域其他 Cookie，且不会接收邮箱或密码。
 
 保留的必要行为：
 
@@ -143,6 +143,12 @@ Cookie 平台当前已确认域名边界，但并非每个平台都已经实测�
 
 当前 active 平台标识为 `libgen`，搜索、检查和下载由 LibGen mirror + MD5 驱动，不需要登录，也不进入 Session 管理。
 
+### Z-Library
+
+当前 active 平台标识为 `zlibrary`。用户在浏览器自行登录后，MCP 从 browser capture 中只保存 `remix_userid` 与 `remix_userkey`，并通过受信任 EAPI 域名完成搜索、详情检查和单书下载。`book_id + book_hash` 是稳定操作身份；下载受用户账号每日额度约束，缺少登录态返回 `AUTH_REQUIRED`，额度耗尽返回 `RATE_LIMITED`。
+
+MCP 不保存账号密码，不自动把凭据切换到发现到的陌生镜像。EAPI 域名只能从内置受信任集合选择，可用 `EDUCATION_RESOURCE_MCP_ZLIBRARY_EAPI_DOMAIN` 在该集合内显式切换。文件下载发生跨域重定向时，只允许 Cookie 继续发送给同一 Z-Library 域名族，外部 CDN 不携带登录 Cookie。该平台不作为 LibGen 的静默 fallback。
+
 ## 5. Host Web Search 与 URL Import
 
 普通网页发现默认由宿主 OpenClaw Web Search 完成。选中具体 URL 后：
@@ -160,6 +166,7 @@ Import 不再无条件把 URL 标成 `generic`。当前对明确 URL 形态做�
 - Zjer course；
 - CCTV column / video；
 - LibGen book；
+- Z-Library book；
 - Zhihu 页面；
 - 无法明确识别 → `generic`。
 
@@ -313,11 +320,12 @@ mcp/education-resources/
 4. Session status 返回的登录步骤是否不泄漏内部 `cookie_domains` / `storage_keys`；
 5. SmartEdu 保存过 session 时公共 Search 是否仍匿名；
 6. LibGen 是否始终使用 `libgen` 平台身份且不触发登录；
-7. Host Web URL → Import 是否能恢复明确的平台身份；
-8. Generic Web 是否同时保留原始 `source.html`、Trafilatura `content.md`，并把清洗 HTML 与正文图片放进无 CDN/JS/远程图片依赖的统一 Reader `index.html`；
-9. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job，course Expand 的稳定子文件是否可单独 Inspect/Download；
-10. JobRead 子集候选是否能得到 `resource_id`，完整 succeeded Expand Job 是否能在用户明确选择全部后直接交给现有 Download Job；
-11. Expand / Download / Archive 既有行为是否未被多文件/完整枚举衔接语义破坏；
-12. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且 Expand 不会自动触发下载。
+7. Z-Library 是否只持久化两个 canonical Cookie，并按 `AUTH_REQUIRED → Session save → 重试` 驱动搜索、检查与下载；
+8. Host Web URL → Import 是否能恢复明确的平台身份；
+9. Generic Web 是否同时保留原始 `source.html`、Trafilatura `content.md`，并把清洗 HTML 与正文图片放进无 CDN/JS/远程图片依赖的统一 Reader `index.html`；
+10. SmartEdu 课程 Inspect 是否同时暴露主视频与自然附件/伴随内容，`original` 是否无需 Agent 猜格式即可产生多文件 Job，course Expand 的稳定子文件是否可单独 Inspect/Download；
+11. JobRead 子集候选是否能得到 `resource_id`，完整 succeeded Expand Job 是否能在用户明确选择全部后直接交给现有 Download Job；
+12. Expand / Download / Archive 既有行为是否未被多文件/完整枚举衔接语义破坏；
+13. 真实 OpenClaw 用户链路是否能完成搜索 → 判断 → 用户选择 → 下载 → 文件，且 Expand 不会自动触发下载。
 
-后端测试不能替代第 12 项。
+后端测试不能替代第 13 项。

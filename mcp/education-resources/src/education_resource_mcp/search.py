@@ -409,6 +409,7 @@ class MultiPlatformSearchProvider:
             ("nlc", "NlcSearchAdapter"),
             ("open163", "Open163SearchAdapter"),
             ("libgen", "LibgenSearchAdapter"),
+            ("zlibrary", "ZlibrarySearchAdapter"),
             ("weibo", "WeiboSearchAdapter"),
             ("wechat", "WechatSearchAdapter"),
             ("shuge", "ShugeSearchAdapter"),

@@ -202,6 +202,7 @@ def _provider_registrations(
         ("ximalaya_download", "XimalayaDownloader", "ximalaya-audio"),
         ("bilibili_download", "BilibiliDownloader", "bilibili-video"),
         ("libgen_download", "LibgenDownloader", "libgen"),
+        ("zlibrary_download", "ZlibraryDownloader", "zlibrary"),
         ("zjer_download", "ZjerVideoDownloader", "zjer-video"),
         ("cctv_download", "CctvVideoDownloader", "cctv-video"),
     ):

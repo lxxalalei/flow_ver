@@ -74,7 +74,7 @@ $EDUCATION_RESOURCE_MCP_DATA_DIR/sessions/
 
 `resource_session_status` 在指定平台的登录态缺失、过期或失效时直接返回登录步骤；全量查询不重复展开步骤。`resource_session_manage` 使用 `action=save|delete`；save 接收 `platform + capture + expires_at?`，delete 只接收 `platform`。`capture` 是 opaque browser-session capture object：Agent 原样传递，不需要理解或手工筛选 Cookie、localStorage、sessionStorage、Token 的具体字段。
 
-MCP 内部 `PlatformConfig` / SessionStore 才拥有平台认证契约。浏览器捕获可以较宽，MCP 再按已验证的平台规则筛选，只保存真正需要的 canonical subset。SmartEdu 当前明确需要 `accessToken`；Cookie 平台在未实测出最小 Cookie 名集合前继续按内部域名边界筛选，不凭经验硬编码白名单。
+MCP 内部 `PlatformConfig` / SessionStore 才拥有平台认证契约。浏览器捕获可以较宽，MCP 再按已验证的平台规则筛选，只保存真正需要的 canonical subset。SmartEdu 当前明确需要 `accessToken`；Z-Library 明确只保存 `remix_userid` 与 `remix_userkey`，不接收邮箱或密码；其他 Cookie 平台在未实测出最小 Cookie 名集合前继续按内部域名边界筛选，不凭经验硬编码白名单。
 
 Session Tool 不公开 `cookie_domains` / `storage_keys` 等内部认证字段；只返回登录 URL、捕获方式、probe 能力、状态和必要登录步骤。
 
@@ -82,7 +82,7 @@ Windows 使用当前用户 DPAPI 保护本地登录态。没有 standalone `sess
 
 从旧独立 session-manager 升级时不做长期双读兼容，已有登录态可能需要重新捕获一次。
 
-SmartEdu 公共 Search / Catalog 不使用已保存 token；LibGen 当前不需要登录。
+SmartEdu 公共 Search / Catalog 不使用已保存 token；LibGen 当前不需要登录。Z-Library 的 Search / Inspect / Download 使用用户浏览器保存的登录态和账号下载额度，缺少会话时显式返回 `AUTH_REQUIRED`。
 
 ## Web Search 与 Import URL
 
@@ -92,9 +92,15 @@ SmartEdu 公共 Search / Catalog 不使用已保存 token；LibGen 当前不需�
 resource_import_url(source_url="https://...")
 ```
 
-Import 会对明确的 URL 形态恢复专门平台身份：Bilibili、Douyin、Ximalaya、SmartEdu、Zjer、CCTV、LibGen 和 Zhihu；其他或无法明确识别的 URL 进入 `generic`。
+Import 会对明确的 URL 形态恢复专门平台身份：Bilibili、Douyin、Ximalaya、SmartEdu、Zjer、CCTV、LibGen、Z-Library 和 Zhihu；其他或无法明确识别的 URL 进入 `generic`。
 
 这只是通用发现到现有专门 Inspector/Downloader 的薄桥接，不是第二套平台 Registry。
+
+## Z-Library 图书
+
+Z-Library 是 `education-resources` 内部的平台 Adapter，不是第二个 MCP。搜索结果以 `book_id + book_hash` 保留平台稳定身份；Inspect fresh EAPI 详情后产生需要登录的 document Representation；Download 在 Job 开始时重新获取短期文件地址，并消耗用户账号的实际下载额度。
+
+用户必须自行在浏览器登录，再把 browser capture 原样交给 Session Tool。MCP 只保留两个 canonical Cookie，不保存账号密码，也不会把凭据自动发送给未确认的镜像。下载重定向到外部 CDN 时移除 Cookie。平台或反爬墙不可用、账号额度耗尽和资源不存在分别以真实错误返回，不静默回落到 LibGen。
 
 ## SmartEdu 课程资源
 

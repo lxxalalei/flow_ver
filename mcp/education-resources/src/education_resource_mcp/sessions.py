@@ -21,6 +21,12 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 
 from .adapters.http_client import probe_with_cookies, probe_with_headers
+from .adapters.zlibrary_client import (
+    ZLIBRARY_COOKIE_DOMAINS,
+    ZLIBRARY_COOKIE_NAMES,
+    ZlibraryAuthRequired,
+    credentials_from_session_data,
+)
 from .errors import DomainError
 from .windows_dpapi import WindowsDpapiError, WindowsDpapiProtector
 
@@ -118,6 +124,10 @@ _PLATFORM_LIST = [
     PlatformConfig(
         "nlc", "国家图书馆", "https://read.nlc.cn/",
         "cookie", "browser_cookies", cookie_domains=("nlc.cn",),
+    ),
+    PlatformConfig(
+        "zlibrary", "Z-Library", "https://z-library.sk/",
+        "cookie", "browser_cookies", cookie_domains=ZLIBRARY_COOKIE_DOMAINS,
     ),
     PlatformConfig("cctv", "央视网", "", "none", "none"),
     PlatformConfig("kepu", "科普中国", "", "none", "none"),
@@ -553,6 +563,24 @@ class SessionStore:
             }
         }
 
+    def _sanitize_zlibrary_payload(
+        self, config: PlatformConfig, session_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        canonical = self._sanitize_cookie_payload(config, session_data)
+        canonical["cookies"] = [
+            cookie
+            for cookie in canonical["cookies"]
+            if cookie.get("name") in ZLIBRARY_COOKIE_NAMES
+        ]
+        try:
+            credentials_from_session_data(canonical)
+        except ZlibraryAuthRequired as exc:
+            raise SessionError(
+                "SESSION_EMPTY",
+                "Z-Library 登录态缺少 remix_userid 或 remix_userkey",
+            ) from exc
+        return canonical
+
     def _sanitize_session_data(
         self, config: PlatformConfig, session_data: dict[str, Any]
     ) -> dict[str, Any]:
@@ -573,6 +601,8 @@ class SessionStore:
             )
         if config.auth_kind == "token":
             return self._sanitize_smartedu_payload(config, session_data)
+        if config.platform_id == "zlibrary":
+            return self._sanitize_zlibrary_payload(config, session_data)
         return self._sanitize_cookie_payload(config, session_data)
 
     def get_status(self, platforms: list[str] | None = None) -> list[SessionStatus]:

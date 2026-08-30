@@ -305,7 +305,7 @@ class MultiPlatformSearchTests(unittest.TestCase):
         registered = set(provider._adapters)
         for platform in (
             "bilibili", "douyin", "smartedu", "ximalaya", "zhihu",
-            "libgen", "shuge", "yixi", "zjer",
+            "libgen", "zlibrary", "shuge", "yixi", "zjer",
         ):
             self.assertIn(platform, registered)
         self.assertNotIn("generic", registered)

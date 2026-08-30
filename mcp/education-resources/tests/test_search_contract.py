@@ -50,6 +50,7 @@ class SearchContractTests(unittest.TestCase):
         self.assertEqual({"platform", "queries"}, set(schema))
         description = schema["platform"]["description"]
         self.assertIn("libgen", description)
+        self.assertIn("zlibrary", description)
         self.assertIn("不要传平台内部分类代码", description)
         self.assertNotIn("tabs", description)
         self.assertNotIn("catalog_expand", description)
