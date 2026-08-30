@@ -86,7 +86,7 @@ OpenClaw `web_search` 负责开放互联网跨站发现；MCP `resource_search` 
 
 开放式、来源不限、需要官方/专业/图文/文档/长尾网页时，Web 往往有直接价值。用户明确限定平台、已经给出具体 URL，或窄任务已被专门生态直接覆盖时，可以直接使用对应专门能力。通用 Web 发现由宿主 `web_search` 承担，MCP 保持专门资源能力边界。
 
-具体平台先验与 trigger / non-trigger 见 [`references/source-routing.md`](references/source-routing.md)。
+具体平台先验与直接触发信号见 [`references/source-routing.md`](references/source-routing.md)。
 
 ## 4. Evidence：按真实证据判断候选
 
@@ -196,7 +196,7 @@ Web URL 的典型获取路径是：
 → Download
 ```
 
-下载结果需要整理时进入 Archive；用户明确要求精美 HTML / 优化排版时进入 HTML Design。
+用户明确要求归档 / 整理，或原始任务已经包含归档目标时进入 Archive；用户明确要求精美 HTML / 优化排版时进入 HTML Design。
 
 详见 [`references/acquisition.md`](references/acquisition.md)、[`references/archive.md`](references/archive.md)、[`references/html-design.md`](references/html-design.md)。
 
