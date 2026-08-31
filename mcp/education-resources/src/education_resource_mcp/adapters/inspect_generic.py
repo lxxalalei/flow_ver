@@ -33,6 +33,22 @@ INSPECTOR_ID = "generic"
 INSPECTION_MAX_BYTES = 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_REDIRECTS = 5
+# Platforms like Bilibili preemptively 412 requests whose header combination
+# does not look like a real browser: a Chrome UA alone passes, but pairing it
+# with a browser-style Accept and no Accept-Language trips their fingerprint
+# check. Send the full browser header trio (no Referer -- the generic
+# inspector has no origin page).
+BROWSER_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
 READ_CHUNK_SIZE = 64 * 1024
 
 _HTTP_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
@@ -803,10 +819,7 @@ class GenericWebInspector:
             request = Request(
                 current_url,
                 method="GET",
-                headers={
-                    "Accept": "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
-                    "User-Agent": "EducationResourceMCP/0.1 (+bounded inspection)",
-                },
+                headers=dict(BROWSER_REQUEST_HEADERS),
             )
             try:
                 response = self._request(request)
