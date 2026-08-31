@@ -67,6 +67,8 @@ OpenClaw 原生 `web_search` 负责跨站发现，包括：
 
 ## 3. 常见来源的价值先验
 
+下表既包含 MCP 已接入的平台，也包含适合 Host Web Search 的开放来源；是否能走 `resource_search` 以当前运行时 Tool schema 和真实返回为准，不因来源出现在表中就默认存在专门 MCP 适配器。
+
 | 来源 | Strong role | 典型触发信号 |
 | --- | --- | --- |
 | OpenClaw `web_search` | 跨站发现、官方/专业网页、文档、长尾资源 | 来源开放、网页/文档、官方/专业、全网发现 |

@@ -57,7 +57,7 @@ openclaw chat --local
 
 ## Skill 语义 baseline
 
-当前语义优化由 `.agent/plans/0074-skill-semantic-decision-kernel.md` 跟踪。为了让 old/new A/B 只改变 Skill 工作区，不改变 runner，本轮先固定旧 Skill 基线：
+Skill 语义优化的 0074 decision kernel 已归档；当前执行计划见 [.agent/plans/README.md](.agent/plans/README.md)，当前 active 专项为 0078 CCTV native H5E completion，0077 真实用户链路 release gate 暂停中。为了让 old/new A/B 只改变 Skill 工作区，不改变 runner，历史基线仍固定为：
 
 ```text
 3a20c1e14358631201e99fb54e007ccfcf118d94

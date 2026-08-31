@@ -1,6 +1,6 @@
 # 开发路线
 
-当前机器事实见 [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)。历史系统收敛实施记录已归档至 [0058-system-convergence-and-resource-fidelity.md](../.agent/plans/archive/0058-system-convergence-and-resource-fidelity.md)；当前路线只看 0067、0028 与 0068。
+当前机器事实见 [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md)。历史系统收敛、能力面统一和早期真实链路计划均已归档；当前执行状态以 [.agent/plans/README.md](../.agent/plans/README.md) 及其中列出的 active 计划为准。
 
 ## 产品目标
 
@@ -38,7 +38,7 @@ Skill / Main Agent 负责需求理解、搜索任务、来源职责、候选判�
 当前唯一 active MCP 为 `education-resources`，暴露：
 
 ```text
-9 个资源 Tool
+10 个资源 Tool
 + 2 个 Session Tool
 ```
 
@@ -85,9 +85,7 @@ BoundedWebFetcher
 
 ### P0 — 完成统一能力面验收
 
-当前唯一主路线是 [0067-resource-capability-surface-unification.md](../.agent/plans/0067-resource-capability-surface-unification.md)：先让 active 文档、Tool schema、平台对象与最小充分验证统一到 Search / Expand / Inspect / Download。CCTV 是同一路线下的专项扩展，记录在 [0068-cctv-platform-integration.md](../.agent/plans/0068-cctv-platform-integration.md)，不形成第二套公共能力。
-
-0067 的静态与 targeted 验收完成后，由其验收子计划 [0028-real-openclaw-platform-e2e.md](../.agent/plans/0028-real-openclaw-platform-e2e.md) 统一记录真实 OpenClaw、平台、Session 与 Job durability 证据。0028 不定义第二套架构，只验证 0067 的当前能力面。
+当前执行状态以 [.agent/plans/README.md](../.agent/plans/README.md) 为准：0078 CCTV native H5E completion 是当前 active 专项，0077 real-user-journey release gate 暂停中。0067、0068 和 0028 作为已归档的架构/验收依据，不再作为当前执行路线，也不形成第二套公共能力。
 
 重点复测：
 

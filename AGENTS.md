@@ -8,12 +8,14 @@
 
 最终产品目标是让用户直接通过自然语言完成可信的教育/学习资源闭环：表达需求、必要且克制的澄清、探索合适来源、判断候选、明确选择、获取真实资源，并在需要时归档。
 
-当前架构以 `docs/CURRENT_ARCHITECTURE.md` 为准。旧 Flow / ResultSet / Presentation / Selection / Plan / Asset / authority / digest 等设计只保留在 Git 历史或 legacy 中，不是 active 兼容目标。
+架构边界以 `docs/CURRENT_ARCHITECTURE.md` 为准；MCP 的 Tool 名称、参数、schema、description、返回和错误以当前 `server.py`、stdio `tools/list` 与真实 Tool 返回为准；Skill 语义规则以 `skills/SKILL.md` 及其 references 为准。旧 Flow / ResultSet / Presentation / Selection / Plan / Asset / authority / digest 等设计只保留在 Git 历史或 legacy 中，不是 active 兼容目标。
 
-当前 active 产品部分只有：
+当前 active 运行时产品部分只有：
 
 - `skills/`（SKILL.md + references + examples）：唯一用户入口和语义决策层；
 - `mcp/education-resources/`：唯一 MCP，提供资源能力和辅助 Session Tool。
+
+`docs/`、`.agent/plans/`、`scripts/` 和 `packaging/` 属于 active 工程、验证与发布支持面，不是运行时产品能力。
 
 `legacy/skill-pipeline-v1/` 只用于审计、参考和显式回滚，不参与正常运行。
 
@@ -28,7 +30,7 @@
 5. 不静默截断或丢弃业务数据；容量限制必须有真实来源，并显式暴露分页、截断或失败语义。
 6. 不使用兜底逻辑掩盖业务不变量被破坏的问题；fallback 只有在降级行为本身是明确产品需求时才允许。
 7. 不为了让测试通过而修改正确的生产行为；测试与业务冲突时先判断哪一方错误。
-8. 不使用后端测试、fixture、Service 直调或 MCP probe 冒充真实 Agent / 用户链路验证。
+8. 后端测试、fixture、Service 直调或 MCP probe 只能证明代码、工具或端点事实，不得将其表述为真实 Agent / 用户链路已验证。
 9. 小改动之后不默认运行全部测试；验证范围必须与 diff 和真实回归风险成比例。
 10. 不重构无关代码；发现无关问题先记录，除非它阻塞当前验收标准。
 11. 没有实际执行过的验证，不得声称已经完成。
@@ -161,7 +163,7 @@ source.html -> Trafilatura -> index.html / content.md / metadata.json
 - 平台实际登录态；
 - Provider 必须产生真实文件；
 - exact Provider 路由；
-- 下载和 Batch 取消；
+- Expand / Download Job 的取消；
 - 下载器实际需要的格式/MIME 校验；
 - 平台明确存在的身份格式要求。
 

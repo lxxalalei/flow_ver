@@ -109,7 +109,7 @@ MCP 直接读取完整 `results.jsonl`。Expand 自身不产生下载授权。
 | Ximalaya | `creator`, `album` | `album[]` / `track[]` | `track` → MP3/M4A |
 | SmartEdu | `textbook`, `course` | `textbook → course[]`; `course → video/document/audio[]` | course 可整体自然交付，也可下载稳定子文件 |
 | Zjer | `course` | `video[]` | `video` → MP4 |
-| CCTV | `column`, `series` | `video[]` | `video` → MP4（720P 上限） |
+| CCTV | `column`, `series` | `video[]` | `video` → MP4（按真实流信息选择当前可确认的最高画质） |
 | LibGen | 无 | — | `book` → ebook file，身份为 MD5 |
 | Generic Web | 无 | — | `webpage` → offline web bundle |
 | Generic File | 无 | — | `file` → 原文件 |
@@ -152,12 +152,9 @@ series (纪录片系列页) -> Expand -> video[]   # 页面内嵌剧集链接
 video               -> Download MP4          # 自研下载链，guid 为下载键
 ```
 
-免登录。搜索双路：`ifsearch.php` 站内视频（叶子）+ `api.cntv.cn` 栏目目录（容器，A-Z 扫描后本地过滤）。单集/系列共用 `/YYYY/MM/DD/VID*.shtml` URL 形态，是否系列由页面真实剧集链接数（≥2）判定，不按 URL 猜测。画质上限 2000 档 720P。搜索候选的 `VIDE...` 标识在下载时自动解析为 32 位真实 guid。
+免登录。搜索双路：`ifsearch.php` 站内视频（叶子）+ `api.cntv.cn` 栏目目录（容器，A-Z 扫描后本地过滤）。单集/系列共用 `/YYYY/MM/DD/VID*.shtml` URL 形态，是否系列由页面真实剧集链接数（≥2）判定，不按 URL 猜测。下载前比较 clear/H5E 实际流的分辨率与码率，按真实信息选择当前可确认的最高画质；不写死 2000/720P 画质上限。搜索候选的 `VIDE...` 标识在下载时自动解析为 32 位真实 guid。
 
-**下载链**（全部自研，无外部下载器）：普通流（HLS/直链）Python 直下；h5e 加密流分片下载 + 多进程解密（`cctv_h5e`，GPLv3 渊源标注）+ ffmpeg 封装。所有产物经 ffmpeg 全片解码体检（错误行 ≤100），脏文件自动降级。
-
-**老视频降级链**：2021 年及以前视频的个别 NAL（01a8 flip 家族）为官方 WASM 独有变换，native 解密会脏 → 体检失败后自动切换**官方 WASM worker** 重下：Python 并发拉 h5e 分片 → 分组并行执行静态 `main.js`/`worker.js` bundle → ffmpeg 封装 → 同体检门槛。bundle **vendored 在包内**（`education_resource_mcp/vendor/cctv-h5e/runtime`，MIT，github.com/xiaoxi-ij478/cctv-h5e-decrypt），构建期已经包含完整 JS，用户安装不再执行 `npm ci`，也不需要 tsx、TypeScript、esbuild 或 node_modules；运行时使用定制 OpenClaw 已提供的 Node。`CCTV_H5E_PROJ` 可在开发时覆盖其他完整 bundle 目录。m3u8 优先取视频自身 `h5e_url`（Inspect 提供），兜底模板可用 `CCTV_H5E_BASE` 覆盖。Node / bundle 缺失是显式失败，不静默跳过；下载结果带 `route`（native / wasm）与体检数据。
-
+**下载链**（全部自研，无外部下载器）：普通流（HLS/直链）Python 直下；H5E 加密流分片下载后使用 Python native 解密，再由 ffmpeg 封装并做全片解码体检。当前运行时不依赖旧 JS/WASM/Node compatibility fallback 或 `vendor/cctv-h5e`；native 解密或流协议不满足当前支持边界时显式失败，不静默切换不等价路线。下载结果保留实际 route 与体检事实。
 ## SmartEdu
 
 ```text
