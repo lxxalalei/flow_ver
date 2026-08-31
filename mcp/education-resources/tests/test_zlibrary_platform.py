@@ -250,7 +250,9 @@ def test_downloader_writes_real_file_from_eapi_link(tmp_path: Path, monkeypatch)
 
 
 def test_redirect_handler_removes_cookie_for_external_host() -> None:
-    handler = _CredentialSafeRedirectHandler("z-library.sk")
+    handler = _CredentialSafeRedirectHandler(
+        "z-library.sk", resolver=lambda host, port: ("1.2.3.4",)
+    )
     original = Request(
         "https://z-library.sk/download/123",
         headers={"Cookie": "remix_userkey=secret", "User-Agent": "test"},

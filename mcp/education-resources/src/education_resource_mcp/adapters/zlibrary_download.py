@@ -16,7 +16,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from ..config import Settings
 from ..downloader import DownloadResult
 from ..errors import DomainError
-from ..policy import PolicyError, ensure_within_root, validate_public_http_url
+from ..policy import PolicyError, Resolver, ensure_within_root, validate_public_http_url
 from ..sessions import SessionStore
 from .zlibrary_client import (
     ZLIBRARY_COOKIE_DOMAINS,
@@ -71,14 +71,18 @@ def _credential_root(domain: str) -> str:
 
 
 class _CredentialSafeRedirectHandler(HTTPRedirectHandler):
-    def __init__(self, credential_root: str) -> None:
+    def __init__(self, credential_root: str, resolver: Resolver | None = None) -> None:
         super().__init__()
         self.credential_root = credential_root
+        self.resolver = resolver
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
         target = urljoin(req.full_url, newurl)
         try:
-            validate_public_http_url(target)
+            if self.resolver is not None:
+                validate_public_http_url(target, resolver=self.resolver)
+            else:
+                validate_public_http_url(target)
         except PolicyError as exc:
             raise DomainError("REDIRECT_BLOCKED", str(exc)) from exc
         redirected = super().redirect_request(req, fp, code, msg, headers, target)
