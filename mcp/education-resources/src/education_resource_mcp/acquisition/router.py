@@ -1,4 +1,4 @@
-"""Direct dispatch from a chosen provider id to its downloader."""
+"""Thin dispatch from a selected provider id to the actual download handler."""
 
 from __future__ import annotations
 
@@ -28,34 +28,34 @@ class WebMaterializer(Protocol):
     def materialize(self, request: AcquisitionRequest) -> AcquisitionResult: ...
 
 
-class BrowserCapture(Protocol):
-    def capture(self, request: AcquisitionRequest) -> AcquisitionResult: ...
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ProviderRegistration:
+    """One provider id mapped to one concrete runtime object.
+
+    ``strategies`` and ``scopes`` remain accepted temporarily so ResourceService
+    construction does not need an unrelated rewrite; they are no longer stored
+    or used as a second capability declaration.
+    """
+
     provider_id: str
     provider: Any
-    strategies: Iterable[AcquisitionStrategy | str]
-    scopes: Iterable[str]
 
-    def __post_init__(self) -> None:
-        provider_id = str(self.provider_id or "").strip()
-        if not provider_id:
+    def __init__(
+        self,
+        provider_id: str,
+        provider: Any,
+        strategies: Iterable[AcquisitionStrategy | str] = (),
+        scopes: Iterable[str] = (),
+    ) -> None:
+        normalized = str(provider_id or "").strip()
+        if not normalized:
             raise ValueError("provider_id is required")
-        strategies = frozenset(
-            AcquisitionStrategy.from_value(value) for value in self.strategies
-        )
-        scopes = frozenset(str(value) for value in self.scopes)
-        if not strategies or not scopes:
-            raise ValueError("provider registration requires strategy and scope")
-        object.__setattr__(self, "provider_id", provider_id)
-        object.__setattr__(self, "strategies", strategies)
-        object.__setattr__(self, "scopes", scopes)
+        object.__setattr__(self, "provider_id", normalized)
+        object.__setattr__(self, "provider", provider)
 
 
 class AcquisitionRouter:
-    """Call exactly the provider selected by ``AcquisitionPlanner.route``."""
+    """Look up the already-selected provider and execute it."""
 
     def __init__(self, registrations: Iterable[ProviderRegistration]) -> None:
         registry: dict[str, ProviderRegistration] = {}
@@ -74,6 +74,7 @@ class AcquisitionRouter:
             return AcquisitionResult.failed(
                 request.strategy, "JOB_CANCELLED", "任务已取消"
             )
+
         registration = self._provider_registry.get(request.provider_id)
         if registration is None:
             return AcquisitionResult.failed(
@@ -81,12 +82,6 @@ class AcquisitionRouter:
                 "PROVIDER_UNAVAILABLE",
                 f"下载器 {request.provider_id} 当前未部署",
                 retryable=True,
-            )
-        if request.strategy not in registration.strategies or request.scope not in registration.scopes:
-            return AcquisitionResult.failed(
-                request.strategy,
-                "CAPABILITY_NOT_DECLARED",
-                f"下载器 {request.provider_id} 不支持当前资源",
             )
 
         try:
@@ -98,18 +93,9 @@ class AcquisitionRouter:
                     request.cancel_event,
                 )
                 return self._from_download_result(request, raw)
+
             if request.strategy is AcquisitionStrategy.WEB_MATERIALIZE:
                 result = registration.provider.materialize(request)
-                return self._check_materialized_result(request, result)
-            if request.strategy is AcquisitionStrategy.WEB_CAPTURE:
-                capture = getattr(registration.provider, "capture", None)
-                if not callable(capture):
-                    return AcquisitionResult.failed(
-                        request.strategy,
-                        "PROVIDER_UNAVAILABLE",
-                        "网页捕获器不可用",
-                    )
-                result = capture(request)
                 return self._check_materialized_result(request, result)
         except DomainError as exc:
             return AcquisitionResult.failed(
@@ -232,7 +218,6 @@ class AcquisitionRouter:
 
 __all__ = [
     "AcquisitionRouter",
-    "BrowserCapture",
     "DirectProvider",
     "ProviderRegistration",
     "WebMaterializer",
