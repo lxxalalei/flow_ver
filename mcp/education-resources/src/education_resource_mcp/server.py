@@ -1,4 +1,4 @@
-"""Thin stdio MCP exposing generic resource actions and session capabilities."""
+"""Thin stdio MCP exposing resource actions and session capabilities."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from .service import ResourceService
 
 
 PLATFORM_CAPABILITY_GUIDANCE = (
-    "主要平台 id：bilibili、douyin、smartedu、ximalaya、libgen、zlibrary、zjer、zhihu、"
-    "shuge、yixi、cctv、kepu、baiduwenku、runoob、open163、weibo、"
-    "wechat、generic。平台是否支持 Search/Expand/Inspect/Download 以真实返回为准；"
-    "不要因为平台存在某功能就猜测 MCP 已实现。"
+    "可搜索平台 id：bilibili、douyin、smartedu、ximalaya、libgen、zlibrary、zjer、zhihu、"
+    "shuge、yixi、cctv、kepu、baiduwenku、runoob、open163、weibo、wechat。"
+    "开放互联网发现使用宿主 web_search；已经知道的普通网页 URL 使用 resource_import_url，"
+    "不要把 generic 当作 resource_search 平台。平台是否支持 Expand/Inspect/Download 以真实返回为准。"
 )
 
 
@@ -30,7 +30,7 @@ class SearchTask(BaseModel):
 
     platform: str = Field(
         description=(
-            "搜索平台 id。不要传平台内部分类代码、分页参数或 API 参数。"
+            "专门资源搜索平台 id。不要传平台内部分类代码、分页参数或 API 参数。"
             + PLATFORM_CAPABILITY_GUIDANCE
         )
     )
@@ -204,16 +204,18 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         instructions=(
             "The Agent owns user intent, search strategy, semantic relevance, stopping decisions, "
             "candidate ranking and user selection. This MCP owns factual platform access and file "
-            "side effects. Search finds candidates. Expand structurally enumerates a known container "
-            "resource and may persist a large complete result set in a Job; resource_job_read only "
-            "controls how many children enter the conversation at once and never caps the underlying "
-            "enumeration. Inspect is optional and should be used only when current resource facts affect "
-            "selection or acquisition. Download acts only on resources the user selected; completion of "
-            "Search or Expand is never implicit download authorization. A logical resource may naturally "
-            "materialize into multiple files. Resource handles are process-local; Download and Expand Job "
-            "handles are persistent. Session tools are not a preflight step: use them after AUTH_REQUIRED "
-            "or when the user explicitly asks to manage a platform session. HTML Design is optional and "
-            "runs only after the user asks for a visually designed single-page Generic Web deliverable."
+            "side effects. resource_search is only for the explicitly supported platform adapters; "
+            "open-web discovery belongs to the host web_search, while a known ordinary web URL enters "
+            "through resource_import_url. Expand structurally enumerates a known container resource and "
+            "may persist a large complete result set in a Job; resource_job_read only controls how many "
+            "children enter the conversation at once and never caps the underlying enumeration. Inspect "
+            "is optional and should be used only when current resource facts affect selection or acquisition. "
+            "Download acts only on resources the user selected; completion of Search or Expand is never "
+            "implicit download authorization. A logical resource may naturally materialize into multiple "
+            "files. Resource handles are process-local; Download and Expand Job handles are persistent. "
+            "Session tools are not a preflight step: use them after AUTH_REQUIRED or when the user explicitly "
+            "asks to manage a platform session. HTML Design is optional and runs only after the user asks for "
+            "a visually designed single-page Generic Web deliverable."
         ),
     )
 
@@ -221,7 +223,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     def resource_search(
         search_tasks: Annotated[
             list[SearchTask],
-            Field(description="一个或多个平台搜索任务；返回候选及当前进程内 resource_id。"),
+            Field(description="一个或多个专门平台搜索任务；返回候选及当前进程内 resource_id。"),
         ],
         limit: Annotated[
             int,
@@ -236,9 +238,9 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
     ) -> dict[str, Any]:
         """Search explicitly chosen MCP platforms for candidate resources.
 
-        Use for platform-native discovery with natural queries. Open-web discovery
-        normally belongs to the host Web Search. Do not use for a known URL,
-        structural container enumeration, or as implicit download authorization.
+        Use only for platform-native discovery with natural queries. Open-web
+        discovery belongs to the host Web Search. A known ordinary web URL uses
+        resource_import_url instead. Search never authorizes download.
         """
         return _call(lambda: _search(resource_service, search_tasks, limit))
 
