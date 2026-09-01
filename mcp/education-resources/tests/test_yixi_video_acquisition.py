@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from education_resource_mcp.acquisition.planner import DEFAULT_PROVIDER_SPECS
+from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
+from education_resource_mcp.acquisition.planner import AcquisitionPlanner
 from education_resource_mcp.adapters.inspect_yixi import YixiInspector
 from education_resource_mcp.adapters.yixi import YixiSearchAdapter
 
@@ -20,6 +21,10 @@ class _Response:
 
     def read(self) -> bytes:
         return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+
+class _DirectProviderStub:
+    pass
 
 
 def _settings():
@@ -147,14 +152,36 @@ def test_yixi_inspector_requires_server_speech_id_and_direct_video() -> None:
 
 
 def test_yixi_video_routes_to_generic_direct() -> None:
-    matches = [
-        spec
-        for spec in DEFAULT_PROVIDER_SPECS
-        if spec.platform_id == "yixi"
-        and spec.scope == "primary_resource"
-        and spec.representation_kind == "video"
-        and "mp4" in spec.containers
-    ]
+    planner = AcquisitionPlanner(
+        AcquisitionRouter(
+            [ProviderRegistration("generic-direct", _DirectProviderStub())]
+        )
+    )
+    route = planner.route(
+        {
+            "resource_id": "res_yixi",
+            "platform": "yixi",
+            "title": "教育就是生长",
+            "resource_type": "video",
+            "source_url": "https://alicdn.yixi.tv/1785913020293-3.mp4",
+        },
+        {
+            "resolved_resource": {
+                "representations": [
+                    {
+                        "representation_id": "repr_yixi",
+                        "scope": "primary_resource",
+                        "kind": "video",
+                        "role": "primary",
+                        "container": "mp4",
+                        "materializable": True,
+                        "technical_availability": "available",
+                    }
+                ]
+            }
+        },
+        preferred_container="mp4",
+    )
 
-    assert len(matches) == 1
-    assert matches[0].provider_id == "generic-direct"
+    assert route["provider_id"] == "generic-direct"
+    assert route["strategy"] == "direct_file"
