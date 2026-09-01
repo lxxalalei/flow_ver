@@ -1,9 +1,4 @@
-"""0057 M0: Zhihu answers/articles route to the web materializer.
-
-The Zhihu inspector now marks the webpage as the primary representation and
-the planner spec table allows zhihu to use generic-web-materializer, so a
-知乎 candidate can be "downloaded" as a materialized page.
-"""
+"""Zhihu answers/articles route to the Generic Web materializer."""
 
 from __future__ import annotations
 
@@ -19,26 +14,15 @@ from education_resource_mcp.adapters.inspect_zhihu import ZhihuInspector
 from education_resource_mcp.acquisition.planner import AcquisitionPlanner
 from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
 from education_resource_mcp.acquisition.models import AcquisitionStrategy
-from education_resource_mcp.downloader import DownloadProvider
 
 
 class _FakeMaterializer:
     provider_id = "generic-web-materializer"
 
-    def download(self, *args, **kwargs):  # pragma: no cover - routing only
-        raise AssertionError("not reached")
-
 
 def _planner() -> AcquisitionPlanner:
     router = AcquisitionRouter(
-        (
-            ProviderRegistration(
-                provider_id="generic-web-materializer",
-                provider=_FakeMaterializer(),
-                strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
-                scopes=("primary_resource", "landing_page"),
-            ),
-        )
+        (ProviderRegistration("generic-web-materializer", _FakeMaterializer()),)
     )
     return AcquisitionPlanner(router)
 
