@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from education_resource_mcp.acquisition.planner import DEFAULT_PROVIDER_SPECS
+from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
+from education_resource_mcp.acquisition.planner import AcquisitionPlanner
 from education_resource_mcp.adapters.inspect_zjer import ZjerInspector
 from education_resource_mcp.adapters.zjer import ZjerSearchAdapter, fetch_course_detail
 from education_resource_mcp.adapters.zjer_download import ZjerVideoDownloader
@@ -233,15 +234,29 @@ def test_zjer_downloader_refreshes_signed_mp4_at_start() -> None:
     assert resource["source_url"].startswith("https://k.zjer.cn/api/s/c/courseAfter/34941")
 
 
-def test_zjer_video_has_exact_provider_spec() -> None:
-    matches = [
-        spec
-        for spec in DEFAULT_PROVIDER_SPECS
-        if spec.platform_id == "zjer"
-        and spec.scope == "primary_resource"
-        and spec.representation_kind == "video"
-        and "mp4" in spec.containers
-    ]
+def test_zjer_video_routes_to_zjer_downloader() -> None:
+    planner = AcquisitionPlanner(
+        AcquisitionRouter([ProviderRegistration("zjer-video", object())])
+    )
+    route = planner.route(
+        _resource(),
+        {
+            "resolved_resource": {
+                "representations": [
+                    {
+                        "representation_id": "repr_zjer_video",
+                        "scope": "primary_resource",
+                        "kind": "video",
+                        "role": "primary",
+                        "container": "mp4",
+                        "materializable": True,
+                        "technical_availability": "available",
+                    }
+                ]
+            }
+        },
+        preferred_container="mp4",
+    )
 
-    assert len(matches) == 1
-    assert matches[0].provider_id == "zjer-video"
+    assert route["provider_id"] == "zjer-video"
+    assert route["strategy"] == "direct_file"
