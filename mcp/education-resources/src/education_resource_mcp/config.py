@@ -1,4 +1,4 @@
-"""Runtime configuration for search, download and archive capabilities."""
+"""Runtime configuration for platform access, download and archive capabilities."""
 
 from __future__ import annotations
 
@@ -33,8 +33,6 @@ class Settings:
     search_timeout_seconds: int = 20
     download_timeout_seconds: int = 30
     max_workers: int = 8
-    searxng_base_url: str = ""
-    prefer_searxng: bool = False
     library_dir: Path | None = None
 
     @property
@@ -49,9 +47,6 @@ class Settings:
                 str(DEFAULT_DATA_DIR),
             )
         ).expanduser().resolve()
-        prefer_searxng = os.environ.get(
-            "EDUCATION_RESOURCE_MCP_PREFER_SEARXNG", ""
-        ).strip().lower() in {"1", "true", "yes", "on"}
         library_dir = os.environ.get("EDUCATION_RESOURCE_MCP_LIBRARY_DIR")
         return cls(
             data_dir=data_dir,
@@ -63,10 +58,6 @@ class Settings:
                 "EDUCATION_RESOURCE_MCP_DOWNLOAD_TIMEOUT", 30
             ),
             max_workers=_positive_int("EDUCATION_RESOURCE_MCP_MAX_WORKERS", 8),
-            searxng_base_url=os.environ.get(
-                "EDUCATION_RESOURCE_MCP_SEARXNG_URL", ""
-            ).rstrip("/"),
-            prefer_searxng=prefer_searxng,
             library_dir=Path(library_dir).expanduser() if library_dir else None,
         )
 
