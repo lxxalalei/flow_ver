@@ -2,21 +2,16 @@ from __future__ import annotations
 
 import unittest
 
-from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
-from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+from education_resource_mcp.acquisition.download_dispatch import select_download_handler
 
 
 class _DirectProviderStub:
     def download(self, resource, job_id, strategy, cancel_event):  # pragma: no cover
-        raise AssertionError("planner route test must not execute the provider")
+        raise AssertionError("handler selection test must not execute the provider")
 
 
 class ShugeAcquisitionRouteTests(unittest.TestCase):
-    def test_primary_pdf_routes_to_generic_direct(self) -> None:
-        router = AcquisitionRouter(
-            [ProviderRegistration("generic-direct", _DirectProviderStub())]
-        )
-        planner = AcquisitionPlanner(router)
+    def test_primary_pdf_selects_generic_direct_handler(self) -> None:
         resource = {
             "resource_id": "res_abcdefghijklmnop",
             "platform": "shuge",
@@ -40,16 +35,17 @@ class ShugeAcquisitionRouteTests(unittest.TestCase):
             "resolved_resource": {"representations": [representation]},
         }
 
-        plan = planner.route(
+        route = select_download_handler(
             resource,
             resolution,
             preferred_container="pdf",
+            handlers={"generic-direct": _DirectProviderStub()},
         )
 
-        self.assertEqual(plan["scope"], "primary_resource")
-        self.assertEqual(plan["strategy"], "direct_file")
-        self.assertEqual(plan["provider_id"], "generic-direct")
-        self.assertEqual(plan["container"], "pdf")
+        self.assertEqual(route["scope"], "primary_resource")
+        self.assertEqual(route["strategy"], "direct_file")
+        self.assertEqual(route["provider_id"], "generic-direct")
+        self.assertEqual(route["container"], "pdf")
 
 
 if __name__ == "__main__":
