@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
-from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+from education_resource_mcp.acquisition.download_dispatch import select_download_handler
 from education_resource_mcp.adapters.inspect_yixi import YixiInspector
 from education_resource_mcp.adapters.yixi import YixiSearchAdapter
 
@@ -151,13 +150,8 @@ def test_yixi_inspector_requires_server_speech_id_and_direct_video() -> None:
     assert unresolved_media["failures"][0]["code"] == "PLATFORM_VALIDATION_BLOCKED"
 
 
-def test_yixi_video_routes_to_generic_direct() -> None:
-    planner = AcquisitionPlanner(
-        AcquisitionRouter(
-            [ProviderRegistration("generic-direct", _DirectProviderStub())]
-        )
-    )
-    route = planner.route(
+def test_yixi_video_selects_generic_direct_handler() -> None:
+    route = select_download_handler(
         {
             "resource_id": "res_yixi",
             "platform": "yixi",
@@ -181,6 +175,7 @@ def test_yixi_video_routes_to_generic_direct() -> None:
             }
         },
         preferred_container="mp4",
+        handlers={"generic-direct": _DirectProviderStub()},
     )
 
     assert route["provider_id"] == "generic-direct"
