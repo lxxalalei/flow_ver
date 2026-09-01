@@ -23,9 +23,13 @@ from .smartedu_resource import (
 )
 
 
-_SMARTEDU_MATERIAL_PARTS_URL = (
-    "https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/national_lesson/"
-    "teachingmaterials/{textbook_id}/resources/part_{part_no}.json"
+_SMARTEDU_RELATION_URL = (
+    "https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/resources/"
+    "{content_id}/relation_teachingmaterials.json"
+)
+_SMARTEDU_PARTS_MANIFEST_URL = (
+    "https://s-file-1.ykt.cbern.com.cn/zxx/ndrs/national_lesson/"
+    "teachingmaterials/{source_resource_id}/resources/parts.json"
 )
 
 
@@ -169,112 +173,73 @@ def _iter_smartedu_course_files(
 
 
 def _iter_smartedu_textbook(
-    adapter: Any,
-    target: Mapping[str, Any],
-    *,
-    cancel_event: Any = None,
+    adapter: Any, target: Mapping[str, Any], *, cancel_event: Any = None,
     summary: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     source_url = _url(target)
-    textbook_id = str(
-        (urllib.parse.parse_qs(urlsplit(source_url).query).get("contentId") or [""])[0]
-    ).strip()
+    textbook_id = str((urllib.parse.parse_qs(urlsplit(source_url).query).get("contentId") or [""])[0]).strip()
     if not textbook_id:
         raise DomainError("INVALID_ARGUMENT", "SmartEdu 教材 URL 缺少 contentId")
-
-    headers = adapter._build_headers()  # noqa: SLF001 - same platform layer
+    headers = adapter._build_headers()  # noqa: SLF001
     parent_metadata = target.get("metadata")
-    parent_signals = (
-        parent_metadata.get("platform_signals")
-        if isinstance(parent_metadata, Mapping)
-        and isinstance(parent_metadata.get("platform_signals"), Mapping)
-        else {}
-    )
-    report: dict[str, Any] = {
-        "textbook_id": textbook_id,
-        "parts_read": 0,
-        "resource_counts": {},
-        "emitted": 0,
-        "skipped_types": {},
-        "invalid_items": 0,
-        "termination": None,
-    }
+    parent_signals = parent_metadata.get("platform_signals", {}) if isinstance(parent_metadata, Mapping) and isinstance(parent_metadata.get("platform_signals"), Mapping) else {}
+    report: dict[str, Any] = {"textbook_id": textbook_id, "source_resource_id": None, "relation_read": False, "parts_manifest_count": 0, "parts_read": 0, "resource_counts": {}, "emitted": 0, "skipped_types": {}, "invalid_items": 0, "termination": None}
     if summary is not None:
         summary["smartedu"] = report
-
-    part_no = 100
-    while True:
-        if cancel_event is not None and cancel_event.is_set():
-            report["termination"] = "cancelled"
+    try:
+        relations = _smartedu_cdn_json(adapter, _SMARTEDU_RELATION_URL.format(content_id=urllib.parse.quote(textbook_id)), headers)
+        if not isinstance(relations, list):
+            raise DomainError("PARTIAL_FAILURE", "SmartEdu 教材关联关系格式异常", retryable=True)
+        relation = next((item for item in relations if isinstance(item, Mapping) and item.get("relation_type_code") == "EBOOK_RELATION" and str(item.get("source_resource_id") or "").strip()), None)
+        if relation is None:
+            report["termination"] = "not_found"
             return
-        try:
-            values = _smartedu_cdn_json(
-                adapter,
-                _SMARTEDU_MATERIAL_PARTS_URL.format(
-                    textbook_id=urllib.parse.quote(textbook_id),
-                    part_no=part_no,
-                ),
-                headers,
-            )
-        except HTTPError as exc:
-            if exc.code == 404:
-                report["termination"] = "not_found"
-                break
-            report["termination"] = "error"
-            raise
-        except Exception:
-            report["termination"] = "error"
-            raise
-        if not isinstance(values, list):
-            report["termination"] = "error"
-            raise DomainError(
-                "PARTIAL_FAILURE",
-                "SmartEdu 教材资源分片格式异常",
-                retryable=True,
-            )
-        report["parts_read"] += 1
-        if not values:
-            report["termination"] = "empty_page"
-            break
-        for entry in values:
-            if not isinstance(entry, dict):
-                report["invalid_items"] += 1
-                continue
-            resource_type = str(entry.get("resource_type_code") or "").strip()
-            child_id = str(entry.get("id") or "").strip()
-            title = str(entry.get("title") or "").strip()
-            if not resource_type or not child_id or not title:
-                report["invalid_items"] += 1
-                continue
-            counts = report["resource_counts"]
-            counts[resource_type] = int(counts.get(resource_type) or 0) + 1
-            if resource_type not in {"national_lesson", "elite_lesson"}:
-                skipped = report["skipped_types"]
-                skipped[resource_type] = int(skipped.get(resource_type) or 0) + 1
-                continue
-            child_url = (
-                "https://basic.smartedu.cn/syncClassroom/classActivity?activityId="
-                + urllib.parse.quote(child_id)
-                if resource_type == "national_lesson"
-                else "https://basic.smartedu.cn/qualityCourse?courseId="
-                + urllib.parse.quote(child_id)
-            )
-            child_signals = {
-                "textbook_id": textbook_id,
-                "resource_type_code": resource_type,
-            }
-            for key in ("subject", "grade", "volume", "version", "edition", "stage"):
-                if parent_signals.get(key) not in (None, ""):
-                    child_signals[key] = parent_signals[key]
-            report["emitted"] += 1
-            yield {
-                "platform": "smartedu",
-                "title": title,
-                "source_url": child_url,
-                "resource_type": "course",
-                "metadata": {"platform_signals": child_signals},
-            }
-        part_no += 1
+        source_resource_id = str(relation["source_resource_id"]).strip()
+        report["source_resource_id"] = source_resource_id
+        report["relation_read"] = True
+        manifest = _smartedu_cdn_json(adapter, _SMARTEDU_PARTS_MANIFEST_URL.format(source_resource_id=urllib.parse.quote(source_resource_id)), headers)
+        if not isinstance(manifest, list):
+            raise DomainError("PARTIAL_FAILURE", "SmartEdu 教材分片清单格式异常", retryable=True)
+        part_urls = [str(item).strip() for item in manifest if isinstance(item, str) and str(item).strip()]
+        report["parts_manifest_count"] = len(part_urls)
+        if not part_urls:
+            report["termination"] = "empty_manifest"
+            return
+        for part_url in part_urls:
+            if cancel_event is not None and cancel_event.is_set():
+                report["termination"] = "cancelled"
+                return
+            values = _smartedu_cdn_json(adapter, part_url, headers)
+            if not isinstance(values, list):
+                raise DomainError("PARTIAL_FAILURE", "SmartEdu 教材资源分片格式异常", retryable=True)
+            report["parts_read"] += 1
+            for entry in values:
+                if not isinstance(entry, dict):
+                    report["invalid_items"] += 1
+                    continue
+                resource_type = str(entry.get("resource_type_code") or "").strip()
+                child_id = str(entry.get("id") or "").strip()
+                title = str(entry.get("title") or "").strip()
+                if not resource_type or not child_id or not title:
+                    report["invalid_items"] += 1
+                    continue
+                counts = report["resource_counts"]
+                counts[resource_type] = int(counts.get(resource_type) or 0) + 1
+                if resource_type not in {"national_lesson", "elite_lesson"}:
+                    skipped = report["skipped_types"]
+                    skipped[resource_type] = int(skipped.get(resource_type) or 0) + 1
+                    continue
+                child_url = ("https://basic.smartedu.cn/syncClassroom/classActivity?activityId=" + urllib.parse.quote(child_id) if resource_type == "national_lesson" else "https://basic.smartedu.cn/qualityCourse?courseId=" + urllib.parse.quote(child_id))
+                child_signals = {"textbook_id": textbook_id, "source_resource_id": source_resource_id, "resource_type_code": resource_type}
+                for key in ("subject", "grade", "volume", "version", "edition", "stage"):
+                    if parent_signals.get(key) not in (None, ""):
+                        child_signals[key] = parent_signals[key]
+                report["emitted"] += 1
+                yield {"platform": "smartedu", "title": title, "source_url": child_url, "resource_type": "course", "metadata": {"platform_signals": child_signals}}
+        report["termination"] = "manifest_complete"
+    except Exception:
+        report["termination"] = "error"
+        raise
 
 
 def _smartedu_cdn_json(

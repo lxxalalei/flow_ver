@@ -91,10 +91,13 @@ class SmartEduTextbookIteratorTests(unittest.TestCase):
 
         def fetch(adapter, url, headers):
             del adapter, headers
-            part = int(url.rsplit("part_", 1)[1].split(".", 1)[0])
-            if part not in pages:
-                raise _not_found(url)
-            return pages[part]
+            if "relation_teachingmaterials" in url:
+                return [{"relation_type_code": "EBOOK_RELATION", "source_resource_id": "pkg_test"}]
+            if url.endswith("/resources/parts.json"):
+                return ["https://cdn.test/part_100.json"]
+            if url.endswith("part_100.json"):
+                return pages[100]
+            raise _not_found(url)
 
         summary: dict = {}
         with mock.patch(
@@ -122,18 +125,21 @@ class SmartEduTextbookIteratorTests(unittest.TestCase):
         )
         self.assertEqual({"singing": 1, "future_type": 1}, report["skipped_types"])
         self.assertEqual(2, report["invalid_items"])
-        self.assertEqual("not_found", report["termination"])
+        self.assertEqual("manifest_complete", report["termination"])
 
     def test_reads_successive_shards_until_real_404(self) -> None:
-        seen: list[int] = []
+        seen: list[str] = []
 
         def fetch(adapter, url, headers):
             del adapter, headers
-            part = int(url.rsplit("part_", 1)[1].split(".", 1)[0])
-            seen.append(part)
-            if part == 100:
+            seen.append(url)
+            if "relation_teachingmaterials" in url:
+                return [{"relation_type_code": "EBOOK_RELATION", "source_resource_id": "pkg_test"}]
+            if url.endswith("/resources/parts.json"):
+                return ["https://cdn.test/part_100.json", "https://cdn.test/part_101.json"]
+            if url.endswith("part_100.json"):
                 return [{"id": "a", "title": "第一片", "resource_type_code": "national_lesson"}]
-            if part == 101:
+            if url.endswith("part_101.json"):
                 return [{"id": "b", "title": "第二片", "resource_type_code": "elite_lesson"}]
             raise _not_found(url)
 
@@ -144,7 +150,7 @@ class SmartEduTextbookIteratorTests(unittest.TestCase):
         ):
             resources = list(expand_resource(self.provider, _target(), summary=summary))
 
-        self.assertEqual([100, 101, 102], seen)
+        self.assertEqual(["https://s-file-2.ykt.cbern.com.cn/zxx/ndrs/resources/mid_test/relation_teachingmaterials.json", "https://s-file-1.ykt.cbern.com.cn/zxx/ndrs/national_lesson/teachingmaterials/pkg_test/resources/parts.json", "https://cdn.test/part_100.json", "https://cdn.test/part_101.json"], seen)
         self.assertEqual(2, len(resources))
         self.assertEqual(2, summary["smartedu"]["parts_read"])
 
@@ -182,10 +188,12 @@ class SmartEduTextbookJobTests(unittest.TestCase):
     def test_job_exposes_skipped_binding_census_without_fake_urls(self) -> None:
         def fetch(adapter, url, headers):
             del adapter, headers
-            if "part_100.json" in url:
-                return [
-                    {"id": "sing_1", "title": "朗读", "resource_type_code": "singing"},
-                ]
+            if "relation_teachingmaterials" in url:
+                return [{"relation_type_code": "EBOOK_RELATION", "source_resource_id": "pkg_test"}]
+            if url.endswith("/resources/parts.json"):
+                return ["https://cdn.test/part_100.json"]
+            if url.endswith("part_100.json"):
+                return [{"id": "sing_1", "title": "朗读", "resource_type_code": "singing"}]
             raise _not_found(url)
 
         started = start_expand(self.service, source_url=TEXTBOOK_URL)
