@@ -4,7 +4,6 @@ import json
 import unittest
 
 from education_resource_mcp.adapters.inspect_libgen import LibgenInspector
-from education_resource_mcp.adapters.inspect_nlc import NlcInspector
 from education_resource_mcp.adapters.inspect_ximalaya import XimalayaInspector
 
 
@@ -75,33 +74,6 @@ def make_inspector(cls, transport: QueueTransport):
 
 
 class PlatformInspectorCatalogTests(unittest.TestCase):
-    def test_nlc_enrichment_and_book_representation(self) -> None:
-        transport = QueueTransport(
-            FakeResponse(final_url="https://www.nlc.cn/catalog/42")
-        )
-        candidate = resource(
-            "nlc",
-            "https://find.nlc.cn/search/showDocDetails?docId=42",
-            author="国家图书馆编",
-            publisher="教育出版社",
-            isbn="9780306406157",
-            publication_year=2024,
-            edition="第 2 版",
-            call_number="G624.3/42",
-        )
-
-        mapped = make_inspector(NlcInspector, transport).inspect(candidate).to_mapping()
-        resolved = mapped["resolved_resource"]
-
-        self.assertEqual("resolved", mapped["resolution_status"])
-        self.assertEqual("book", resolved["resource_type"])
-        self.assertEqual("nlc", mapped["inspection"]["inspector_id"])
-        self.assertEqual("platform_bounded_get", mapped["inspection"]["method"])
-        self.assertEqual("9780306406157", resolved["metadata"]["isbn"])
-        self.assertEqual("国家图书馆编", resolved["creator"])
-        self.assertEqual("G624.3/42", resolved["metadata"]["call_number"])
-        self.assertIn("webpage", {item["kind"] for item in resolved["representations"]})
-
     def test_ximalaya_enrichment_has_audio_representation_and_landing_page(self) -> None:
         transport = QueueTransport(
             FakeResponse(final_url="https://www.ximalaya.com/album/7788")
@@ -189,10 +161,8 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
         self.assertEqual("libgen", mapped["failures"][0]["platform"])
         self.assertEqual([], transport.requests)
 
-    def test_nlc_and_ximalaya_wrong_hosts_are_blocked_before_transport(self) -> None:
+    def test_ximalaya_wrong_hosts_are_blocked_before_transport(self) -> None:
         cases = (
-            (NlcInspector, "nlc", "https://www.nlc.cn.evil.test/item"),
-            (NlcInspector, "nlc", "https://example.com.evil/item"),
             (XimalayaInspector, "ximalaya", "https://www.ximalaya.com.evil.test/album/1"),
             (XimalayaInspector, "ximalaya", "https://example.com/album/1"),
         )
@@ -213,27 +183,8 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
                 self.assertEqual(platform, mapped["failures"][0]["platform"])
                 self.assertEqual([], transport.requests)
 
-    def test_platform_host_policy_is_applied_to_redirect_hops(self) -> None:
-        response = FakeResponse(
-            status=302,
-            headers={"Location": "https://public.example/redirected"},
-            final_url="https://www.nlc.cn/catalog/1",
-        )
-        transport = QueueTransport(response)
-        mapped = make_inspector(NlcInspector, transport).inspect(
-            resource("nlc", "https://www.nlc.cn/catalog/1")
-        ).to_mapping()
-
-        self.assertEqual(
-            "policy_blocked",
-            mapped["resolved_resource"]["availability"]["status"],
-        )
-        self.assertEqual("PLATFORM_POLICY_BLOCKED", mapped["failures"][0]["code"])
-        self.assertEqual(1, len(transport.requests))
-
     def test_auth_and_not_found_statuses_are_preserved(self) -> None:
         cases = (
-            (NlcInspector, "nlc", "https://www.nlc.cn/catalog/1", {}),
             (XimalayaInspector, "ximalaya", "https://www.ximalaya.com/album/1", {}),
         )
         for status in (401, 404):
@@ -255,45 +206,6 @@ class PlatformInspectorCatalogTests(unittest.TestCase):
                         "platform_bounded_get",
                         mapped["inspection"]["method"],
                     )
-
-    def test_output_has_no_locator_bytes_headers_or_secret(self) -> None:
-        candidate = resource(
-            "nlc",
-            "https://www.nlc.cn/catalog/1?token=private-token",
-            author="公开作者",
-            headers={"Authorization": "Bearer private-token"},
-            cookie="private-cookie",
-            local_path="/private/secret.pdf",
-        )
-        transport = QueueTransport(
-            FakeResponse(final_url="https://www.nlc.cn/catalog/1")
-        )
-        mapped = make_inspector(NlcInspector, transport).inspect(candidate).to_mapping()
-        encoded = json.dumps(mapped, ensure_ascii=False, sort_keys=True)
-
-        for secret in ("private-token", "private-cookie", "/private/secret.pdf"):
-            self.assertNotIn(secret, encoded)
-        self.assertNotIn("source_url", encoded)
-        self.assertNotIn("headers", encoded)
-        self.assertNotIn("cookie", encoded)
-        self.assertNotIn("token", encoded.casefold())
-
-        def walk(value):
-            if isinstance(value, dict):
-                for key, child in value.items():
-                    self.assertNotIn(
-                        key.casefold(),
-                        {"url", "uri", "href", "path", "headers", "cookie", "token", "bytes"},
-                    )
-                    yield from walk(child)
-            elif isinstance(value, list):
-                for child in value:
-                    yield from walk(child)
-            else:
-                yield value
-
-        for value in walk(mapped):
-            self.assertFalse(isinstance(value, (bytes, bytearray, memoryview)))
 
 
 if __name__ == "__main__":

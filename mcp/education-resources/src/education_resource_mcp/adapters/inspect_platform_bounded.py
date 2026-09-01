@@ -1,4 +1,4 @@
-"""Bounded public inspection for the National Library of China catalog.
+"""Shared bounded public inspection helpers for catalog and platform adapters.
 
 The platform inspectors in this small module share a deliberately narrow
 base with the LibGen and Ximalaya inspectors.  The base is kept
@@ -130,7 +130,7 @@ class PlatformBoundedInspector(GenericWebInspector):
 
         GenericWebInspector already validates public DNS and every redirect.
         This additional check prevents a public but unrelated host from being
-        treated as an NLC/Ximalaya detail page after a redirect.  The flag is
+        treated as a bounded platform detail page after a redirect.  The flag is
         converted to a structured policy result by ``inspect`` below because
         GenericWebInspector intentionally catches transport exceptions at its
         own boundary.
@@ -364,106 +364,9 @@ class PlatformBoundedInspector(GenericWebInspector):
         return availability in {"available", "unknown"}
 
 
-class NlcInspector(PlatformBoundedInspector):
-    """Inspect public NLC catalog detail pages without using a session."""
-
-    platform_id = "nlc"
-    inspector_id = "nlc"
-    allowed_host_suffixes = ("nlc.cn",)
-
-    def _enrich(self, resource: Mapping[str, Any], result: InspectionResult) -> InspectionResult:
-        if not self._enrichment_allowed(result):
-            return result
-
-        metadata: dict[str, Any] = {}
-        isbn = _first_text(resource, "isbn", "ISBN")
-        if isbn:
-            metadata["isbn"] = isbn
-        author = _first_text(resource, "author", "creator", "著者")
-        if author:
-            metadata["author"] = author
-        publisher = _first_text(resource, "publisher", "出版社")
-        if publisher:
-            metadata["publisher"] = publisher
-        publication_year = _safe_year(
-            _first_value(resource, "publication_year", "publish_year", "pub_year", "year")
-        )
-        if publication_year is not None:
-            metadata["publication_year"] = publication_year
-        edition = _first_text(resource, "edition", "edition_statement", "版本")
-        if edition:
-            metadata["edition"] = edition
-        call_number = _first_text(resource, "call_number", "callno", "索书号")
-        if call_number:
-            metadata["call_number"] = call_number
-
-        current = result.to_mapping()["resolved_resource"]["representations"]
-        representations: list[dict[str, Any]] = []
-        for representation in current:
-            kind = representation.get("kind")
-            if kind not in {"webpage", "document"}:
-                continue
-            is_concrete_primary = (
-                representation.get("scope") == "primary_resource"
-                and representation.get("role") == "primary"
-                and representation.get("materializable") is True
-                and representation.get("technical_availability") == "available"
-            )
-            if kind == "webpage":
-                role, scope = "landing", "landing_page"
-            elif is_concrete_primary:
-                # A genuinely verified file outranks platform metadata; do
-                # not downgrade it merely because this is an NLC candidate.
-                role, scope = "primary", "primary_resource"
-            else:
-                role, scope = "metadata", "metadata"
-            representations.append(
-                self._copy_representation(
-                    resource,
-                    representation,
-                    kind=kind,
-                    role=role,
-                    scope=scope,
-                )
-            )
-        if not representations:
-            representations.append(
-                {
-                    "representation_id": self._representation_id(resource, "webpage", "landing"),
-                    "kind": "webpage",
-                    "container": "html",
-                    "mime_type": "text/html",
-                    "scope": "landing_page",
-                    "role": "landing",
-                    "technical_availability": "available",
-                    "materializable": False,
-                }
-            )
-
-        return self._rewrite_result(
-            resource,
-            result,
-            resource_type="book",
-            metadata=metadata,
-            representations=representations,
-            creator=author,
-        )
-
-
-# Both spellings are useful to callers while the canonical implementation
-# keeps the platform ID's normal acronym casing out of the class name.
-NLCInspector = NlcInspector
-
 
 __all__ = [
-    "NLCInspector",
-    "NlcInspector",
-    "PLATFORM_INSPECTION_METHOD",
-    "PlatformBoundedInspector",
-    "_first_text",
-    "_first_value",
-    "_safe_integer",
-    "_safe_numeric_id",
-    "_safe_text",
-    "_safe_year",
+    "PLATFORM_INSPECTION_METHOD", "PlatformBoundedInspector",
+    "_first_text", "_first_value", "_safe_integer", "_safe_numeric_id",
+    "_safe_text", "_safe_year",
 ]

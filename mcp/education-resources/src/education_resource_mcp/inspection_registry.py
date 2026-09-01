@@ -10,7 +10,6 @@ from .adapters.inspect_bilibili import BilibiliInspector
 from .adapters.inspect_cctv import CctvInspector
 from .adapters.inspect_douyin import DouyinInspector
 from .adapters.inspect_generic import GenericWebInspector
-from .adapters.inspect_nlc import NlcInspector
 from .adapters.inspect_shuge import ShugeInspector
 from .adapters.inspect_smartedu import SmartEduInspector
 from .adapters.inspect_ximalaya import XimalayaInspector
@@ -37,7 +36,6 @@ def default_inspection_router(
             GenericWebInspector(**options),
             BilibiliInspector(session_store=session_store, **options),
             DouyinInspector(session_store=session_store),
-            NlcInspector(**options),
             LibgenInspector(**options),
             ZlibraryInspector(session_store=session_store, **options),
             XimalayaInspector(session_store=session_store, **options),

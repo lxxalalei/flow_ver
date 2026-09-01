@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..inspection import InspectionResult
-from .inspect_nlc import PlatformBoundedInspector
+from .inspect_platform_bounded import PlatformBoundedInspector
 
 
 INSPECTOR_ID = "yixi"

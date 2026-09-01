@@ -31,7 +31,7 @@
 - Baidu Wenku
 - LibGen
 - Zhihu
-- Shuge / NLC
+- Shuge
 - Yixi / Open163 / Kepu
 - Weibo / WeChat
 - Runoob

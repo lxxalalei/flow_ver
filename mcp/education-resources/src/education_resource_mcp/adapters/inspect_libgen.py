@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 from ..inspection import InspectionResult
-from .inspect_nlc import (
+from .inspect_platform_bounded import (
     PlatformBoundedInspector,
     _first_text,
     _first_value,

@@ -122,10 +122,6 @@ _PLATFORM_LIST = [
         "cookie", "browser_cookies", cookie_domains=("baidu.com",),
     ),
     PlatformConfig(
-        "nlc", "国家图书馆", "https://read.nlc.cn/",
-        "cookie", "browser_cookies", cookie_domains=("nlc.cn",),
-    ),
-    PlatformConfig(
         "zlibrary", "Z-Library", "https://z-library.sk/",
         "cookie", "browser_cookies", cookie_domains=ZLIBRARY_COOKIE_DOMAINS,
     ),

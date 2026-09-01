@@ -108,7 +108,7 @@ OpenClaw 真实多轮会话
   - 普通 EPUB/PDF 只因书名相同就声称是 1923 初版。
   - 伪造馆藏、版本或 URL。
 - fixtures: 无。
-- coverage: Exact edition / Evidence / Web search / Book/NLC routing。
+- coverage: Exact edition / Evidence / Web search / Book routing。
 
 ## P0-04 平台约束：只在 B 站找牛顿第二定律
 
@@ -639,7 +639,6 @@ OpenClaw 真实多轮会话
 - SmartEdu：P0-07 / P1-04（允许实际搜索路由到 SmartEdu）
 - Zjer：P1-05
 - Ximalaya：P0-09 / P1-03
-- NLC / 书籍版本：P0-03
 - Generic Web：P0-06 / P1-07 / P1-08 / P1-09
 - Zhihu / Baidu Wenku：当前主要通过开放 Search/Research Journey 间接覆盖；若后续改 Adapter，再补对应 P2 专项，不为了平台数量机械造测试。
 

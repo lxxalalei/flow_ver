@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..inspection import InspectionResult
-from .inspect_nlc import (
+from .inspect_platform_bounded import (
     PLATFORM_INSPECTION_METHOD,
     PlatformBoundedInspector,
     _first_text,

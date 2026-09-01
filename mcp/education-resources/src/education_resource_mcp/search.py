@@ -406,7 +406,6 @@ class MultiPlatformSearchProvider:
             ("kepu", "KepuSearchAdapter"),
             ("baiduwenku", "BaiduwenkuSearchAdapter"),
             ("runoob", "RunoobSearchAdapter"),
-            ("nlc", "NlcSearchAdapter"),
             ("open163", "Open163SearchAdapter"),
             ("libgen", "LibgenSearchAdapter"),
             ("zlibrary", "ZlibrarySearchAdapter"),
