@@ -14,7 +14,6 @@ import threading
 from typing import Any, Mapping
 
 from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistration
-from .acquisition.models import AcquisitionStrategy
 from .acquisition.planner import AcquisitionPlanner
 from .acquisition.web_materializer import WebMaterializer
 from .archive import archive_downloaded_files
@@ -186,14 +185,10 @@ def _provider_registrations(
         ProviderRegistration(
             provider_id="generic-direct",
             provider=download_provider or PublicHttpDownloader(settings),
-            strategies=(AcquisitionStrategy.DIRECT_FILE,),
-            scopes=("primary_resource",),
         ),
         ProviderRegistration(
             provider_id="generic-web-materializer",
             provider=WebMaterializer(settings=settings),
-            strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
-            scopes=("primary_resource", "landing_page"),
         ),
     ]
     for module_name, class_name, provider_id in (
@@ -217,8 +212,6 @@ def _provider_registrations(
             ProviderRegistration(
                 provider_id=provider_id,
                 provider=provider_class(session_store, settings),
-                strategies=(AcquisitionStrategy.DIRECT_FILE,),
-                scopes=("primary_resource",),
             )
         )
     return registrations
