@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from education_resource_mcp.acquisition import (
-    AcquisitionRouter,
-    AcquisitionStrategy,
-    ProviderRegistration,
-)
+from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
 from education_resource_mcp.acquisition.planner import AcquisitionPlanner
 
 
@@ -18,14 +14,7 @@ class _DirectProviderStub:
 class ShugeAcquisitionRouteTests(unittest.TestCase):
     def test_primary_pdf_routes_to_generic_direct(self) -> None:
         router = AcquisitionRouter(
-            [
-                ProviderRegistration(
-                    provider_id="generic-direct",
-                    provider=_DirectProviderStub(),
-                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
-                    scopes=("primary_resource",),
-                )
-            ]
+            [ProviderRegistration("generic-direct", _DirectProviderStub())]
         )
         planner = AcquisitionPlanner(router)
         resource = {
