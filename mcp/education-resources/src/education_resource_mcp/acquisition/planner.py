@@ -1,9 +1,8 @@
-"""Choose one concrete downloader for a freshly inspected resource."""
+"""Select one current representation and its concrete download handler."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from .models import AcquisitionStrategy
@@ -31,136 +30,6 @@ class AcquisitionPlanningError(ValueError):
         super().__init__(self.message)
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderSpec:
-    platform_id: str
-    scope: str
-    representation_kind: str
-    role: str
-    strategy: AcquisitionStrategy
-    provider_id: str
-    containers: frozenset[str] = frozenset()
-    resource_types: frozenset[str] = frozenset()
-
-    def matches(
-        self,
-        resource: Mapping[str, Any],
-        representation: Mapping[str, Any],
-        scope: str,
-    ) -> bool:
-        if str(resource.get("platform") or "generic") != self.platform_id:
-            return False
-        if scope != self.scope:
-            return False
-        if str(representation.get("kind") or "") != self.representation_kind:
-            return False
-        if _role(representation) != self.role:
-            return False
-        container = str(representation.get("container") or "").strip().lower()
-        if self.containers and container and container not in self.containers:
-            return False
-        resource_type = str(resource.get("resource_type") or "other")
-        if self.resource_types and resource_type not in self.resource_types:
-            return False
-        return bool(representation.get("materializable", True))
-
-
-DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
-    ProviderSpec(
-        "smartedu", "primary_resource", "document", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
-        frozenset({"pdf"}), frozenset({"book", "course", "document", "other"}),
-    ),
-    ProviderSpec(
-        "smartedu", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
-        frozenset({"mp4", "m3u8"}), frozenset({"course", "video"}),
-    ),
-    ProviderSpec(
-        "smartedu", "primary_resource", "audio", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "smartedu-resource",
-        frozenset({"mp3", "m4a"}), frozenset({"audio", "course"}),
-    ),
-    ProviderSpec(
-        "douyin", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "douyin-video",
-        frozenset({"mp4"}), frozenset({"video"}),
-    ),
-    ProviderSpec(
-        "ximalaya", "primary_resource", "audio", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "ximalaya-audio",
-        frozenset({"mp3", "m4a"}), frozenset({"audio"}),
-    ),
-    ProviderSpec(
-        "bilibili", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "bilibili-video",
-        frozenset({"mp4"}), frozenset({"video"}),
-    ),
-    ProviderSpec(
-        "yixi", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
-        frozenset({"mp4"}), frozenset({"video"}),
-    ),
-    ProviderSpec(
-        "cctv", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "cctv-video",
-        frozenset({"mp4"}), frozenset({"video"}),
-    ),
-    ProviderSpec(
-        "zjer", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "zjer-video",
-        frozenset({"mp4"}), frozenset({"video"}),
-    ),
-    ProviderSpec(
-        "libgen", "primary_resource", "document", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "libgen",
-        frozenset(), frozenset({"book", "document"}),
-    ),
-    ProviderSpec(
-        "zlibrary", "primary_resource", "document", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "zlibrary",
-        frozenset(), frozenset({"book", "document"}),
-    ),
-    ProviderSpec(
-        "shuge", "primary_resource", "document", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
-        _DOCUMENT_CONTAINERS, frozenset({"book", "document", "other"}),
-    ),
-    ProviderSpec(
-        "generic", "primary_resource", "document", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
-        _DOCUMENT_CONTAINERS,
-        frozenset({"article", "book", "course", "dataset", "document", "other"}),
-    ),
-    ProviderSpec(
-        "generic", "primary_resource", "video", "primary",
-        AcquisitionStrategy.DIRECT_FILE, "generic-direct",
-        frozenset({"mp4"}), frozenset({"course", "video"}),
-    ),
-    ProviderSpec(
-        "generic", "primary_resource", "webpage", "primary",
-        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
-        frozenset({"html"}),
-        frozenset({"article", "course", "dataset", "document", "other"}),
-    ),
-    ProviderSpec(
-        "generic", "landing_page", "webpage", "landing",
-        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
-        frozenset({"html"}), frozenset(),
-    ),
-    ProviderSpec(
-        "zhihu", "primary_resource", "webpage", "primary",
-        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
-        frozenset({"article", "webpage", "html"}), frozenset(),
-    ),
-    ProviderSpec(
-        "zhihu", "landing_page", "webpage", "landing",
-        AcquisitionStrategy.WEB_MATERIALIZE, "generic-web-materializer",
-        frozenset({"article", "webpage", "html"}), frozenset(),
-    ),
-)
-
-
 def _role(representation: Mapping[str, Any]) -> str:
     role = str(representation.get("role") or "").strip().lower()
     if role:
@@ -172,14 +41,7 @@ def _scope(representation: Mapping[str, Any]) -> str:
     scope = str(representation.get("scope") or "").strip()
     if scope:
         return scope
-    role = _role(representation)
-    if role == "primary":
-        return "primary_resource"
-    if role == "landing":
-        return "landing_page"
-    if role == "metadata":
-        return "metadata"
-    return "representation"
+    return "landing_page" if _role(representation) == "landing" else "primary_resource"
 
 
 def _choose_representation(
@@ -191,6 +53,7 @@ def _choose_representation(
     raw = resolved.get("representations") or []
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
         raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "检查结果没有可下载资源")
+
     values = [
         dict(item)
         for item in raw
@@ -201,7 +64,6 @@ def _choose_representation(
 
     primaries = [item for item in values if _scope(item) == "primary_resource"]
     pool = primaries or values
-
     if preferred_container == "original":
         if len(pool) == 1:
             return pool[0]
@@ -211,8 +73,10 @@ def _choose_representation(
         )
 
     matching = [
-        item for item in pool
-        if str(item.get("container") or "").lower() == preferred_container.lower()
+        item
+        for item in pool
+        if str(item.get("container") or "").strip().lower()
+        == preferred_container.strip().lower()
     ]
     if len(matching) == 1:
         return matching[0]
@@ -227,14 +91,116 @@ def _choose_representation(
     )
 
 
+def _direct(provider_id: str) -> tuple[AcquisitionStrategy, str]:
+    return AcquisitionStrategy.DIRECT_FILE, provider_id
+
+
+def _web(provider_id: str) -> tuple[AcquisitionStrategy, str]:
+    return AcquisitionStrategy.WEB_MATERIALIZE, provider_id
+
+
+def _handler_for(
+    resource: Mapping[str, Any], representation: Mapping[str, Any], scope: str
+) -> tuple[AcquisitionStrategy, str] | None:
+    """Map real resource facts directly to one deployed handler id.
+
+    This is intentionally explicit. There is no second capability registry or
+    generic rule object: platform-specific differences stay visible here.
+    """
+
+    platform = str(resource.get("platform") or "generic")
+    resource_type = str(resource.get("resource_type") or "other")
+    kind = str(representation.get("kind") or "")
+    role = _role(representation)
+    container = str(representation.get("container") or "").strip().lower()
+
+    if not bool(representation.get("materializable", True)):
+        return None
+
+    if platform == "smartedu" and scope == "primary_resource" and role == "primary":
+        if kind == "document" and container == "pdf" and resource_type in {
+            "book", "course", "document", "other"
+        }:
+            return _direct("smartedu-resource")
+        if kind == "video" and container in {"mp4", "m3u8"} and resource_type in {
+            "course", "video"
+        }:
+            return _direct("smartedu-resource")
+        if kind == "audio" and container in {"mp3", "m4a"} and resource_type in {
+            "audio", "course"
+        }:
+            return _direct("smartedu-resource")
+
+    if platform == "douyin" and scope == "primary_resource" and role == "primary":
+        if kind == "video" and container == "mp4" and resource_type == "video":
+            return _direct("douyin-video")
+
+    if platform == "ximalaya" and scope == "primary_resource" and role == "primary":
+        if kind == "audio" and container in {"mp3", "m4a"} and resource_type == "audio":
+            return _direct("ximalaya-audio")
+
+    if platform == "bilibili" and scope == "primary_resource" and role == "primary":
+        if kind == "video" and container == "mp4" and resource_type == "video":
+            return _direct("bilibili-video")
+
+    if platform == "yixi" and scope == "primary_resource" and role == "primary":
+        if kind == "video" and container == "mp4" and resource_type == "video":
+            return _direct("generic-direct")
+
+    if platform == "cctv" and scope == "primary_resource" and role == "primary":
+        if kind == "video" and container == "mp4" and resource_type == "video":
+            return _direct("cctv-video")
+
+    if platform == "zjer" and scope == "primary_resource" and role == "primary":
+        if kind == "video" and container == "mp4" and resource_type == "video":
+            return _direct("zjer-video")
+
+    if platform == "libgen" and scope == "primary_resource" and role == "primary":
+        if kind == "document" and resource_type in {"book", "document"}:
+            return _direct("libgen")
+
+    if platform == "zlibrary" and scope == "primary_resource" and role == "primary":
+        if kind == "document" and resource_type in {"book", "document"}:
+            return _direct("zlibrary")
+
+    if platform == "shuge" and scope == "primary_resource" and role == "primary":
+        if (
+            kind == "document"
+            and container in _DOCUMENT_CONTAINERS
+            and resource_type in {"book", "document", "other"}
+        ):
+            return _direct("generic-direct")
+
+    if platform == "generic" and scope == "primary_resource" and role == "primary":
+        if kind == "document" and container in _DOCUMENT_CONTAINERS and resource_type in {
+            "article", "book", "course", "dataset", "document", "other"
+        }:
+            return _direct("generic-direct")
+        if kind == "video" and container == "mp4" and resource_type in {"course", "video"}:
+            return _direct("generic-direct")
+        if kind == "webpage" and container == "html" and resource_type in {
+            "article", "course", "dataset", "document", "other"
+        }:
+            return _web("generic-web-materializer")
+
+    if platform == "generic" and scope == "landing_page" and role == "landing":
+        if kind == "webpage" and container == "html":
+            return _web("generic-web-materializer")
+
+    if platform == "zhihu" and kind == "webpage" and container in {
+        "", "article", "webpage", "html"
+    }:
+        if scope in {"primary_resource", "landing_page"} and role in {"primary", "landing"}:
+            return _web("generic-web-materializer")
+
+    return None
+
+
 class AcquisitionPlanner:
-    def __init__(
-        self,
-        router: AcquisitionRouter,
-        specs: Sequence[ProviderSpec] = DEFAULT_PROVIDER_SPECS,
-    ) -> None:
+    """Choose a representation and its concrete handler; no workflow planning."""
+
+    def __init__(self, router: AcquisitionRouter) -> None:
         self.router = router
-        self.specs = tuple(specs)
 
     def route(
         self,
@@ -254,48 +220,41 @@ class AcquisitionPlanner:
             )
 
         scope = _scope(representation)
-        for spec in self.specs:
-            if not spec.matches(resource, representation, scope):
-                continue
-            registration = self.router.provider_registry.get(spec.provider_id)
-            if registration is None:
-                raise AcquisitionPlanningError(
-                    "PROVIDER_UNAVAILABLE",
-                    f"下载器 {spec.provider_id} 当前未部署",
-                    retryable=True,
-                )
-            if spec.strategy not in registration.strategies or scope not in registration.scopes:
-                continue
-            representation_id = str(representation.get("representation_id") or "")
-            if not representation_id:
-                raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "资源表示缺少 ID")
-            container = str(representation.get("container") or "").strip().lower()
-            return {
-                "strategy": spec.strategy.kind,
-                "provider_id": spec.provider_id,
-                "scope": scope,
-                "representation_id": representation_id,
-                "container": (
-                    container
-                    if spec.platform_id == "smartedu" and container
-                    else preferred_container
-                ),
-            }
+        selected = _handler_for(resource, representation, scope)
+        if selected is None:
+            raise AcquisitionPlanningError(
+                "CAPABILITY_NOT_DECLARED",
+                "当前资源没有可用下载器",
+                {
+                    "platform": str(resource.get("platform") or "generic"),
+                    "kind": str(representation.get("kind") or ""),
+                    "scope": scope,
+                },
+            )
 
-        raise AcquisitionPlanningError(
-            "CAPABILITY_NOT_DECLARED",
-            "当前资源没有可用下载器",
-            {
-                "platform": str(resource.get("platform") or "generic"),
-                "kind": str(representation.get("kind") or ""),
-                "scope": scope,
-            },
-        )
+        strategy, provider_id = selected
+        if provider_id not in self.router.provider_registry:
+            raise AcquisitionPlanningError(
+                "PROVIDER_UNAVAILABLE",
+                f"下载器 {provider_id} 当前未部署",
+                retryable=True,
+            )
+
+        representation_id = str(representation.get("representation_id") or "")
+        if not representation_id:
+            raise AcquisitionPlanningError("RESOURCE_UNAVAILABLE", "资源表示缺少 ID")
+        actual_container = str(representation.get("container") or "").strip().lower()
+        return {
+            "strategy": strategy.kind,
+            "provider_id": provider_id,
+            "scope": scope,
+            "representation_id": representation_id,
+            "container": (
+                actual_container
+                if str(resource.get("platform") or "") == "smartedu" and actual_container
+                else preferred_container
+            ),
+        }
 
 
-__all__ = [
-    "AcquisitionPlanner",
-    "AcquisitionPlanningError",
-    "DEFAULT_PROVIDER_SPECS",
-    "ProviderSpec",
-]
+__all__ = ["AcquisitionPlanner", "AcquisitionPlanningError"]
