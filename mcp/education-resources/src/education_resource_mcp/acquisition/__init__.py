@@ -1,4 +1,4 @@
-"""Download provider routing primitives."""
+"""Download execution models shared by handlers and the dispatcher."""
 
 from .models import (
     ACQUISITION_SCOPES,
@@ -11,7 +11,6 @@ from .models import (
     Artifact,
     ArtifactBundle,
 )
-from .router import AcquisitionRouter, ProviderRegistration
 
 __all__ = [
     "ACQUISITION_SCOPES",
@@ -20,9 +19,7 @@ __all__ = [
     "AcquisitionItemFailure",
     "AcquisitionRequest",
     "AcquisitionResult",
-    "AcquisitionRouter",
     "AcquisitionStrategy",
     "Artifact",
     "ArtifactBundle",
-    "ProviderRegistration",
 ]
