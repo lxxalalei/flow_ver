@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -234,9 +236,11 @@ _HLS_PLAIN = (
 _AES_KEY = bytes(range(16))
 _AES_IV = bytes.fromhex("00000000000000000000000000000001")
 _AES_PLAIN = b"0123456789abcdef" * 4
+_HLS_KEY_ID = "coursekey1.key"
+_HLS_KEY_URI = "https://ndvideo-key.ykt.eduyun.cn/v1/resource_keys/" + _HLS_KEY_ID
 _HLS_AES = (
     b"#EXTM3U\n"
-    b"#EXT-X-KEY:METHOD=AES-128,URI=\"secret.key\",IV=0x00000000000000000000000000000001\n"
+    b"#EXT-X-KEY:METHOD=AES-128,URI=\"" + _HLS_KEY_URI.encode("ascii") + b"\",IV=0x00000000000000000000000000000001\n"
     b"#EXTINF:4.0,\n"
     b"seg0.ts\n"
     b"#EXTINF:4.0,\n"
@@ -304,6 +308,10 @@ class SmartEduBundleTests(unittest.TestCase):
                 return _json_response(detail, url)
             if "relation_audios" in url:
                 return _json_response(audio or [], url)
+            if url.endswith("/signs"):
+                return _Response((extra_bodies or {}).get("signs", b"{}"), url=url)
+            if "ndvideo-key.ykt.eduyun.cn" in url:
+                return _Response((extra_bodies or {}).get(url.split("/resource_keys/", 1)[-1].split("?", 1)[0], (extra_bodies or {}).get("key", b"{}")), url=url)
             suffix = Path(url.split("?", 1)[0]).suffix.lstrip(".")
             if cancel_on_format == suffix:
                 cancel_event.set()
@@ -429,6 +437,14 @@ class SmartEduBundleTests(unittest.TestCase):
     def test_course_m3u8_aes128_segments_are_decrypted(self) -> None:
         from Crypto.Cipher import AES
 
+        # ndvideo-key 密钥交换协议：signs → nonce，sign = md5(nonce+key_id)[:16]，
+        # key 资源返回 base64(AES-ECB(sign, pkcs7(material)))。
+        nonce = "1788241165041:YnY41K"
+        sign = hashlib.md5((nonce + _HLS_KEY_ID).encode("utf-8")).hexdigest()[:16]
+        # 16 字节密钥的 PKCS7 填充是整块 0x10
+        sealed = AES.new(sign.encode("utf-8"), AES.MODE_ECB).encrypt(
+            _AES_KEY + bytes([16]) * 16
+        )
         cipher = AES.new(_AES_KEY, AES.MODE_CBC, _AES_IV)
         encrypted = cipher.encrypt(_AES_PLAIN + bytes([16]) * 16)
         captured: dict = {}
@@ -439,7 +455,14 @@ class SmartEduBundleTests(unittest.TestCase):
             raw, _transport = self._download(
                 _course_detail(include_mp4=False),
                 planned_container="m3u8",
-                extra_bodies={"m3u8": _HLS_AES, "ts": encrypted, "key": _AES_KEY},
+                extra_bodies={
+                    "m3u8": _HLS_AES,
+                    "ts": encrypted,
+                    "signs": ('{"nonce": "' + nonce + '"}').encode("utf-8"),
+                    "key": (
+                        '{"key": "' + base64.b64encode(sealed).decode("ascii") + '"}'
+                    ).encode("utf-8"),
+                },
             )
         results, failures = _batch_parts(raw)
 

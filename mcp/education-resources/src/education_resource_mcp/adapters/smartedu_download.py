@@ -74,7 +74,14 @@ _SMARTEDU_STORAGE_HOSTS = frozenset(
         "r3-ndr-private.ykt.cbern.com.cn",
     }
 )
-_SMARTEDU_ALLOWED_HOSTS = _SMARTEDU_DETAIL_HOSTS | _SMARTEDU_STORAGE_HOSTS
+_SMARTEDU_KEY_HOSTS = frozenset(
+    {
+        "ndvideo-key.ykt.eduyun.cn",
+    }
+)
+_SMARTEDU_ALLOWED_HOSTS = (
+    _SMARTEDU_DETAIL_HOSTS | _SMARTEDU_STORAGE_HOSTS | _SMARTEDU_KEY_HOSTS
+)
 _HTTP_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _SENSITIVE_QUERY_KEYS = frozenset(
     {"access_token", "accesstoken", "auth", "authorization", "token"}
@@ -260,6 +267,96 @@ def _hls_fetch(client: Any, url: str, token: str, *, limit: int, label: str) -> 
         return _read_bounded(resp, limit, label=label)
 
 
+def _hls_fetch_bare(client: Any, url: str, *, limit: int, label: str) -> bytes:
+    """GET with a bare User-Agent only.
+
+    The ndvideo-key key-exchange endpoint rejects requests that carry auth
+    headers (legacy platform finding: adding them turns 200 into 403).
+    """
+
+    request = Request(url, headers={"User-Agent": UA})
+    with client.open(request, timeout=30) as resp:
+        _raise_for_http_status(resp)
+        return _read_bounded(resp, limit, label=label)
+
+
+def _hls_json_field(payload: bytes, field: str, *, label: str) -> str:
+    try:
+        parsed = json.loads(payload.decode("utf-8", "replace"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}格式无效",
+            retryable=False,
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}格式无效",
+            retryable=False,
+        )
+    value = parsed.get(field)
+    if not isinstance(value, str) or not value:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            f"SmartEdu {label}缺少 {field}",
+            retryable=False,
+        )
+    return value
+
+
+def _aes_ecb_unwrap(ciphertext: bytes, key: bytes) -> bytes:
+    from Crypto.Cipher import AES  # lazy: only encrypted streams need it
+
+    if not ciphertext or len(ciphertext) % 16:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            "HLS 密钥载荷长度非法",
+            retryable=False,
+        )
+    plain = AES.new(key, AES.MODE_ECB).decrypt(ciphertext)
+    pad = plain[-1] if plain else 0
+    if 1 <= pad <= 16 and plain.endswith(bytes([pad]) * pad):
+        plain = plain[:-pad]
+    return plain
+
+
+def _hls_fetch_decryption_key(http_client: Any, key_uri: str) -> bytes:
+    """Resolve one SmartEdu AES-128 key through the ndvideo-key protocol.
+
+    The key server is not a plain 16-byte key file; it runs a custom
+    exchange (reference: smartedu-dl-go, tchMaterial-parser ecosystem):
+
+    1. bare GET ``{base}/signs`` -> ``{"nonce": ...}``
+    2. ``sign = md5(nonce + key_id)[:16]`` with key_id = URI tail
+    3. bare GET ``{base}?nonce=...&sign=...`` -> ``{"key": <base64>}``
+    4. AES-ECB-decrypt the payload using the ASCII sign bytes; the
+       16-byte plaintext is the HLS AES-128 key.
+    """
+
+    base = key_uri.rstrip("/")
+    key_id = base.rsplit("/", 1)[-1]
+    nonce_payload = _hls_fetch_bare(
+        http_client, base + "/signs", limit=_KEY_JSON_MAX_BYTES, label="HLS 密钥 nonce"
+    )
+    nonce = _hls_json_field(nonce_payload, "nonce", label="HLS 密钥 nonce")
+    sign = hashlib.md5((nonce + key_id).encode("utf-8")).hexdigest()[:16]
+    key_url = base + "?nonce=" + quote(nonce, safe="") + "&sign=" + sign
+    key_payload = _hls_fetch_bare(
+        http_client, key_url, limit=_KEY_JSON_MAX_BYTES, label="HLS 密钥数据"
+    )
+    key_b64 = _hls_json_field(key_payload, "key", label="HLS 密钥数据")
+    try:
+        ciphertext = base64.b64decode(key_b64)
+    except (ValueError, TypeError) as exc:
+        raise DomainError(
+            "CONTENT_VALIDATION_FAILED",
+            "SmartEdu HLS 密钥数据不是合法 base64",
+            retryable=False,
+        ) from exc
+    return _aes_ecb_unwrap(ciphertext, sign.encode("utf-8"))
+
+
 def _hls_master_variant(text: str, base_url: str) -> str:
     """Return the highest-bandwidth variant URL of a master playlist."""
 
@@ -353,9 +450,7 @@ def _download_hls_to_mp4(
     cipher_key: bytes | None = None
     explicit_iv: bytes | None = None
     if key is not None:
-        cipher_key = _hls_fetch(
-            http_client, key["uri"], token, limit=64, label="HLS 密钥"
-        )
+        cipher_key = _hls_fetch_decryption_key(http_client, key["uri"])
         if len(cipher_key) != 16:
             raise DomainError(
                 "CONTENT_VALIDATION_FAILED", "HLS 密钥长度非法", retryable=False
@@ -904,7 +999,7 @@ class SmartEduDownloader:
         self.storage_client = _SmartEduHttpClient(
             resolver=resolver,
             transport=transport,
-            allowed_hosts=_SMARTEDU_STORAGE_HOSTS,
+            allowed_hosts=_SMARTEDU_STORAGE_HOSTS | _SMARTEDU_KEY_HOSTS,
         )
 
     def download(
