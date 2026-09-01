@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from .acquisition.planner import AcquisitionPlanningError
+from .acquisition.download_dispatch import DownloadDispatchError
 from .errors import DomainError
 from .job_state import (
     CANCEL_FLAG_NAME,
@@ -53,7 +53,7 @@ def run(directory: Path) -> int:
                 )
                 files.extend(resource_files)
                 failures.extend(resource_failures)
-            except (DomainError, AcquisitionPlanningError) as exc:
+            except (DomainError, DownloadDispatchError) as exc:
                 failures.append(
                     {
                         "resource_id": resource.get("resource_id"),
