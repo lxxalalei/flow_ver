@@ -177,22 +177,36 @@ MCP 只保存执行真正需要的状态，例如：
 
 详细设计见 [`docs/CURRENT_ARCHITECTURE.md`](docs/CURRENT_ARCHITECTURE.md)。
 
-## 当前资源来源
+## 已接入搜索来源
 
-| 来源 | 典型能力 |
+`resource_search` 当前默认注册以下专门来源，并另外提供 Generic Web 搜索能力：
+
+| 来源 | 主要资源 |
 | --- | --- |
 | Bilibili | 视频、UP 主、合集 |
 | Douyin | 视频、创作者、合集 |
 | Ximalaya | 音频、专辑、创作者 |
+| CCTV | 栏目、视频 |
+| 一席（Yixi） | 演讲视频 |
+| 网易公开课（Open163） | 公开课、课程视频 |
 | SmartEdu | 教材、课程等国家智慧教育资源 |
 | Zjer | 课程资源 |
-| CCTV | 栏目、视频 |
-| LibGen | 书籍搜索与获取 |
-| Z-Library | 登录后的书籍搜索与获取 |
-| Zhihu | 页面导入与资源处理 |
-| Generic Web | 普通网页导入、正文抽取和离线阅读 |
+| 科普中国（Kepu） | 科普文章 |
+| 百度文库（Baidu Wenku） | 文档资料 |
+| 菜鸟教程（Runoob） | 编程教程 |
+| LibGen | 书籍 |
+| Z-Library | 书籍 |
+| 书格（Shuge） | 古籍、公开文件 |
+| Zhihu | 回答、文章等页面内容 |
+| Weibo | 微博内容 |
+| WeChat | 微信公众号内容 |
+| Generic Web | 开放互联网网页与长尾资源 |
 
-开放互联网的资源发现默认由宿主 Web Search 承担。选中具体 URL 后可通过 `resource_import_url` 进入专门平台或 Generic Web 的后续处理。
+这里表示“已经接入搜索发现”，不代表所有来源拥有完全相同的 Inspect、Expand 或 Download 深度。具体资源是否需要进一步检查、能否直接获取，以及是否需要登录，由对应平台实现和当前真实结果决定。
+
+其中一席和书格都已经有专门搜索 Adapter，并已接入 `resource_inspect`。一席搜索会解析公开可用的视频资源；书格直接搜索其公开存储中的古籍文件。
+
+开放互联网的资源发现也可由宿主 Web Search 承担。选中具体 URL 后可通过 `resource_import_url` 进入专门平台或 Generic Web 的后续处理。
 
 ## MCP 能力
 
