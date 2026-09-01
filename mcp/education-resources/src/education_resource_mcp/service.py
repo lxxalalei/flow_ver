@@ -13,8 +13,8 @@ import secrets
 import threading
 from typing import Any, Mapping
 
-from .acquisition import AcquisitionRequest, AcquisitionRouter, ProviderRegistration
-from .acquisition.planner import AcquisitionPlanner
+from .acquisition.download_dispatch import dispatch_download, select_download_handler
+from .acquisition.models import AcquisitionRequest
 from .acquisition.web_materializer import WebMaterializer
 from .archive import archive_downloaded_files
 from .config import Settings
@@ -176,21 +176,15 @@ def _resource_type(value: Any) -> str:
     )
 
 
-def _provider_registrations(
+def _download_handlers(
     settings: Settings,
     session_store: Any,
     download_provider: DownloadProvider | None = None,
-) -> list[ProviderRegistration]:
-    registrations = [
-        ProviderRegistration(
-            provider_id="generic-direct",
-            provider=download_provider or PublicHttpDownloader(settings),
-        ),
-        ProviderRegistration(
-            provider_id="generic-web-materializer",
-            provider=WebMaterializer(settings=settings),
-        ),
-    ]
+) -> dict[str, Any]:
+    handlers: dict[str, Any] = {
+        "generic-direct": download_provider or PublicHttpDownloader(settings),
+        "generic-web-materializer": WebMaterializer(settings=settings),
+    }
     for module_name, class_name, provider_id in (
         ("smartedu_download", "SmartEduDownloader", "smartedu-resource"),
         ("douyin_download", "DouyinDownloader", "douyin-video"),
@@ -208,13 +202,8 @@ def _provider_registrations(
         except ImportError:
             continue
         provider_class = getattr(module, class_name)
-        registrations.append(
-            ProviderRegistration(
-                provider_id=provider_id,
-                provider=provider_class(session_store, settings),
-            )
-        )
-    return registrations
+        handlers[provider_id] = provider_class(session_store, settings)
+    return handlers
 
 
 class ResourceService:
@@ -226,7 +215,7 @@ class ResourceService:
         *,
         search_provider: SearchProvider | None = None,
         inspection_router: InspectionRouter | None = None,
-        acquisition_router: AcquisitionRouter | None = None,
+        download_handlers: Mapping[str, Any] | None = None,
         download_provider: DownloadProvider | None = None,
         job_runner: JobSpawner | None = None,
         recover_jobs: bool = True,
@@ -240,14 +229,11 @@ class ResourceService:
         self.inspection_router = inspection_router or default_inspection_router(
             self.settings, session_store=self.session_store
         )
-        self.acquisition_router = acquisition_router or AcquisitionRouter(
-            _provider_registrations(
-                self.settings,
-                self.session_store,
-                download_provider=download_provider,
-            )
+        self.download_handlers = dict(download_handlers) if download_handlers is not None else _download_handlers(
+            self.settings,
+            self.session_store,
+            download_provider=download_provider,
         )
-        self.planner = AcquisitionPlanner(self.acquisition_router)
         self.job_runner = job_runner or JobSpawner(max_workers=self.settings.max_workers)
         self._resources: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
@@ -732,10 +718,11 @@ class ResourceService:
         cancel_event: threading.Event,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         resolution = self._inspect_raw(resource)
-        route = self.planner.route(
+        route = select_download_handler(
             resource,
             resolution,
             preferred_container=preferred_container,
+            handlers=self.download_handlers,
         )
         provider_resource = dict(resource)
         if route["provider_id"] == "smartedu-resource":
@@ -754,7 +741,7 @@ class ResourceService:
             cancel_event=cancel_event,
             jobs_root=self.settings.jobs_dir.resolve(),
         )
-        acquisition = self.acquisition_router.acquire(request)
+        acquisition = dispatch_download(self.download_handlers, request)
         if not acquisition.ok or acquisition.bundle is None:
             failure = acquisition.failure
             raise DomainError(
