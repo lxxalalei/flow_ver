@@ -94,7 +94,7 @@ class McpStdioTests(unittest.TestCase):
             all(str(item.get("description") or "").strip() for item in tools),
             "every public Tool must expose a runtime description",
         )
-        self.assertIn("Open-web discovery", by_name["resource_search"]["description"])
+        self.assertIn("host Web Search", by_name["resource_search"]["description"])
         self.assertIn("explicitly selected", by_name["resource_download"]["description"])
         self.assertIn("not a preflight", by_name["resource_session_status"]["description"])
         self.assertIn("explicitly requests", by_name["resource_html_design"]["description"])

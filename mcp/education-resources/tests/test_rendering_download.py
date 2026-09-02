@@ -13,12 +13,10 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.acquisition import (
+from education_resource_mcp.acquisition.models import (
     AcquisitionResult,
-    AcquisitionRouter,
     AcquisitionStrategy,
     Artifact,
-    ProviderRegistration,
     ArtifactBundle,
 )
 from education_resource_mcp.config import Settings
@@ -154,20 +152,10 @@ class ServiceRoutingTests(unittest.TestCase):
                 )
 
         static = StaticMaterializer()
-        acquisition_router = AcquisitionRouter(
-            [
-                ProviderRegistration(
-                    provider_id="generic-web-materializer",
-                    provider=static,
-                    strategies=(AcquisitionStrategy.WEB_MATERIALIZE,),
-                    scopes=("landing_page",),
-                )
-            ]
-        )
         service = ResourceService(
             self.settings,
             search_provider=StaticSearchProvider(resources),
-            acquisition_router=acquisition_router,
+            download_handlers={"generic-web-materializer": static},
             inspection_router=InspectionRouter([_StaticLandingInspector()]),
         )
         service._fake_renderer = fake  # type: ignore[attr-defined]

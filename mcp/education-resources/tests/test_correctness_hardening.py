@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from education_resource_mcp.acquisition.models import AcquisitionRequest, AcquisitionStrategy
-from education_resource_mcp.acquisition.router import AcquisitionRouter, ProviderRegistration
+from education_resource_mcp.acquisition.download_dispatch import dispatch_download
 from education_resource_mcp.adapters.smartedu_resource import (
     _bounded_text,
     _find_files,
@@ -23,126 +23,6 @@ from education_resource_mcp.downloader import (
     DownloadResult,
     _available_destination,
 )
-from education_resource_mcp.search import MultiPlatformSearchProvider
-
-
-class _GenericProvider:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.calls: list[tuple[list[dict], int]] = []
-        self.fail = fail
-
-    def search(self, tasks, limit):  # type: ignore[no-untyped-def]
-        self.calls.append((tasks, limit))
-        if self.fail:
-            raise RuntimeError("generic exploded")
-        query = tasks[0]["queries"][0]["query"]
-        return (
-            [
-                {
-                    "platform": "generic",
-                    "title": query,
-                    "source_url": "https://example.com/generic",
-                    "resource_type": "网页",
-                    "metadata": {},
-                }
-            ],
-            [
-                {
-                    "platform": "generic",
-                    "status": "succeeded",
-                    "query_runs": [
-                        {
-                            "query": query,
-                            "candidate_count": 1,
-                            "failure_count": 0,
-                        }
-                    ],
-                }
-            ],
-        )
-
-
-class _Adapter:
-    platform_id = "bilibili"
-
-    def search(self, query: str, limit: int):
-        return (
-            [
-                {
-                    "platform": "bilibili",
-                    "title": query,
-                    "source_url": "https://www.bilibili.com/video/BV1example",
-                    "resource_type": "视频",
-                    "metadata": {},
-                }
-            ],
-            None,
-        )
-
-
-class SearchCorrectnessTests(unittest.TestCase):
-    def _provider(self, root: Path, generic: _GenericProvider) -> MultiPlatformSearchProvider:
-        settings = Settings(
-            data_dir=root,
-            jobs_dir=root / "jobs",
-            library_dir=root / "library",
-            max_workers=2,
-        )
-        with patch.object(MultiPlatformSearchProvider, "_register_default_adapters"):
-            provider = MultiPlatformSearchProvider(settings, object(), generic)
-        provider.register_adapter(_Adapter())
-        return provider
-
-    def test_mixed_search_keeps_generic_query_isolated(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            generic = _GenericProvider()
-            provider = self._provider(Path(raw), generic)
-            resources, runs = provider.search(
-                [
-                    {
-                        "platform": "generic",
-                        "queries": [{"query": "火山形成 原理"}],
-                    },
-                    {
-                        "platform": "bilibili",
-                        "queries": [{"query": "火山喷发 动画"}],
-                    },
-                ],
-                8,
-            )
-
-        self.assertEqual(
-            "火山形成 原理",
-            generic.calls[0][0][0]["queries"][0]["query"],
-        )
-        self.assertEqual(["generic", "bilibili"], [run["platform"] for run in runs])
-        self.assertEqual(2, len(resources))
-
-    def test_generic_failure_reports_its_own_query(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            generic = _GenericProvider(fail=True)
-            provider = self._provider(Path(raw), generic)
-            _resources, runs = provider.search(
-                [
-                    {
-                        "platform": "generic",
-                        "queries": [{"query": "通用网页查询"}],
-                    },
-                    {
-                        "platform": "bilibili",
-                        "queries": [{"query": "视频查询"}],
-                    },
-                ],
-                8,
-            )
-
-        generic_run = next(run for run in runs if run["platform"] == "generic")
-        self.assertEqual("通用网页查询", generic_run["query_runs"][0]["query"])
-
-    def test_adapter_no_longer_requires_descriptor_duplicate(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            provider = self._provider(Path(raw), _GenericProvider())
-        self.assertIn("bilibili", provider._adapters)
 
 
 class _DirectProvider:
@@ -166,44 +46,19 @@ class DownloadCorrectnessTests(unittest.TestCase):
             second = root / "second.pdf"
             first.write_bytes(b"%PDF-first")
             second.write_bytes(b"%PDF-second")
-            router = AcquisitionRouter(
-                [
-                    ProviderRegistration(
-                        "provider-first",
-                        _DirectProvider(first),
-                        (AcquisitionStrategy.DIRECT_FILE,),
-                        ("primary_resource",),
+            def run(resource_id: str, provider_id: str, provider: object):
+                return dispatch_download(
+                    {provider_id: provider},
+                    AcquisitionRequest(
+                        resource={"resource_id": resource_id}, provider_id=provider_id,
+                        job_id="job_" + "a" * 32, strategy=AcquisitionStrategy.DIRECT_FILE,
+                        scope="primary_resource", representation_id="repr",
+                        cancel_event=threading.Event(), jobs_root=root,
                     ),
-                    ProviderRegistration(
-                        "provider-second",
-                        _DirectProvider(second),
-                        (AcquisitionStrategy.DIRECT_FILE,),
-                        ("primary_resource",),
-                    ),
-                ]
-            )
-            common = {
-                "job_id": "job_" + "a" * 32,
-                "strategy": AcquisitionStrategy.DIRECT_FILE,
-                "scope": "primary_resource",
-                "representation_id": "repr",
-                "cancel_event": threading.Event(),
-                "jobs_root": root,
-            }
-            one = router.acquire(
-                AcquisitionRequest(
-                    resource={"resource_id": "res_one"},
-                    provider_id="provider-first",
-                    **common,
                 )
-            )
-            two = router.acquire(
-                AcquisitionRequest(
-                    resource={"resource_id": "res_two"},
-                    provider_id="provider-second",
-                    **common,
-                )
-            )
+            one = run("res_one", "provider-first", _DirectProvider(first))
+            two = run("res_two", "provider-second", _DirectProvider(second))
+
 
         self.assertNotEqual(
             one.bundle.artifacts[0].artifact_id,

@@ -11,8 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from education_resource_mcp.adapters.inspect_zhihu import ZhihuInspector
-from education_resource_mcp.acquisition.planner import AcquisitionPlanner
-from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
+from education_resource_mcp.acquisition.download_dispatch import select_download_handler
 from education_resource_mcp.acquisition.models import AcquisitionStrategy
 
 
@@ -20,16 +19,16 @@ class _FakeMaterializer:
     provider_id = "generic-web-materializer"
 
 
-def _planner() -> AcquisitionPlanner:
-    router = AcquisitionRouter(
-        (ProviderRegistration("generic-web-materializer", _FakeMaterializer()),)
+def _route(resource: dict, resolution: dict, preferred_container: str = "original") -> dict:
+    return select_download_handler(
+        resource, resolution, preferred_container=preferred_container,
+        handlers={"generic-web-materializer": _FakeMaterializer()},
     )
-    return AcquisitionPlanner(router)
 
 
 class ZhihuMaterializeRoutingTests(unittest.TestCase):
     def test_primary_webpage_routes_to_materializer(self) -> None:
-        route = _planner().route(
+        route = _route(
             {
                 "platform": "zhihu",
                 "resource_type": "article",
@@ -54,7 +53,7 @@ class ZhihuMaterializeRoutingTests(unittest.TestCase):
         self.assertEqual(AcquisitionStrategy.WEB_MATERIALIZE.kind, route["strategy"])
 
     def test_answer_container_routes_too(self) -> None:
-        route = _planner().route(
+        route = _route(
             {
                 "platform": "zhihu",
                 "resource_type": "article",

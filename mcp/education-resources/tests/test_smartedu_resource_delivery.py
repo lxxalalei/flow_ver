@@ -11,14 +11,9 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from education_resource_mcp.acquisition.models import AcquisitionStrategy
-from education_resource_mcp.acquisition.planner import (
-    AcquisitionPlanner,
-    AcquisitionPlanningError,
-)
-from education_resource_mcp.acquisition.router import (
-    AcquisitionRouter,
-    ProviderRegistration,
+from education_resource_mcp.acquisition.download_dispatch import (
+    DownloadDispatchError,
+    select_download_handler,
 )
 from education_resource_mcp.adapters.inspect_smartedu import SmartEduInspector
 from education_resource_mcp.adapters.smartedu_resource import (
@@ -148,6 +143,13 @@ def _inspect(candidate: dict | None = None, detail: dict | None = None) -> tuple
     return candidate, inspector.inspect(candidate).to_mapping()
 
 
+def _route(candidate: dict, mapped: dict, preferred_container: str) -> dict:
+    return select_download_handler(
+        candidate, mapped, preferred_container=preferred_container,
+        handlers={"smartedu-resource": object()},
+    )
+
+
 class SmartEduResourceDeliveryTests(unittest.TestCase):
     def test_course_file_inspect_exposes_only_selected_file_as_primary(self) -> None:
         detail = _course_detail()
@@ -180,21 +182,7 @@ class SmartEduResourceDeliveryTests(unittest.TestCase):
             ],
         )
         self.assertEqual("attachment", resolved["metadata"]["course_role"])
-        router = AcquisitionRouter(
-            [
-                ProviderRegistration(
-                    provider_id="smartedu-resource",
-                    provider=object(),
-                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
-                    scopes=("primary_resource",),
-                )
-            ]
-        )
-        route = AcquisitionPlanner(router).route(
-            candidate,
-            mapped,
-            preferred_container="original",
-        )
+        route = _route(candidate, mapped, "original")
         self.assertEqual("smartedu-resource", route["provider_id"])
         self.assertEqual("pdf", route["container"])
 
@@ -234,43 +222,15 @@ class SmartEduResourceDeliveryTests(unittest.TestCase):
 
     def test_original_routes_once_even_when_resource_has_multiple_files(self) -> None:
         candidate, mapped = _inspect()
-        router = AcquisitionRouter(
-            [
-                ProviderRegistration(
-                    provider_id="smartedu-resource",
-                    provider=object(),
-                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
-                    scopes=("primary_resource",),
-                )
-            ]
-        )
-        route = AcquisitionPlanner(router).route(
-            candidate,
-            mapped,
-            preferred_container="original",
-        )
+        route = _route(candidate, mapped, "original")
         self.assertEqual("smartedu-resource", route["provider_id"])
         self.assertEqual("primary_resource", route["scope"])
         self.assertEqual("mp4", route["container"])
 
     def test_explicit_missing_primary_format_is_not_silently_ignored(self) -> None:
         candidate, mapped = _inspect()
-        router = AcquisitionRouter(
-            [
-                ProviderRegistration(
-                    provider_id="smartedu-resource",
-                    provider=object(),
-                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
-                    scopes=("primary_resource",),
-                )
-            ]
-        )
-        with self.assertRaises(AcquisitionPlanningError) as context:
-            AcquisitionPlanner(router).route(
-                candidate,
-                mapped,
-                preferred_container="pdf",
-            )
+        with self.assertRaises(DownloadDispatchError) as context:
+            _route(candidate, mapped, "pdf")
         self.assertEqual("REPRESENTATION_UNAVAILABLE", context.exception.code)
 
 

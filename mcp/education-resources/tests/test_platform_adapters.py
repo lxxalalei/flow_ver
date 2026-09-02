@@ -230,7 +230,6 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = MultiPlatformSearchProvider(
                 _settings(root),
                 SessionStore(root),
-                MagicMock(),
             )
             provider.register_adapter(first)
             provider.register_adapter(second)
@@ -268,7 +267,6 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = MultiPlatformSearchProvider(
                 _settings(root, max_workers=2),
                 SessionStore(root),
-                MagicMock(),
             )
             provider.register_adapter(adapter("a"))
             provider.register_adapter(adapter("b"))
@@ -287,7 +285,6 @@ class MultiPlatformSearchTests(unittest.TestCase):
             provider = MultiPlatformSearchProvider(
                 _settings(root),
                 SessionStore(root),
-                MagicMock(),
             )
             resources, runs = provider.search(
                 [{"platform": "missing", "queries": [{"query": "q"}]}], 10
@@ -309,7 +306,6 @@ class MultiPlatformSearchTests(unittest.TestCase):
         ):
             self.assertIn(platform, registered)
         self.assertNotIn("generic", registered)
-        self.assertIsNotNone(provider.generic_provider)
 
 
 if __name__ == "__main__":

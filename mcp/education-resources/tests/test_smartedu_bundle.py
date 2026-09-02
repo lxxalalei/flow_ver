@@ -628,21 +628,9 @@ class SmartEduHlsRoutingTests(unittest.TestCase):
         self.assertEqual(("video", "m3u8", "video/mp4"), shape)
 
     def test_m3u8_representation_routes_to_smartedu_provider(self) -> None:
-        from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
-        from education_resource_mcp.acquisition.models import AcquisitionStrategy
-        from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+        from education_resource_mcp.acquisition.download_dispatch import select_download_handler
 
-        router = AcquisitionRouter(
-            (
-                ProviderRegistration(
-                    provider_id="smartedu-resource",
-                    provider=object(),
-                    strategies=(AcquisitionStrategy.DIRECT_FILE,),
-                    scopes=("primary_resource",),
-                ),
-            )
-        )
-        route = AcquisitionPlanner(router).route(
+        route = select_download_handler(
             {
                 "platform": "smartedu",
                 "resource_type": "course",
@@ -662,6 +650,8 @@ class SmartEduHlsRoutingTests(unittest.TestCase):
                     ]
                 }
             },
+            preferred_container="original",
+            handlers={"smartedu-resource": object()},
         )
         self.assertEqual("smartedu-resource", route["provider_id"])
         self.assertEqual("m3u8", route["container"])

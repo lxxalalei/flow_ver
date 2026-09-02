@@ -6,8 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from education_resource_mcp.acquisition import AcquisitionRouter, ProviderRegistration
-from education_resource_mcp.acquisition.planner import AcquisitionPlanner
+from education_resource_mcp.acquisition.download_dispatch import select_download_handler
 from education_resource_mcp.adapters.inspect_zjer import ZjerInspector
 from education_resource_mcp.adapters.zjer import ZjerSearchAdapter, fetch_course_detail
 from education_resource_mcp.adapters.zjer_download import ZjerVideoDownloader
@@ -235,10 +234,7 @@ def test_zjer_downloader_refreshes_signed_mp4_at_start() -> None:
 
 
 def test_zjer_video_routes_to_zjer_downloader() -> None:
-    planner = AcquisitionPlanner(
-        AcquisitionRouter([ProviderRegistration("zjer-video", object())])
-    )
-    route = planner.route(
+    route = select_download_handler(
         _resource(),
         {
             "resolved_resource": {
@@ -256,6 +252,7 @@ def test_zjer_video_routes_to_zjer_downloader() -> None:
             }
         },
         preferred_container="mp4",
+        handlers={"zjer-video": object()},
     )
 
     assert route["provider_id"] == "zjer-video"
