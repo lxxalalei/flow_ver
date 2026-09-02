@@ -17,10 +17,7 @@ from education_resource_mcp.adapters.bilibili import BilibiliSearchAdapter
 from education_resource_mcp.archive import archive_downloaded_files
 from education_resource_mcp.config import Settings
 from education_resource_mcp.errors import DomainError
-from education_resource_mcp.search import (
-    GenericWebSearchProvider,
-    MultiPlatformSearchProvider,
-)
+from education_resource_mcp.search import MultiPlatformSearchProvider
 from education_resource_mcp.service import ResourceService
 
 
@@ -64,15 +61,14 @@ class PlatformIdTests(unittest.TestCase):
         from education_resource_mcp.sessions import SessionStore
 
         settings = _settings(self.root)
-        multi = MultiPlatformSearchProvider(
-            settings, SessionStore(settings.data_dir), GenericWebSearchProvider(settings)
-        )
+        multi = MultiPlatformSearchProvider(settings, SessionStore(settings.data_dir))
         _, runs = multi.search(
             [{"platform": "libgen-typo", "queries": [{"query": "x"}]}], 5
         )
         message = str(runs[0]["query_runs"][0]["error"]["message"])
         self.assertIn("libgen", message)
         self.assertIn("bilibili", message)
+        self.assertIn("宿主 web_search", message)
 
 
 class BilibiliSessionTests(unittest.TestCase):
@@ -294,24 +290,9 @@ class ArchiveManifestTests(unittest.TestCase):
             self.assertEqual("2026-01-01T00:00:00+00:00", json.loads(lines[0])["archived_at"])
             self.assertEqual("res_2", json.loads(lines[1])["resource_id"])
             self.assertEqual("迁移", json.loads(lines[1])["topic"])
-            # schema 统一：缺失的描述字段留空而不是消失
             self.assertEqual("", json.loads(lines[1])["summary"])
             self.assertEqual("", json.loads(lines[1])["published_at"])
             self.assertEqual("", json.loads(lines[1])["language"])
-
-
-class QueryTuningTests(unittest.TestCase):
-    def test_book_title_becomes_quoted_phrase(self) -> None:
-        self.assertEqual(
-            '"毛泽东选集" 人民出版社',
-            GenericWebSearchProvider._tuned_query("《毛泽东选集》 人民出版社"),
-        )
-
-    def test_plain_query_untouched(self) -> None:
-        self.assertEqual(
-            "火山喷发 原理 动画",
-            GenericWebSearchProvider._tuned_query("火山喷发 原理 动画"),
-        )
 
 
 if __name__ == "__main__":
