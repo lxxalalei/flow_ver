@@ -73,7 +73,9 @@ $JunkDirectoryNames = @(
 )
 Get-ChildItem -Path $ReleaseRoot -Directory -Recurse -Force |
     Sort-Object FullName -Descending |
-    Where-Object { $JunkDirectoryNames -contains $_.Name } |
+    Where-Object {
+        $JunkDirectoryNames -contains $_.Name -or $_.Name -like '*.egg-info'
+    } |
     Remove-Item -Recurse -Force
 Get-ChildItem -Path $ReleaseRoot -File -Recurse -Force |
     Where-Object { $_.Extension -in @('.pyc', '.pyo') } |
