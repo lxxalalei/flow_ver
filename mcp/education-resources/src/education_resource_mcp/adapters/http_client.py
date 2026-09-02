@@ -14,6 +14,10 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
+# Console-subsystem children (curl fallback) must not pop a visible console
+# window when the MCP server runs under a hidden gateway parent on Windows.
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 class _NoRedirectHandler(HTTPRedirectHandler):
     """Keep redirect responses visible to application-owned policy loops."""
@@ -193,7 +197,13 @@ def _curl_open(
             command.extend(["--data-binary", f"@{data_file}"])
         command.append(url)
 
-        completed = subprocess.run(command, text=True, capture_output=True, check=False)
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+            creationflags=_SUBPROCESS_FLAGS,
+        )
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip() or f"curl exit {completed.returncode}"
             raise URLError(detail)

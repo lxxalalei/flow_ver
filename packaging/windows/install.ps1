@@ -142,6 +142,7 @@ if (Test-Path $VenvRoot) { Remove-Item -Recurse -Force $VenvRoot }
 Invoke-Native { & $Python -m venv $VenvRoot } 'Create Python virtual environment'
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $McpExe = Join-Path $VenvRoot 'Scripts\education-resource-mcp.exe'
+$McpPythonw = Join-Path $VenvRoot 'Scripts\pythonw.exe'
 
 Invoke-Native {
     & $VenvPython -m pip install --disable-pip-version-check --no-input $InstalledMcp
@@ -158,9 +159,12 @@ Invoke-Native {
 Ok 'Skill installed globally'
 
 Section 'Registering MCP in OpenClaw'
+# pythonw (GUI subsystem) instead of the console exe: the MCP stdio server
+# never needs a console, and console children of the hidden gateway parent
+# would otherwise pop a visible window on the desktop.
 $mcpConfig = @{
-    command = $McpExe
-    args = @()
+    command = $McpPythonw
+    args = @('-m', 'education_resource_mcp.server')
     env = @{
         EDUCATION_RESOURCE_MCP_DATA_DIR = $DataRoot
         EDUCATION_RESOURCE_MCP_LIBRARY_DIR = $LibraryRoot

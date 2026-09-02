@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -27,6 +28,9 @@ from ..policy import PolicyError, ensure_within_root
 from .http_client import urlopen_with_fallback
 from .wbi import wbi_sign
 
+# Console-subsystem children (ffmpeg) must not pop a visible console window
+# when the MCP server runs under a hidden gateway parent on Windows.
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
 VIEW_URL = "https://api.bilibili.com/x/web-interface/view"
@@ -184,6 +188,7 @@ class BilibiliDownloader:
         try:
             result = subprocess.run(
                 cmd, capture_output=True, timeout=120,
+                creationflags=_SUBPROCESS_FLAGS,
             )
             if result.returncode != 0:
                 raise DomainError(

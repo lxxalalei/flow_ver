@@ -41,6 +41,10 @@ _H5E_DOWNLOAD_THREADS = 12
 _ILLEGAL_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
 _NUMERIC_M3U8_RE = re.compile(r"(?:^|/)(\d{3,5})\.m3u8(?:$|[?#])", re.IGNORECASE)
 
+# Console-subsystem children (ffmpeg) must not pop a visible console window
+# when the MCP server runs under a hidden gateway parent on Windows.
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
 Quality = tuple[int | None, int | None]
 
 
@@ -60,7 +64,9 @@ def _run_with_cancel(
     import tempfile
 
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-        proc = subprocess.Popen(cmd, stdout=stdout_file, stderr=stderr_file)
+        proc = subprocess.Popen(
+            cmd, stdout=stdout_file, stderr=stderr_file, creationflags=_SUBPROCESS_FLAGS
+        )
         deadline = time.monotonic() + timeout
         while proc.poll() is None:
             if cancel_event is not None and cancel_event.is_set():
@@ -88,6 +94,7 @@ def ffmpeg_error_count(mp4: Path) -> int | None:
             encoding="utf-8",
             errors="replace",
             timeout=1800,
+            creationflags=_SUBPROCESS_FLAGS,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

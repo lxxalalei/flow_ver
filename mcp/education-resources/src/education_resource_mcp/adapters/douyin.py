@@ -8,6 +8,7 @@ end.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import datetime
@@ -22,6 +23,9 @@ from ..sessions import SessionStore
 from .base import adapter_error, make_resource
 from .http_client import urlopen_with_fallback
 
+# Console-subsystem children (node for a_bogus signing) must not pop a visible
+# console window when the MCP server runs under a hidden gateway parent.
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 SEARCH_URL = "https://www.douyin.com/aweme/v1/web/general/search/single/"
 POST_URL = "https://www.douyin.com/aweme/v1/web/aweme/post/"
@@ -118,6 +122,7 @@ def sign_a_bogus(query_string: str, user_agent: str) -> str:
     try:
         result = subprocess.run(
             ["node", "-e", script], capture_output=True, text=True, timeout=15,
+            creationflags=_SUBPROCESS_FLAGS,
         )
     except FileNotFoundError:
         raise _AdapterError("SIGN_FAILED", "系统未安装 Node.js，无法计算抖音签名", False)
