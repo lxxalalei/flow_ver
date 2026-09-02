@@ -1,4 +1,9 @@
-"""Targeted tests for the Bilibili DASH-verification inspector."""
+"""Targeted hermetic tests for the Bilibili DASH-verification inspector.
+
+The landing-page fetch goes through an injected fake transport so the suite
+never touches bilibili.com live (Bilibili IP risk controls intermittently
+return 412, which would otherwise decide the suite's green/red state).
+"""
 
 from __future__ import annotations
 
@@ -12,9 +17,62 @@ sys.path.insert(0, str(SRC_ROOT))
 from education_resource_mcp.adapters.inspect_bilibili import BilibiliInspector  # noqa: E402
 
 
+def _page_body(title: str = "测试视频") -> bytes:
+    return (
+        "<!doctype html><html lang=\"zh-CN\"><head>"
+        "<meta charset=\"utf-8\">"
+        f"<title>{title}</title>"
+        "<meta name=\"description\" content=\"测试\">"
+        "</head><body><p>内容</p></body></html>"
+    ).encode("utf-8")
+
+
+class FakeResponse:
+    def __init__(self, *, status: int = 200, headers: dict[str, str], body: bytes) -> None:
+        self.status = status
+        self.headers = headers
+        self._body = body
+        self._offset = 0
+
+    def read(self, amount: int = -1) -> bytes:
+        if amount < 0:
+            amount = len(self._body) - self._offset
+        value = self._body[self._offset : self._offset + amount]
+        self._offset += len(value)
+        return value
+
+    def geturl(self) -> str:
+        return "https://www.bilibili.com/video/BV1xx411c7mD"
+
+    def close(self) -> None:
+        pass
+
+
+class QueueTransport:
+    def __init__(self, *responses: FakeResponse) -> None:
+        self.responses = list(responses)
+        self.requests: list[object] = []
+
+    def __call__(self, request, timeout=None):
+        self.requests.append((request, timeout))
+        if not self.responses:
+            raise AssertionError("unexpected network request")
+        return self.responses.pop(0)
+
+
+def _page_response() -> FakeResponse:
+    return FakeResponse(
+        headers={"Content-Type": "text/html; charset=utf-8"},
+        body=_page_body(),
+    )
+
+
 class BilibiliInspectorTests(unittest.TestCase):
-    def _inspector(self, verify_func=None):
-        return BilibiliInspector(playurl_verify_func=verify_func)
+    def _inspector(self, verify_func=None, transport=None):
+        return BilibiliInspector(
+            playurl_verify_func=verify_func,
+            transport=transport,
+        )
 
     def _resource(self, **overrides):
         base = {
@@ -32,7 +90,7 @@ class BilibiliInspectorTests(unittest.TestCase):
             assert bvid == "BV1xx411c7mD"
             return {"title": "测试视频"}
 
-        inspector = self._inspector(verify)
+        inspector = self._inspector(verify, QueueTransport(_page_response()))
         result = inspector.inspect(self._resource())
         payload = result.to_mapping()
 
@@ -53,7 +111,7 @@ class BilibiliInspectorTests(unittest.TestCase):
         def verify(bvid, cookie):
             return None  # DASH not available or API failure
 
-        inspector = self._inspector(verify)
+        inspector = self._inspector(verify, QueueTransport(_page_response()))
         result = inspector.inspect(self._resource())
         payload = result.to_mapping()
 
@@ -70,7 +128,8 @@ class BilibiliInspectorTests(unittest.TestCase):
         def verify(bvid, cookie):
             return {"title": "t"}
 
-        inspector = self._inspector(verify)
+        inspector = self._inspector(verify, QueueTransport(_page_response()))
+
         import json
 
         payload = inspector.inspect(self._resource()).to_mapping()
