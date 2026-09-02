@@ -198,7 +198,13 @@ Web URL 的典型获取路径是：
 → Download
 ```
 
-用户明确要求归档 / 整理，或原始任务已经包含归档目标时进入 Archive；用户明确要求精美 HTML / 优化排版时进入 HTML Design。
+下载 Job 真实成功后，归档还没有被讨论过时主动给出一句话分类建议：按
+[`references/archive.md`](references/archive.md) 的分类规则给出具体领域与主题
+（例如“建议归档到 natural_science / 火山喷发原理，需要就说一声”），用户确认后
+执行 Archive。同一资源只建议一次；用户表示不需要整理时尊重其结果，不再重复提议。
+
+用户明确要求归档 / 整理、原始任务已经包含归档目标、或用户确认了下载后的归档建议时
+进入 Archive；用户明确要求精美 HTML / 优化排版时进入 HTML Design。
 
 详见 [`references/acquisition.md`](references/acquisition.md)、[`references/archive.md`](references/archive.md)、[`references/html-design.md`](references/html-design.md)。
 
