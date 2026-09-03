@@ -143,8 +143,29 @@ Invoke-Native { & $Python -m venv $VenvRoot } 'Create Python virtual environment
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 
 Invoke-Native {
-    & $VenvPython -m pip install --disable-pip-version-check --no-input $InstalledMcp
+    & $VenvPython -m pip install --disable-pip-version-check --no-input "$InstalledMcp[browser]"
 } 'Install education-resource-mcp'
+
+# The [browser] extra carries the playwright driver for the front-end-driven
+# Douyin collection expand. The Chromium binary itself downloads on demand;
+# failure here only degrades that one capability (expand reports
+# DEPENDENCY_MISSING with the install hint), so it must not fail the install.
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & $VenvPython -m playwright install chromium 2>&1 | ForEach-Object { "$_" } | Out-Null
+    $pwCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $prev
+}
+$global:LASTEXITCODE = 0
+if ($pwCode -eq 0) {
+    Ok 'Chromium for Douyin collection expand installed'
+}
+else {
+    Warn 'Chromium download failed; Douyin collection expand will report DEPENDENCY_MISSING until `playwright install chromium` succeeds.'
+}
 
 $RuntimeCheck = Join-Path $InstalledMcp 'scripts\verify_runtime_environment.py'
 Invoke-Native { & $VenvPython $RuntimeCheck } 'Verify Python runtime'

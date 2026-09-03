@@ -68,6 +68,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 - Python 3.12+ 检查与安装；
 - FFmpeg 检查与安装；
 - `education-resources` 独立 Python 环境；
+- 抖音合集展开所需的 Chromium 浏览器（下载失败不阻塞安装，该能力会显式提示缺少依赖）；
 - `learning-resource-flow` Skill 全局安装；
 - `education-resources` MCP 注册；
 - MCP live probe；
