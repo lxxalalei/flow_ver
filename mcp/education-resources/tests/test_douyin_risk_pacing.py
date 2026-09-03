@@ -86,22 +86,50 @@ class DouyinRiskPacingTests(unittest.TestCase):
         time.sleep = lambda sec: sleeps.append(sec)  # type: ignore[assignment]
         return sleeps, original_sleep
 
-    def test_argus_403_is_not_retried(self) -> None:
+    def test_argus_403_retries_with_backoff_then_succeeds(self) -> None:
         calls: list[str] = []
+        sleeps, original_sleep = self._patch_sleep()
         body = b"Blocked by ArgusSecurityPlugin Uifid Not Found"
 
-        def fake_open(_request: object, timeout: float) -> _FakeHTTPResponse:
-            del timeout
-            calls.append("call")
-            raise _http_error(403, body)
+        try:
 
-        with mock.patch.object(douyin_mod, "urlopen_with_fallback", fake_open):
-            with self.assertRaises(_AdapterError) as ctx:
-                self.adapter._request_json("https://www.douyin.com/x", "cookie")
+            def fake_open(_request: object, timeout: float) -> _FakeHTTPResponse:
+                del timeout
+                calls.append("call")
+                if len(calls) < 2:
+                    raise _http_error(403, body)
+                return _FakeHTTPResponse(b'{"status_code": 0}')
+
+            with mock.patch.object(douyin_mod, "urlopen_with_fallback", fake_open):
+                result = self.adapter._request_json("https://www.douyin.com/x", "cookie")
+        finally:
+            time.sleep = original_sleep  # type: ignore[assignment]
+
+        self.assertEqual({"status_code": 0}, result)
+        self.assertEqual(2, len(calls))
+        self.assertEqual([0.01], sleeps)
+
+    def test_argus_403_classification(self) -> None:
+        calls: list[str] = []
+        sleeps, original_sleep = self._patch_sleep()
+        body = b"Blocked by ArgusSecurityPlugin Uifid Not Found"
+        try:
+
+            def fake_open(_request: object, timeout: float) -> _FakeHTTPResponse:
+                del timeout
+                calls.append("call")
+                raise _http_error(403, body)
+
+            with mock.patch.object(douyin_mod, "urlopen_with_fallback", fake_open):
+                with self.assertRaises(_AdapterError) as ctx:
+                    self.adapter._request_json("https://www.douyin.com/x", "cookie")
+        finally:
+            time.sleep = original_sleep  # type: ignore[assignment]
+
         self.assertEqual("NETWORK_BLOCKED", ctx.exception.code)
-        self.assertFalse(ctx.exception.retryable)
+        self.assertTrue(ctx.exception.retryable)
         self.assertIn("Argus", ctx.exception.message)
-        self.assertEqual(1, len(calls))
+        self.assertGreater(len(calls), 1)  # persisted through budgeted retries
 
     def test_plain_403_retries_with_backoff_then_succeeds(self) -> None:
         calls: list[str] = []

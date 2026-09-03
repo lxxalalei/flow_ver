@@ -210,7 +210,10 @@ class DouyinSearchAdapter:
                 raise _AdapterError("AUTH_REQUIRED", f"抖音返回 HTTP {exc.code}", False)
             if exc.code == 403:
                 # A valid session can still be risk-blocked; only a missing
-                # session is AUTH_REQUIRED (checked before any request).
+                # session is AUTH_REQUIRED (checked before any request). The
+                # Argus block is intermittent on the direct endpoints
+                # (post/detail/search): bounded backoff often passes. The one
+                # hard-walled endpoint (mix) no longer uses this path.
                 block_body = ""
                 try:
                     block_body = exc.read().decode("utf-8", "replace")
@@ -220,8 +223,9 @@ class DouyinSearchAdapter:
                     raise _AdapterError(
                         "NETWORK_BLOCKED",
                         "抖音 Argus 风控拦截该接口"
-                        f"（{block_body.strip()[:80]}，需前端签名，直连不可用）",
-                        False,
+                        f"（{block_body.strip()[:80]}，需前端签名；重试可过则继续，"
+                        "持续失败说明该接口已加固）",
+                        True,
                     )
                 raise _AdapterError(
                     "NETWORK_BLOCKED", "抖音返回 HTTP 403（疑似风控/限流）", True
