@@ -7,6 +7,7 @@ from typing import Annotated, Any, Callable, Literal
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import __version__
 from .errors import DomainError
 from .expand import (
     download_expanded,
@@ -202,7 +203,7 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         ),
         # Keep in sync with pyproject.toml [project] version — the packaged
         # release (zip name, doctor/probe output) is labeled from pyproject.
-        version="0.4.0",
+        version=__version__,
         instructions=(
             "The Agent owns user intent, search strategy, semantic relevance, stopping decisions, "
             "candidate ranking and user selection. This MCP owns factual platform access and file "
