@@ -10,9 +10,12 @@ it goes straight to the detail API.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable, Mapping
 import hashlib
 import json
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -22,6 +25,7 @@ from ..errors import DomainError
 from ..inspection import (
     INSPECTOR_VERSION,
     InspectionResult,
+    build_default_inspection,
 )
 from .douyin import (
     USER_AGENT,
@@ -33,6 +37,8 @@ from .douyin import (
 from .http_client import urlopen_with_fallback
 
 DETAIL_URL = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
+
+_CONTAINER_URL_RE = re.compile(r"/(?:user|collection|mix)/", re.IGNORECASE)
 
 
 def _representation_id(resource: Mapping[str, Any], aweme_id: str) -> str:
@@ -50,6 +56,9 @@ class DouyinInspector:
     version = INSPECTOR_VERSION
     supported_scopes = ("primary_resource", "representation", "metadata")
     host_suffixes = ("douyin.com",)
+    # Wait before retrying a risk-blocked detail call; class attribute so
+    # tests can shrink it.
+    _RISK_RETRY_SECONDS = 3.0
 
     def __init__(
         self,
@@ -71,6 +80,16 @@ class DouyinInspector:
     def inspect(self, resource: Mapping[str, Any]) -> InspectionResult:
         source_url = str(resource.get("source_url") or "")
         inspected_at: str | None = None
+
+        # Containers (creator / collection) are expand targets, not leaf
+        # resources with a detail record; video inspection does not apply.
+        # Mirror the Ximalaya album precedent: no fabricated failure, the
+        # container simply stays unresolved until it is expanded.
+        resource_type = str(resource.get("resource_type") or "").strip().lower()
+        if resource_type in {"creator", "collection"} or _CONTAINER_URL_RE.search(
+            source_url
+        ):
+            return self._container_result(resource)
 
         # Host gate
         host_error = self._validate_host(source_url)
@@ -167,8 +186,27 @@ class DouyinInspector:
     def _fetch_detail(
         self, aweme_id: str, cookie: str
     ) -> tuple[dict[str, Any] | None, InspectionResult | None]:
-        """Call the signed detail API and return parsed JSON or a failure."""
+        """Call the signed detail API and return parsed JSON or a failure.
 
+        Retryable risk-control blocks (rate limiting) are retried once after
+        a short wait — the same block often passes seconds later.
+        """
+        for attempt in range(2):
+            detail, failure = self._fetch_detail_once(aweme_id, cookie)
+            if detail is not None or failure is None:
+                return detail, failure
+            retriable = bool(failure.failures) and all(
+                item.get("retriable") for item in failure.failures if isinstance(item, dict)
+            )
+            if not retriable:
+                return detail, failure
+            if attempt == 0:
+                time.sleep(self._RISK_RETRY_SECONDS)
+        return detail, failure
+
+    def _fetch_detail_once(
+        self, aweme_id: str, cookie: str
+    ) -> tuple[dict[str, Any] | None, InspectionResult | None]:
         params = {**_COMMON_PARAMS, "aweme_id": aweme_id}
         query_string = urlencode(params)
         try:
@@ -194,12 +232,20 @@ class DouyinInspector:
             else:
                 response = urlopen_with_fallback(request, timeout=20)
         except HTTPError as exc:
-            code = "AUTH_REQUIRED" if exc.code in (401, 403) else "DOWNLOAD_FAILED"
-            return None, self._failure_result_raw(
-                code,
-                f"抖音详情 API HTTP {exc.code}",
-                exc.code >= 500,
+            # A valid session can still be risk-blocked; only 401 means the
+            # login state itself is unusable.
+            if exc.code == 401:
+                code, retryable = "AUTH_REQUIRED", False
+            elif exc.code == 403:
+                code, retryable = "NETWORK_BLOCKED", True
+            else:
+                code, retryable = "DOWNLOAD_FAILED", exc.code >= 500
+            message = (
+                "抖音详情被风控拦截（HTTP 403）"
+                if exc.code == 403
+                else f"抖音详情 API HTTP {exc.code}"
             )
+            return None, self._failure_result_raw(code, message, retryable)
         except (TimeoutError, URLError) as exc:
             return None, self._failure_result_raw(
                 "DOWNLOAD_FAILED",
@@ -240,6 +286,31 @@ class DouyinInspector:
     # ------------------------------------------------------------------
     # result builders
     # ------------------------------------------------------------------
+
+    def _container_result(
+        self, resource: Mapping[str, Any]
+    ) -> InspectionResult:
+        """Neutral result for creator/collection URLs: no video detail applies."""
+
+        return InspectionResult(
+            resolution_status="unresolved",
+            resolved_resource={
+                "title": str(resource.get("title") or "抖音容器资源"),
+                "resource_type": str(
+                    resource.get("resource_type") or "collection"
+                ),
+                "availability": {"status": "unknown"},
+                "representations": [],
+                "metadata": {},
+            },
+            inspection={
+                **build_default_inspection(
+                    self.inspector_id, method="container_not_inspectable"
+                ),
+                "platform": self.platform_id,
+            },
+            failures=(),
+        )
 
     def _failure_result(
         self,

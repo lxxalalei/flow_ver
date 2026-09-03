@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from itertools import islice
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,8 @@ from .jobs import spawn_worker
 
 
 RESULTS_NAME = "results.jsonl"
+
+LOGGER = logging.getLogger(__name__)
 
 
 def import_resource_url(service: Any, source_url: str) -> dict[str, Any]:
@@ -264,6 +267,12 @@ def run_expand(directory: Path, service: Any = None) -> int:
         service = ResourceService(recover_jobs=False)
 
     cancel = FileCancelEvent(directory / CANCEL_FLAG_NAME)
+    LOGGER.info(
+        "expand %s started: platform=%s url=%s",
+        request.get("job_id"),
+        target.get("platform"),
+        target.get("source_url"),
+    )
     write_job(
         directory,
         {
@@ -327,6 +336,7 @@ def run_expand(directory: Path, service: Any = None) -> int:
                         },
                     )
     except Exception as exc:
+        LOGGER.exception("expand %s failed after %d items", request.get("job_id"), count)
         failures.append(_failure_from_exception(exc))
 
     if cancel.is_set():
@@ -361,6 +371,13 @@ def run_expand(directory: Path, service: Any = None) -> int:
             "failures": failures,
             "summary": summary,
         },
+    )
+    LOGGER.info(
+        "expand %s finished: %s (%d items, %d failures)",
+        request.get("job_id"),
+        final,
+        count,
+        len(failures),
     )
     return 0
 

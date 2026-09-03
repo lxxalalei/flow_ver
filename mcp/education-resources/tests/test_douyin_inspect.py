@@ -68,6 +68,92 @@ class DouyinInspectorTests(unittest.TestCase):
         base.update(overrides)
         return base
 
+    def test_container_urls_skip_video_detail(self) -> None:
+        def _fail_transport(_req):
+            raise AssertionError("container URLs must not hit the detail API")
+
+        inspector = DouyinInspector(
+            session_store=_FakeSessionStore(),
+            detail_transport=_fail_transport,
+            sign_func=lambda qs, ua: "fake_a_bogus",
+        )
+        for url in (
+            "https://www.douyin.com/user/MS4wLjABAAAAxyz",
+            "https://www.douyin.com/collection/7564038388731365427",
+            "https://www.douyin.com/mix/7564038388731365427",
+        ):
+            with self.subTest(url=url):
+                payload = inspector.inspect(self._resource(source_url=url)).to_mapping()
+                self.assertEqual("unresolved", payload["resolution_status"])
+                self.assertEqual([], payload["failures"])
+
+    def test_container_resource_type_skips_video_detail(self) -> None:
+        inspector = DouyinInspector(
+            session_store=_FakeSessionStore(),
+            detail_transport=lambda _req: (_ for _ in ()).throw(
+                AssertionError("container types must not hit the detail API")
+            ),
+            sign_func=lambda qs, ua: "fake_a_bogus",
+        )
+        payload = inspector.inspect(
+            self._resource(
+                source_url="https://www.douyin.com/some/other/path",
+                resource_type="collection",
+            )
+        ).to_mapping()
+        self.assertEqual("unresolved", payload["resolution_status"])
+        self.assertEqual([], payload["failures"])
+
+    def test_risk_blocked_detail_is_retried_once(self) -> None:
+        import io
+        from urllib.error import HTTPError
+
+        calls: list[int] = []
+
+        def transport(req):
+            calls.append(1)
+            if len(calls) == 1:
+                raise HTTPError(
+                    req.full_url, 403, "Forbidden", {}, io.BytesIO(b"blocked")
+                )
+            return _FakeResponse(_detail_body())
+
+        inspector = DouyinInspector(
+            session_store=_FakeSessionStore(),
+            detail_transport=transport,
+            sign_func=lambda qs, ua: "fake_a_bogus",
+        )
+        inspector._RISK_RETRY_SECONDS = 0.0
+        payload = inspector.inspect(self._resource()).to_mapping()
+
+        self.assertEqual("resolved", payload["resolution_status"])
+        self.assertEqual(2, len(calls))
+
+    def test_persistent_risk_block_fails_after_one_retry(self) -> None:
+        import io
+        from urllib.error import HTTPError
+
+        calls: list[int] = []
+
+        def transport(req):
+            calls.append(1)
+            raise HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"blocked"))
+
+        inspector = DouyinInspector(
+            session_store=_FakeSessionStore(),
+            detail_transport=transport,
+            sign_func=lambda qs, ua: "fake_a_bogus",
+        )
+        inspector._RISK_RETRY_SECONDS = 0.0
+        payload = inspector.inspect(self._resource()).to_mapping()
+
+        self.assertNotEqual("resolved", payload["resolution_status"])
+        self.assertEqual(2, len(calls))
+        self.assertEqual(
+            "NETWORK_BLOCKED", payload["failures"][0]["code"]
+        )
+        self.assertTrue(payload["failures"][0]["retriable"])
+
     def test_concrete_mp4_primary_when_detail_available(self) -> None:
         inspector = DouyinInspector(
             session_store=_FakeSessionStore(),

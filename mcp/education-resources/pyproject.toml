@@ -20,6 +20,10 @@ education-resource-mcp = "education_resource_mcp.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=9"]
+# Douyin collection enumeration drives the real front-end in headless
+# Chromium. Pin the line that matches the shared %LOCALAPPDATA%\ms-playwright
+# browser cache so no second browser is downloaded.
+browser = ["playwright>=1.61,<1.62"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

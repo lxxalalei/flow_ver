@@ -39,6 +39,21 @@ DETAIL_URL = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
 
 
 def _request_json(url: str, cookie: str) -> dict[str, Any]:
+    """Fetch the signed detail JSON, retrying once on risk-control blocks."""
+
+    import time
+
+    for attempt in range(2):
+        try:
+            return _request_json_once(url, cookie)
+        except DomainError as exc:
+            if not exc.retryable or attempt > 0:
+                raise
+            time.sleep(3.0)
+    raise DomainError("DOWNLOAD_FAILED", "抖音详情请求失败", retryable=True)
+
+
+def _request_json_once(url: str, cookie: str) -> dict[str, Any]:
     headers = {
         "User-Agent": USER_AGENT,
         "Referer": "https://www.douyin.com/",
@@ -51,6 +66,9 @@ def _request_json(url: str, cookie: str) -> dict[str, Any]:
         with urlopen_with_fallback(request, timeout=20) as resp:
             body = resp.read().decode("utf-8", "replace")
     except HTTPError as exc:
+        if exc.code == 403:
+            # Risk control, not a broken login; retrying later often passes.
+            raise DomainError("NETWORK_BLOCKED", "抖音详情被风控拦截（HTTP 403）", retryable=True)
         raise DomainError("DOWNLOAD_FAILED", f"抖音详情 API HTTP {exc.code}", retryable=exc.code >= 500)
     except (TimeoutError, URLError) as exc:
         raise DomainError("DOWNLOAD_FAILED", f"抖音详情请求失败: {type(exc).__name__}", retryable=True)

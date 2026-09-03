@@ -37,6 +37,7 @@ def run(directory: Path) -> int:
         directory,
         {**read_job(directory), "status": "running", "pid": os.getpid()},
     )
+    LOGGER.info("job %s started: %d resources", job_id, len(resources))
 
     service = ResourceService(recover_jobs=False)
     files: list[dict[str, Any]] = []
@@ -54,6 +55,12 @@ def run(directory: Path) -> int:
                 files.extend(resource_files)
                 failures.extend(resource_failures)
             except (DomainError, DownloadDispatchError) as exc:
+                LOGGER.warning(
+                    "download failed for %s: %s %s",
+                    resource.get("resource_id"),
+                    str(getattr(exc, "code", "DOWNLOAD_FAILED")),
+                    str(getattr(exc, "message", str(exc))),
+                )
                 failures.append(
                     {
                         "resource_id": resource.get("resource_id"),

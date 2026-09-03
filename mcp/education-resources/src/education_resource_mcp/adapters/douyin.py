@@ -1,16 +1,21 @@
 """Douyin video search, creator and collection adapter.
 
 Uses Douyin's web APIs with hardcoded device parameters. Auth is cookie-based;
-creator and collection enumeration stream pages until the platform reports the
-end.
+creator enumeration streams pages until the platform reports the end. The mix
+list API is gated by ByteDance's Argus device-signature layer (direct signed
+requests fail regardless of cookie validity), so collection enumeration drives
+the real front-end in headless Chromium — see ``douyin_browser``.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
 import re
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
@@ -21,7 +26,10 @@ from urllib.request import Request
 from ..config import Settings
 from ..sessions import SessionStore
 from .base import adapter_error, make_resource
+from .douyin_browser import enumerate_collection
 from .http_client import urlopen_with_fallback
+
+LOGGER = logging.getLogger(__name__)
 
 # Console-subsystem children (node for a_bogus signing) must not pop a visible
 # console window when the MCP server runs under a hidden gateway parent.
@@ -29,7 +37,7 @@ _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 SEARCH_URL = "https://www.douyin.com/aweme/v1/web/general/search/single/"
 POST_URL = "https://www.douyin.com/aweme/v1/web/aweme/post/"
-MIX_URL = "https://www.douyin.com/aweme/v1/web/mix/aweme/"
+DETAIL_URL = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
@@ -41,8 +49,6 @@ _MIX_ID_RE = re.compile(r"/(?:collection|mix)/(\d+)")
 
 
 def _web_id() -> str:
-    import random
-
     def _e(t: int | None) -> str:
         if t is not None:
             return str(t ^ (int(16 * random.random()) >> (t // 4)))
@@ -138,11 +144,53 @@ class DouyinSearchAdapter:
 
     platform_id = "douyin"
 
+    # Anti-risk pacing mirrors bilibili: creator pages advance no faster than
+    # _PAGE_PACE_SECONDS, and retryable NETWORK_BLOCKED failures retry with
+    # bounded backoff. Class attributes so tests can shrink the waits.
+    _PAGE_PACE_SECONDS = 1.2
+    _BACKOFF_WAITS = (5.0, 10.0, 20.0, 40.0, 60.0)
+    _BACKOFF_BUDGET_SECONDS = 300.0
+
     def __init__(self, session_store: SessionStore, settings: Settings) -> None:
         self.session_store = session_store
         self.timeout = float(settings.search_timeout_seconds)
 
     def _request_json(
+        self, url: str, cookie: str, referer: str | None = None
+    ) -> dict[str, Any]:
+        """One request with bounded backoff on retryable risk-control blocks.
+
+        A 403 carrying the ArgusSecurityPlugin body is a device-signature wall
+        that retrying cannot pass and propagates immediately; other
+        NETWORK_BLOCKED failures (rate limiting) walk ``_BACKOFF_WAITS`` until
+        the budget is exhausted.
+        """
+        budget = self._BACKOFF_BUDGET_SECONDS
+        attempt = 0
+        while True:
+            try:
+                return self._request_json_once(url, cookie, referer=referer)
+            except _AdapterError as exc:
+                if exc.code != "NETWORK_BLOCKED" or not exc.retryable:
+                    raise
+                waits = self._BACKOFF_WAITS
+                wait = waits[min(attempt, len(waits) - 1)]
+                if budget <= wait:
+                    LOGGER.warning(
+                        "douyin risk block persists after budget; giving up (%s)",
+                        exc.message,
+                    )
+                    raise
+                budget -= wait
+                attempt += 1
+                LOGGER.warning(
+                    "douyin risk block (attempt %d); retrying in %.0fs",
+                    attempt,
+                    wait,
+                )
+                time.sleep(wait)
+
+    def _request_json_once(
         self, url: str, cookie: str, referer: str | None = None
     ) -> dict[str, Any]:
         headers = {
@@ -158,8 +206,26 @@ class DouyinSearchAdapter:
                 content_type = response.headers.get("Content-Type", "")
                 body = response.read().decode("utf-8", errors="replace")
         except HTTPError as exc:
-            if exc.code in (401, 403):
+            if exc.code == 401:
                 raise _AdapterError("AUTH_REQUIRED", f"抖音返回 HTTP {exc.code}", False)
+            if exc.code == 403:
+                # A valid session can still be risk-blocked; only a missing
+                # session is AUTH_REQUIRED (checked before any request).
+                block_body = ""
+                try:
+                    block_body = exc.read().decode("utf-8", "replace")
+                except Exception:  # noqa: BLE001
+                    block_body = ""
+                if "ArgusSecurityPlugin" in block_body:
+                    raise _AdapterError(
+                        "NETWORK_BLOCKED",
+                        "抖音 Argus 风控拦截该接口"
+                        f"（{block_body.strip()[:80]}，需前端签名，直连不可用）",
+                        False,
+                    )
+                raise _AdapterError(
+                    "NETWORK_BLOCKED", "抖音返回 HTTP 403（疑似风控/限流）", True
+                )
             raise _AdapterError(
                 "PARTIAL_FAILURE", f"抖音返回 HTTP {exc.code}", exc.code >= 500
             )
@@ -310,10 +376,14 @@ class DouyinSearchAdapter:
         cookie = self._get_cookie()
         sec_user_id = _parse_sec_user_id(creator_id)
         max_cursor = ""
+        first_page = True
 
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 break
+            if not first_page:
+                time.sleep(self._PAGE_PACE_SECONDS)
+            first_page = False
             params = self._sign_params(
                 {
                     **_COMMON_PARAMS,
@@ -348,56 +418,54 @@ class DouyinSearchAdapter:
                 )
             max_cursor = next_cursor
 
+    def _fetch_aweme_detail(self, aweme_id: str, cookie: str) -> dict[str, Any]:
+        """One a_bogus-signed detail API call (this endpoint is not Argus-gated)."""
+
+        params = {**_COMMON_PARAMS, "aweme_id": str(aweme_id)}
+        query_string = urlencode(params)
+        params["a_bogus"] = sign_a_bogus(query_string, USER_AGENT)
+        detail = self._request_json(f"{DETAIL_URL}?{urlencode(params)}", cookie)
+        aweme_detail = detail.get("aweme_detail") or {}
+        if not aweme_detail:
+            raise _AdapterError("PARTIAL_FAILURE", "抖音详情 API 未返回 aweme_detail", True)
+        return aweme_detail
+
     def iter_collection(
         self, collection_id: str, *, cancel_event: Any = None
     ) -> Iterator[dict[str, Any]]:
-        """Yield all videos from one Douyin collection (mix)."""
+        """Yield all videos from one Douyin collection (mix).
 
-        cookie = self._get_cookie()
+        The mix list API is gated by the Argus device-signature layer, so this
+        drives the real collection modal in headless Chromium with the saved
+        login cookies and harvests the front-end's own responses.
+        """
+
+        session_data = self.session_store.get_session_data("douyin")
+        if not session_data:
+            raise _AdapterError(
+                "AUTH_REQUIRED", "未保存抖音登录态，请先在浏览器中登录抖音", False
+            )
         mix_id = _parse_mix_id(collection_id)
         if not mix_id:
             raise _AdapterError("INVALID_ARGUMENT", "抖音合集 URL 缺少有效 mix_id", False)
-        cursor = "0"
-        count = "12"
-        referer = (
-            collection_id
-            if str(collection_id).startswith(("http://", "https://"))
-            else f"https://www.douyin.com/collection/{mix_id}"
-        )
+        cookie = SessionStore._cookie_header(session_data)
 
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                break
-            params = self._sign_params(
-                {
-                    **_COMMON_PARAMS,
-                    "version_code": "170400",
-                    "version_name": "17.4.0",
-                    "mix_id": mix_id,
-                    "cursor": cursor,
-                    "count": count,
-                }
+        raw_items, info = enumerate_collection(
+            session_data,
+            mix_id=mix_id,
+            fetch_detail=lambda aweme_id: self._fetch_aweme_detail(aweme_id, cookie),
+            cancel_event=cancel_event,
+        )
+        resources = []
+        for raw in raw_items:
+            normalized = self._normalize_item(raw)
+            if normalized:
+                resources.append(normalized)
+        yield from resources
+        if not info.get("confirmed_complete") and not info.get("cancelled"):
+            raise _AdapterError(
+                "PARTIAL_FAILURE",
+                "抖音合集枚举未确认完整"
+                f"（已收集 {len(resources)} 条，前端 has_more 未归零），结果可能不完整",
+                True,
             )
-            query_string = urlencode(params)
-            params["a_bogus"] = sign_a_bogus(query_string, USER_AGENT)
-            response = self._request_json(
-                f"{MIX_URL}?{urlencode(params)}",
-                cookie,
-                referer=referer,
-            )
-            aweme_list = response.get("aweme_list")
-            if not isinstance(aweme_list, list) or not aweme_list:
-                break
-            for item in aweme_list:
-                if isinstance(item, dict):
-                    normalized = self._normalize_item(item)
-                    if normalized:
-                        yield normalized
-            if not response.get("has_more"):
-                break
-            next_cursor = str(response.get("cursor") or "")
-            if not next_cursor or next_cursor == cursor:
-                raise _AdapterError(
-                    "PARTIAL_FAILURE", "抖音合集分页未返回新的 cursor", True
-                )
-            cursor = next_cursor

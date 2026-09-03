@@ -132,7 +132,9 @@ collection -> Expand -> video[]
 video      -> Download MP4
 ```
 
-合集内部使用平台 `mix` 分页接口；`mix_id / cursor / has_more / a_bogus` 都属于 Adapter 机械事实，不进入公共 Tool schema。
+合集展开通过真实前端驱动完成：mix 列表接口受 Argus 设备签名风控保护，直连请求（含有效登录态）一律 403；Adapter 在 headless Chromium（注入已保存登录态）中打开合集弹窗，拦截前端自身的 mix 响应收集全集，以前端 `has_more=0` 确认完整。`mix_id / modal / has_more / uifid / Argus` 都属于 Adapter 机械事实，不进入公共 Tool schema。合集枚举依赖可选依赖 `playwright`（`pip install '.[browser]'`；浏览器复用本机 ms-playwright 缓存）。
+
+风控缓解与 B 站同口径：creator 分页有 page pacing；`NETWORK_BLOCKED`（403/非 JSON）走有界 backoff 重试，Argus 签名墙（不可重试）显式报风控而非 AUTH_REQUIRED；detail 路径（Inspect/Download）对可重试风控块做一次短重试。
 
 ## Ximalaya
 
