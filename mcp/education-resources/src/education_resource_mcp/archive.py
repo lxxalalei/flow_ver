@@ -78,6 +78,42 @@ def _safe_component(value: str, fallback: str) -> str:
     return text if text not in {"", ".", ".."} else fallback
 
 
+# Structural leaf directories under a topic; they are formats, not topics.
+_FORMAT_DIRECTORIES = frozenset({"视频", "音频", "图文", "其他"})
+
+
+def topic_directory(topic: str) -> str:
+    """Resolve a free-text topic to its directory component."""
+
+    return _safe_component(
+        topic, str(library_taxonomy().get("fallback_topic") or "其他")
+    )
+
+
+def domain_topics(domain_id: str, library_root: Path) -> list[str]:
+    """Topic directories that already exist under one domain, then the
+    taxonomy's suggested topics that do not have a directory yet.
+
+    Existing disk directories (including ones the user organized by hand)
+    come first so the Agent can prefer reuse over near-duplicates.
+    """
+
+    domain = domain_directory(domain_id)
+    suggested: list[str] = []
+    for item in library_taxonomy().get("domains", []):
+        if domain == str(item.get("directory") or ""):
+            suggested = [str(t) for t in item.get("suggested_topics") or []]
+            break
+    existing: list[str] = []
+    domain_path = Path(library_root).expanduser() / domain
+    if domain_path.is_dir():
+        for child in sorted(domain_path.iterdir()):
+            if child.is_dir() and child.name not in _FORMAT_DIRECTORIES:
+                existing.append(child.name)
+    seen = set(existing)
+    return existing + [t for t in suggested if t not in seen]
+
+
 def _resource_format(media_type: str, filename: str) -> str:
     normalized = str(media_type or "").split(";", 1)[0].strip().lower()
     extension = Path(filename).suffix.lower()
@@ -167,10 +203,7 @@ def archive_downloaded_files(
 
     taxonomy = library_taxonomy()
     domain = domain_directory(domain_id)
-    topic_dir = _safe_component(
-        topic,
-        str(taxonomy.get("fallback_topic") or "其他"),
-    )
+    topic_dir = topic_directory(topic)
     root = Path(library_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
 
@@ -297,7 +330,9 @@ __all__ = [
     "archive_domains",
     "archive_downloaded_files",
     "domain_directory",
+    "domain_topics",
     "format_directory",
     "library_taxonomy",
     "media_signature_matches",
+    "topic_directory",
 ]

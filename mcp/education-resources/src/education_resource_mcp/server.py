@@ -8,6 +8,7 @@ from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__
+from .archive import archive_domains
 from .errors import DomainError
 from .expand import (
     download_expanded,
@@ -190,6 +191,30 @@ def _html_design(
             raise DomainError("INVALID_ARGUMENT", "render 操作需要 design_spec")
         return service.html_design_render(job_id, design_spec.model_dump())
     raise DomainError("INVALID_ARGUMENT", f"未知 HTML 设计操作：{action}")
+
+
+def _archive_topic_hint() -> str:
+    """One-line domain→suggested-topics summary for the archive tool schema.
+
+    The Agent proposes the archive classification before the first archive
+    call, so the taxonomy has to be visible in the tool description — it
+    cannot wait for the archive result's available_topics.
+    """
+
+    try:
+        parts = []
+        for item in archive_domains():
+            topics = "、".join(str(t) for t in item.get("suggested_topics") or [])
+            parts.append(f"{item.get('id')}（{topics}）")
+        return "；".join(parts)
+    except Exception:  # noqa: BLE001 - taxonomy is optional hint material
+        return ""
+
+
+# Module-level on purpose: tool Field expressions live inside the (deferred)
+# Annotated[...] annotation strings, which the SDK evaluates against module
+# globals only — closure variables of create_server would raise NameError.
+_ARCHIVE_TOPIC_HINT = _archive_topic_hint()
 
 
 def create_server(service: ResourceService | None = None) -> MCPServer:
@@ -481,14 +506,27 @@ def create_server(service: ResourceService | None = None) -> MCPServer:
         ] = "",
         topic: Annotated[
             str,
-            Field(description="自由文本学习主题，例如“天文与宇宙”“自然拼读”；可留空。"),
+            Field(
+                description=(
+                    "学习主题（资料库二级目录）。优先从上次归档返回的 available_topics"
+                    "（含库中已有目录）或各领域建议主题中选择贴合的；都不贴合才新建"
+                    "简明可复用的主题词，不要用一次性资源名当主题。可留空。"
+                    + (
+                        f"各领域建议主题：{_ARCHIVE_TOPIC_HINT}"
+                        if _ARCHIVE_TOPIC_HINT
+                        else ""
+                    )
+                )
+            ),
         ] = "",
     ) -> dict[str, Any]:
         """Move real files from a finished Download Job into the learning library.
 
         Use only after a succeeded or partial Download Job has produced files and
-        archiving is wanted. The Agent chooses domain/topic; the MCP moves files
-        and reports real archive failures.
+        archiving is wanted. The Agent chooses domain/topic (preferring existing
+        topic directories over coining near-duplicates); the MCP moves files and
+        reports real archive failures. The result carries available_topics — the
+        domain's real topic directories — for reuse in the next classification.
         """
         return _call(
             lambda: resource_service.archive(job_id, domain_id=domain_id, topic=topic),

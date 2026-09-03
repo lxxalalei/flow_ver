@@ -16,7 +16,7 @@ from typing import Any, Mapping
 from .acquisition.download_dispatch import dispatch_download, select_download_handler
 from .acquisition.models import AcquisitionRequest
 from .acquisition.web_materializer import WebMaterializer
-from .archive import archive_downloaded_files
+from .archive import archive_downloaded_files, domain_directory, domain_topics, topic_directory
 from .config import Settings
 from .downloader import DownloadProvider, PublicHttpDownloader
 from .errors import DomainError
@@ -662,6 +662,13 @@ class ResourceService:
             "job_id": job_id,
             "status": "succeeded" if archived and not failures else "partial",
             "library_root": str(self.settings.library_root),
+            # Archive context facts so the Agent can prefer existing topics
+            # instead of coining near-duplicate directories next time.
+            "domain_directory": domain_directory(domain_id),
+            "topic_directory": topic_directory(topic),
+            "available_topics": domain_topics(
+                domain_id, self.settings.library_root
+            ),
             "file_count": len(archived),
             "failure_count": len(failures),
             "files": [_public_job_file(item) for item in archived],
