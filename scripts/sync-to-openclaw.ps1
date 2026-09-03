@@ -67,11 +67,12 @@ function MirrorDir([string]$Src, [string]$Dst, [string[]]$ExtraExcludes = @()) {
     $global:LASTEXITCODE = 0
 }
 
-function InstallEditable([string]$Python, [string]$Source, [string]$Name) {
+function InstallEditable([string]$Python, [string]$Source, [string]$Name, [string]$Extras = '') {
+    $spec = if ($Extras) { "$Source[$Extras]" } else { $Source }
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & $Python -m pip install -e $Source --no-input 2>&1 | ForEach-Object { "$_" }
+        $output = & $Python -m pip install -e $spec --no-input 2>&1 | ForEach-Object { "$_" }
         $code = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $prev }
@@ -125,8 +126,11 @@ Ok "Source synced to $EduSrc"
 # install left over from the standalone deployment (its source path is gone).
 UninstallIfPresent $EduPy 'openclaw-session-manager'
 
-InstallEditable $EduPy $EduSrc 'education-resources'
-Ok 'Package reinstalled in venv'
+# The [browser] extra pulls the playwright driver (pinned to the line that
+# reuses the machine-wide %LOCALAPPDATA%\ms-playwright chromium cache) needed
+# by the front-end-driven Douyin collection expand.
+InstallEditable $EduPy $EduSrc 'education-resources' 'browser'
+Ok 'Package reinstalled in venv (with [browser] extra)'
 
 Invoke-Native { & $EduPy -m pip check } 'Dependency consistency check (pip check)'
 Ok 'Dependency consistency check passed'
