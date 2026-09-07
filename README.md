@@ -101,6 +101,9 @@ openclaw mcp doctor education-resources --probe
 
 不需要记忆 Skill 名称或 MCP Tool 名称。
 
+完整的使用说明（典型问法、平台登录、文件去向与常见问题）见
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)。
+
 ### 从开发仓库启动
 
 已完成本地 OpenClaw 和项目开发环境配置时，可从仓库运行：

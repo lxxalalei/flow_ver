@@ -6,6 +6,7 @@
 
 | 你想知道 | 阅读入口 |
 | --- | --- |
+| 作为最终使用者怎么搜索、下载、归档，文件去哪了 | [USER_GUIDE.md](USER_GUIDE.md) |
 | 当前系统现在是什么、哪些能力已经落地 | [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md) |
 | 项目接下来按什么顺序发展、阶段完成门槛是什么 | [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) |
 | 当前正在执行什么任务 | [`.agent/plans/`](../.agent/plans/README.md) |
