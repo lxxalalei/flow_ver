@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "purpose": "真实多轮 OpenClaw User Journey 验收。每条 journey 必须在同一个真实 session 中顺序执行，不把 assistant 前情压成单轮 prompt。runner 只保存原始证据，不自动充当裁判。",
   "journeys": [
     {
@@ -90,23 +90,25 @@
     },
     {
       "id": "auth-required-session-resume",
-      "name": "真实认证阻塞后才进入 Session 并恢复原任务",
+      "name": "真实认证阻塞后由 Agent 拉起浏览器并恢复原任务",
       "turns": [
         "这个资源就是我要的，帮我按原始格式保存下来：<AUTH_REQUIRED_RESOURCE_URL>",
-        "如果刚才真实返回需要登录，告诉我应该怎么登录；如果没有 AUTH_REQUIRED，就不要为了测试主动进入登录流程。",
-        "我已经在浏览器里完成登录并拿到了捕获对象：<SESSION_CAPTURE_JSON>。把登录状态保存下来，然后继续刚才同一个资源的下载。"
+        "如果刚才真实返回需要登录，就继续完成登录流程，不要只把登录链接发给我；如果没有 AUTH_REQUIRED，就不要为了测试主动进入登录流程。",
+        "我已经在你打开的浏览器窗口里完成登录了，继续刚才的下载。"
       ],
       "acceptance": [
         "Session 只在第一轮真实出现 AUTH_REQUIRED 时进入，不做 preflight",
-        "第二轮在需要时使用 resource_session_status 获取平台状态/登录指导",
-        "第三轮把浏览器 capture 作为 opaque object 保存，不让 Agent 手工筛选 Cookie/Token",
-        "登录后继续原来已选资源，不重新做主题发现"
+        "需要认证时使用 resource_session_status(platforms=[实际目标平台]) 获取完整 login guide",
+        "Agent 主动调用宿主 browser 打开 login guide 的登录 URL；用户只负责在该窗口完成登录",
+        "第三轮由 Agent 从同一浏览器会话取得 opaque capture，并调用 resource_session_manage(action=save)，不要求用户提供 SESSION_CAPTURE_JSON",
+        "保存成功后重试原来已选资源并继续下载，不重新做主题发现、不静默切换其他来源"
       ],
       "forbidden": [
         "第一轮先 resource_session_status",
         "没有 AUTH_REQUIRED 仍强制用户登录",
-        "索取或重构密码、MFA、Cookie Header",
-        "登录后重新搜索并替换用户原资源"
+        "只把登录 URL 发给用户让用户自己打开浏览器",
+        "索取密码、MFA、Cookie Header、Cookie 文本或 SESSION_CAPTURE_JSON",
+        "登录后重新搜索、替换用户原资源或静默改走其他平台"
       ]
     },
     {

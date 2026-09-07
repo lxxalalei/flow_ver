@@ -114,9 +114,11 @@ succeeded / partial / failed / cancelled / interrupted
 
 替代资源、重试或停止由 Agent 根据用户目标和当前 Evidence 决定。
 
-真实资源操作返回 `AUTH_REQUIRED` 时，进入 Session 登录引导。先调用 `resource_session_status` 读取该平台登录步骤；步骤会给出登录 URL 与捕获方式（`browser_cookies` / `browser_storage`）。
+真实资源操作返回 `AUTH_REQUIRED` 时，如果用户明确指定了当前平台或资源，不得静默改走其他来源；进入 Session 登录恢复。只有当前来源只是开放式任务中的可选路线时，Agent 才可以在不损害 Goal 的前提下放弃该路线并选择等价来源。
 
-由 Agent 用宿主浏览器工具打开登录 URL（可见窗口）并引导用户登录；用户只完成扫码/登录本身，不要索取或代填账号、密码、验证码。登录完成后由 Agent 从宿主浏览器提取捕获对象，原样交给 `resource_session_manage(action=save)`，不手工筛选或理解 Cookie / storage 字段。保存成功后重试原资源操作。
+对返回 `AUTH_REQUIRED` 的目标平台调用 `resource_session_status(platforms=[target_platform])` 读取完整登录步骤；login guide 会给出登录 URL 与捕获方式（`browser_cookies` / `browser_storage`）。
+
+由 Agent 用宿主浏览器工具打开登录 URL（可见窗口）并引导用户登录；用户只完成扫码/登录本身，不要索取或代填账号、密码、验证码。登录完成后由 Agent 从同一宿主浏览器会话提取捕获对象，原样交给 `resource_session_manage(action=save)`，不手工筛选或理解 Cookie / storage 字段。保存成功后重试原资源操作。
 
 宿主浏览器不可用时（网关未运行、会话为嵌入式导致无法弹窗或连接被网关拒绝），回退为把登录 URL 交给用户自行在浏览器登录、再由用户提供捕获对象；回退路径同样不索取账号密码。用户选择不登录或登录后仍无法获取时，说明当前限制并基于原目标判断替代来源。
 

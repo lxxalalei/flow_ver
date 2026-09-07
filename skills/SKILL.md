@@ -92,12 +92,14 @@ OpenClaw `web_search` 负责开放互联网跨站发现；MCP `resource_search` 
 
 需要认证的真实操作可能出现在任何阶段——搜索、检查、展开或下载返回 `AUTH_REQUIRED`（部分来源从搜索/展开阶段就需要登录态），或用户主动要求管理平台会话时才进入 Session；登录不做成任何操作的默认前置步骤。
 
+如果用户明确指定了某个平台或具体资源，该平台/资源属于当前 must：真实返回 `AUTH_REQUIRED` 后进入 Session，不得静默跳过、替换成其他来源或把该路线当作已经完成。只有来源开放、该平台只是 Agent 自己选择的可选路线时，才可以在不损害 Goal 的前提下放弃该路线并选择等价来源；被放弃的认证路线不得冒充已完成。
+
 进入 Session 后由 Agent 执行以下闭环，而不是把步骤转述给用户：
 
-1. 调用 `resource_session_status` 读取该平台的登录 URL 与捕获方式（`browser_cookies` / `browser_storage`）。
-2. 用宿主浏览器工具打开登录 URL（可见窗口），引导用户完成扫码或登录；不索取或代填账号、密码、验证码、短信码或 MFA。
-3. 登录完成后，从宿主浏览器提取捕获对象，原样交给 `resource_session_manage(action=save)`；不手工筛选或理解 Cookie / localStorage 字段。
-4. 保存成功后重试原资源操作。
+1. 对返回 `AUTH_REQUIRED` 的目标平台调用 `resource_session_status(platforms=[target_platform])`，读取该平台完整 login guide、登录 URL 与捕获方式（`browser_cookies` / `browser_storage`）；不要无目标查询全部平台来代替这一步。
+2. 用宿主浏览器工具打开 login guide 给出的登录 URL（可见窗口），引导用户完成扫码或登录；不索取或代填账号、密码、验证码、短信码或 MFA。
+3. 登录完成后，从同一宿主浏览器会话提取捕获对象，原样交给 `resource_session_manage(action=save)`；不手工筛选或理解 Cookie / localStorage 字段。
+4. 保存成功后重试原资源操作，继续原来已经确定的平台、资源和用户目标。
 
 宿主浏览器不可用（网关未运行、会话为嵌入式导致无法弹窗或连接被网关拒绝）时，回退为把登录 URL 交给用户自行登录、再由用户提供捕获对象；回退路径同样不索取账号密码。用户选择不登录或登录后仍无法获取时，说明当前限制并基于原目标判断替代来源。失败处理细节见 [`references/acquisition.md`](references/acquisition.md) §8。
 
@@ -163,8 +165,6 @@ Inspect 的范围由这个决策缺口决定。
 Browse 是任务语义，表示获取足以判断的代表性内容，不是一个名为 `resource_browse` 的 MCP Tool；具体执行可使用 `web_search`、`resource_search`、`resource_import_url` 或 `resource_inspect`。
 
 Browse 获取足够判断的代表性内容，并在这些内容已经足以刻画来源或支持选择时完成。
-
-Browse / Preview 优先使用匿名可达路线。某一路线遇到认证或风控时，先寻找匿名可达的等价发现路线；当任务价值确实依赖认证能力且匿名路线无法满足时进入 Session。
 
 Enumerate 面向数据完整性任务，例如：
 

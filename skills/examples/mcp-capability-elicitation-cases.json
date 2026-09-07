@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "purpose": "验证模型能否仅根据用户自然语言和当前上下文，正确激发 education-resources MCP 已有 12 个 Tool，并避免固定流水线、Session preflight、未授权下载和无关 Tool。该 suite 复用 run_semantic_baseline.py，不新增测试框架。",
+  "version": "1.1.0",
+  "purpose": "验证模型能否仅根据用户自然语言和当前上下文，正确激发 education-resources MCP 已有 12 个 Tool，并避免固定流水线、Session preflight、未授权下载和无关 Tool；认证恢复还必须由 Agent 主动承接浏览器登录闭环。该 suite 复用 run_semantic_baseline.py，不新增测试框架。",
   "cases": [
     {
       "id": "mcp-search-explicit-platform",
@@ -101,12 +101,12 @@
       ],
       "expected": [
         "保持任务为代表性 Browse",
-        "优先使用足够判断的匿名发现路线",
+        "使用足够支持判断的发现路线",
         "只有确实需要结构事实时才考虑 Expand"
       ],
       "forbidden": [
         "因为存在 creator 容器就自动完整枚举",
-        "要求登录作为浏览前置",
+        "在没有 AUTH_REQUIRED 时把登录作为浏览前置",
         "下载全部作品"
       ]
     },
@@ -332,11 +332,11 @@
     {
       "id": "mcp-session-status-after-auth",
       "execution_mode": "judgment",
-      "name": "真实 AUTH_REQUIRED 后查询会话",
+      "name": "真实 AUTH_REQUIRED 后由 Agent 主动完成登录闭环",
       "messages": [
         {
           "role": "assistant",
-          "content": "用户选中的平台资源下载真实返回 AUTH_REQUIRED，尚未请求用户提供任何凭据。"
+          "content": "用户明确选中的知乎资源下载真实返回 AUTH_REQUIRED，尚未请求用户提供任何凭据。"
         },
         {
           "role": "user",
@@ -344,13 +344,15 @@
         }
       ],
       "expected": [
-        "调用 resource_session_status 查询该平台状态和登录步骤",
-        "让用户自行完成登录",
-        "拿到 capture 后才考虑 save"
+        "调用 resource_session_status(platforms=[\"zhihu\"]) 获取该平台完整 login guide",
+        "login guide 返回 open_login_url 后主动调用宿主 browser 打开可见登录页，而不是只转述链接",
+        "用户只完成扫码或账号登录；登录完成后由 Agent 从浏览器捕获会话并调用 resource_session_manage(action=\"save\")",
+        "保存成功后继续原来这个知乎资源，不切换等价来源"
       ],
       "forbidden": [
-        "手工拼 Cookie Header",
-        "索取密码、短信码或 MFA",
+        "只把登录 URL 发给用户让用户自己打开",
+        "调用 resource_session_status 时不指定目标平台",
+        "要求用户提供 Cookie Header、Cookie 文本或 SESSION_CAPTURE_JSON",
         "把 Session Status 当所有搜索的前置步骤"
       ]
     },
@@ -361,17 +363,17 @@
       "messages": [
         {
           "role": "assistant",
-          "content": "用户已经自行完成平台登录，浏览器工具返回了一个合法 opaque capture object。"
+          "content": "用户已经在 Agent 打开的平台登录窗口完成登录，浏览器工具返回了一个合法 opaque capture object。"
         },
         {
           "role": "user",
-          "content": "把这个登录状态保存下来。"
+          "content": "继续吧。"
         }
       ],
       "expected": [
         "调用 resource_session_manage(action=\"save\", platform=..., capture=原对象)",
         "不改写 capture 中的 Cookie/Token/storage 字段",
-        "根据真实保存结果汇报"
+        "根据真实保存结果继续原任务"
       ],
       "forbidden": [
         "由 Agent 筛选或拼接 canonical Token",
