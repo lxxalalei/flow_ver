@@ -88,7 +88,20 @@ OpenClaw `web_search` 负责开放互联网跨站发现；MCP `resource_search` 
 
 具体平台先验与直接触发信号见 [`references/source-routing.md`](references/source-routing.md)。
 
-## 4. Evidence：按真实证据判断候选
+## 4. Session：需要认证时由 Agent 完成登录闭环
+
+需要认证的真实操作可能出现在任何阶段——搜索、检查、展开或下载返回 `AUTH_REQUIRED`（部分来源从搜索/展开阶段就需要登录态），或用户主动要求管理平台会话时才进入 Session；登录不做成任何操作的默认前置步骤。
+
+进入 Session 后由 Agent 执行以下闭环，而不是把步骤转述给用户：
+
+1. 调用 `resource_session_status` 读取该平台的登录 URL 与捕获方式（`browser_cookies` / `browser_storage`）。
+2. 用宿主浏览器工具打开登录 URL（可见窗口），引导用户完成扫码或登录；不索取或代填账号、密码、验证码、短信码或 MFA。
+3. 登录完成后，从宿主浏览器提取捕获对象，原样交给 `resource_session_manage(action=save)`；不手工筛选或理解 Cookie / localStorage 字段。
+4. 保存成功后重试原资源操作。
+
+宿主浏览器不可用（网关未运行、会话为嵌入式导致无法弹窗或连接被网关拒绝）时，回退为把登录 URL 交给用户自行登录、再由用户提供捕获对象；回退路径同样不索取账号密码。用户选择不登录或登录后仍无法获取时，说明当前限制并基于原目标判断替代来源。失败处理细节见 [`references/acquisition.md`](references/acquisition.md) §8。
+
+## 5. Evidence：按真实证据判断候选
 
 搜索阶段偏 Recall，评估阶段偏 Precision。具体候选的评价只由当前真实证据决定；来源先验只用于召回。
 
@@ -116,7 +129,7 @@ Recommendable  当前证据已经足够说明为什么值得给用户看
 
 Web 与 MCP 命中同一个实际资源时，依据当前可见 URL、平台稳定标识、标题/作者等事实做语义去重；稳定资源身份继续沿用 URL 或平台稳定 ID。
 
-## 5. Gap → Next → Stop：每一步都增加实质价值
+## 6. Gap → Next → Stop：每一步都增加实质价值
 
 Gap 由当前 Evidence 中仍未满足的用户价值或会改变决策的关键事实产生，例如：
 
@@ -132,7 +145,7 @@ Gap 由当前 Evidence 中仍未满足的用户价值或会改变决策的关键
 
 详见 [`references/retrieval.md`](references/retrieval.md)。
 
-## 6. Inspect：只补会改变决策的事实
+## 7. Inspect：只补会改变决策的事实
 
 当高潜候选存在一个未知事实，并且这个事实会改变推荐、选择或获取决策时使用 Inspect，例如：
 
@@ -145,7 +158,7 @@ Inspect 的范围由这个决策缺口决定。
 
 详见 [`references/inspection.md`](references/inspection.md)。
 
-## 7. Browse 与 Enumerate：预览和完整性对应不同完成条件
+## 8. Browse 与 Enumerate：预览和完整性对应不同完成条件
 
 Browse 是任务语义，表示获取足以判断的代表性内容，不是一个名为 `resource_browse` 的 MCP Tool；具体执行可使用 `web_search`、`resource_search`、`resource_import_url` 或 `resource_inspect`。
 
@@ -161,7 +174,7 @@ Enumerate 面向数据完整性任务，例如：
 
 完整枚举使用结构化 Expand / Job 能力直到来源真实结束。聊天分页只控制单次展示量；完整性由来源终止信号和 Expand Job 的完整结果决定。
 
-## 8. 用户选择：用稳定资源身份承接指代
+## 9. 用户选择：用稳定资源身份承接指代
 
 用户说“第 2 个”“这两个”“刚才那个作者的视频”时，把指代映射到用户已经实际看到且能够合理指代的候选。
 
@@ -181,7 +194,7 @@ URL
 
 用户选中已经展示的 Web URL 后，直接以这个 URL 进入 `resource_import_url`。临时句柄失效时，先根据已知稳定身份恢复同一个资源；身份事实不足时重新进入发现阶段。
 
-## 9. Acquire / Transform：明确意图驱动副作用
+## 10. Acquire / Transform：明确意图驱动副作用
 
 Download / Archive / Transform 只在用户已经表达对应意图且目标对象明确时执行。
 
@@ -208,7 +221,7 @@ Web URL 的典型获取路径是：
 
 详见 [`references/acquisition.md`](references/acquisition.md)、[`references/archive.md`](references/archive.md)、[`references/html-design.md`](references/html-design.md)。
 
-## 10. 面向用户：呈现资源、真实链接和判断
+## 11. 面向用户：呈现资源、真实链接和判断
 
 通常展示：
 
@@ -238,6 +251,6 @@ Coverage、Gap、Dispatch、matched_queries、runs、内部评分等概念保留
 - 多轮检索、Coverage / Gap / Stop：[`references/retrieval.md`](references/retrieval.md)
 - 来源生态与路由：[`references/source-routing.md`](references/source-routing.md)
 - 候选事实检查：[`references/inspection.md`](references/inspection.md)
-- 获取意图与下载结果：[`references/acquisition.md`](references/acquisition.md)
+- 获取意图、下载结果与认证恢复：[`references/acquisition.md`](references/acquisition.md)
 - 内容感知的离线 HTML 设计：[`references/html-design.md`](references/html-design.md)
 - 归档分类：[`references/archive.md`](references/archive.md)
