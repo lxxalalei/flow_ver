@@ -136,7 +136,13 @@ def _handler_id(
             return AcquisitionStrategy.DIRECT_FILE, "douyin-video"
 
     if platform == "ximalaya" and scope == "primary_resource" and role == "primary":
-        if kind == "audio" and container in {"mp3", "m4a"} and resource_type == "audio":
+        # Album expand emits tracks with resource_type="track"; inspect of a
+        # sound URL resolves the same object as "audio". Accept both.
+        if (
+            kind == "audio"
+            and container in {"mp3", "m4a"}
+            and resource_type in {"audio", "track"}
+        ):
             return AcquisitionStrategy.DIRECT_FILE, "ximalaya-audio"
 
     if platform == "bilibili" and scope == "primary_resource" and role == "primary":
