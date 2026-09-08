@@ -13,6 +13,11 @@ from ..errors import DomainError
 from ..sessions import session_cookie
 from .http_client import urlopen_with_fallback
 
+try:  # reuse the downloader's anti-bot signing chain; degrade if unavailable
+    from .ximalaya_download import _generate_xm_sign as _generate_xm_sign
+except ImportError:  # pragma: no cover - signing needs pycryptodome
+    _generate_xm_sign = None  # type: ignore[assignment]
+
 _XIMALAYA_TRACKS_URL = "https://www.ximalaya.com/revision/album/v1/getTracksList"
 _XIMALAYA_CREATOR_ALBUMS_URL = "https://www.ximalaya.com/revision/user/pub"
 _XIMALAYA_UA = (
@@ -204,11 +209,23 @@ def _iter_ximalaya_album(
         params = urlencode(
             {"albumId": album_id, "pageNum": page_num, "pageSize": page_size}
         )
+        # getTracksList is gated by the front-end anti-bot signature (xm-sign),
+        # not by login. Mint a fresh signature per request through the same
+        # shuzilm chain the downloader uses; degrade to unsigned when the
+        # signing service is unreachable so the real cause surfaces below.
+        xm_sign = None
+        if _generate_xm_sign is not None:
+            try:
+                xm_sign = _generate_xm_sign()
+            except Exception:
+                xm_sign = None
         headers = {
             "User-Agent": _XIMALAYA_UA,
             "Referer": source_url,
             "Accept": "application/json, text/plain, */*",
         }
+        if xm_sign:
+            headers["xm-sign"] = xm_sign
         if cookie:
             headers["Cookie"] = cookie
         request = Request(
@@ -227,11 +244,26 @@ def _iter_ximalaya_album(
         msg = str(payload.get("msg") or "").strip()
         data = payload.get("data")
         if ret is not None and ret != 200:
-            if not cookie and ("webtk" in msg or ret in (401, 407)):
+            signature_gate = ret == 407 or "webtk" in msg
+            auth_hint = ("登录" in msg) or ("login" in msg.casefold())
+            if signature_gate:
+                signed = "已携带" if xm_sign else "后端签名不可用（未携带）"
                 raise DomainError(
-                    "AUTH_REQUIRED",
-                    "喜马拉雅专辑曲目接口需要浏览器会话 Cookie（webtk 缺失）；"
-                    "请先用 resource_session_status 查看登录步骤并捕获喜马拉雅会话后重试",
+                    "PARTIAL_FAILURE",
+                    f"喜马拉雅曲目接口反bot签名拦截（ret={ret} {signed}）：该接口要求前端动态 "
+                    f"xm-sign/webtk 签名，登录态无法解决；可在浏览器页面内完成枚举",
+                    retryable=False,
+                )
+            if auth_hint:
+                if not cookie:
+                    raise DomainError(
+                        "AUTH_REQUIRED",
+                        f"喜马拉雅专辑曲目接口需要登录：{msg or '无说明'}",
+                        retryable=False,
+                    )
+                raise DomainError(
+                    "PARTIAL_FAILURE",
+                    f"喜马拉雅专辑曲目接口需要登录或权限：{msg or '无说明'}",
                     retryable=False,
                 )
             raise DomainError(

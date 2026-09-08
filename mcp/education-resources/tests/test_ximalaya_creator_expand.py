@@ -155,7 +155,12 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
                 list(expand_resource(_Provider(), target))
         self.assertEqual("PARTIAL_FAILURE", ctx.exception.code)
 
-    def test_album_webtk_gate_surfaces_auth_required(self) -> None:
+    def test_album_signature_gate_is_not_a_login_problem(self) -> None:
+        # getTracksList gates on the front-end xm-sign signature (ret=407
+        # "webtk缺失"), not on login: even a signed request that still 407s is
+        # a capability boundary, so it must surface as a non-retryable
+        # PARTIAL_FAILURE - never as AUTH_REQUIRED (which would send the agent
+        # chasing a login that cannot fix it).
         target = {
             "platform": "ximalaya",
             "resource_type": "album",
@@ -164,11 +169,16 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
         with mock.patch(
             "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
             return_value=_Response({"ret": 407, "msg": "webtk缺失", "code": 5}),
+        ), mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand._generate_xm_sign",
+            return_value="cadd&&sid",
         ):
             with self.assertRaises(DomainError) as ctx:
                 list(expand_resource(_Provider(), target))
-        self.assertEqual("AUTH_REQUIRED", ctx.exception.code)
-        self.assertIn("webtk", ctx.exception.message)
+        self.assertEqual("PARTIAL_FAILURE", ctx.exception.code)
+        self.assertFalse(ctx.exception.retryable)
+        self.assertIn("签名", ctx.exception.message)
+        self.assertNotIn("AUTH_REQUIRED", str(ctx.exception.to_dict()))
 
     def test_album_expands_tracks_anonymously_when_available(self) -> None:
         payloads = [
@@ -184,6 +194,12 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
             },
             {"ret": 200, "data": {"trackTotalCount": 2, "tracks": []}},
         ]
+        requests: list = []
+
+        def transport(request, *, timeout):
+            requests.append(request)
+            return _Response(payloads.pop(0))
+
         target = {
             "platform": "ximalaya",
             "resource_type": "album",
@@ -191,13 +207,18 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
         }
         with mock.patch(
             "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
-            side_effect=lambda request, *, timeout: _Response(payloads.pop(0)),
+            side_effect=transport,
+        ), mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand._generate_xm_sign",
+            return_value="cadd&&sid",
         ):
             results = list(expand_resource(_Provider(), target))
         self.assertEqual(2, len(results))
         self.assertEqual("https://www.ximalaya.com/sound/101", results[0]["source_url"])
+        self.assertTrue(requests)
+        self.assertEqual("cadd&&sid", requests[0].get_header("Xm-sign"))
 
-    def test_album_sends_saved_session_cookie(self) -> None:
+    def test_album_sends_saved_session_cookie_and_signature(self) -> None:
         class _Store:
             def get_session_data(self, platform):
                 return {"platform": platform, "cookies": {"webtk": "abc123"}}
@@ -209,6 +230,9 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
         with mock.patch(
             "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
             side_effect=lambda request, *, timeout: _capture_cookie(seen, request),
+        ), mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand._generate_xm_sign",
+            return_value="cadd&&sid",
         ):
             with self.assertRaises(DomainError):
                 list(
@@ -223,6 +247,26 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
                     )
                 )
         self.assertEqual("webtk=abc123", seen.get("cookie"))
+        self.assertEqual("cadd&&sid", seen.get("xm_sign"))
+
+    def test_album_reports_signature_boundary_when_signer_unavailable(self) -> None:
+        target = {
+            "platform": "ximalaya",
+            "resource_type": "album",
+            "source_url": "https://www.ximalaya.com/album/20665610",
+        }
+        with mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand.urlopen_with_fallback",
+            return_value=_Response({"ret": 407, "msg": "webtk缺失"}),
+        ), mock.patch(
+            "education_resource_mcp.adapters.ximalaya_expand._generate_xm_sign",
+            side_effect=RuntimeError("signing service unreachable"),
+        ):
+            with self.assertRaises(DomainError) as ctx:
+                list(expand_resource(_Provider(), target))
+        self.assertEqual("PARTIAL_FAILURE", ctx.exception.code)
+        self.assertIn("签名不可用", ctx.exception.message)
+        self.assertIn("浏览器页面内完成枚举", ctx.exception.message)
 
 
     def test_creator_url_requires_numeric_uid(self) -> None:
@@ -238,6 +282,8 @@ class XimalayaCreatorExpandTests(unittest.TestCase):
 
 def _capture_cookie(seen, request) -> _Response:
     seen["cookie"] = request.get_header("Cookie")
+    # urllib capitalizes custom header names ("xm-sign" -> "Xm-sign").
+    seen["xm_sign"] = request.get_header("Xm-sign")
     return _Response({"ret": 407, "msg": "webtk缺失"})
 
 
